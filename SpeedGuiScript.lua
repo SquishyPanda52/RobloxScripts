@@ -5,14 +5,15 @@ local MinimizedFrame = Instance.new("Frame")
 local ToggleButton = Instance.new("TextButton")
 local TextInput = Instance.new("TextBox")
 local TitleLabel = Instance.new("TextLabel")
+local DashButton = Instance.new("TextButton") -- Dash Button for minimization
 
 -- Parent GUI to PlayerGui
 ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.Name = "SpeedGui"
 
 -- Frame Settings
-Frame.Size = UDim2.new(0, 200, 0, 100)
-Frame.Position = UDim2.new(0.8, 0, 0.1, 0)
+Frame.Size = UDim2.new(0, 120, 0, 100) -- Smaller width
+Frame.Position = UDim2.new(0.1, 0, 0.1, 0) -- Position to left
 Frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 Frame.BorderSizePixel = 2
 Frame.Parent = ScreenGui
@@ -32,6 +33,14 @@ TextInput.TextColor3 = Color3.new(1, 1, 1)
 TextInput.PlaceholderText = "Enter Speed"
 TextInput.Parent = Frame
 
+-- Dash Button for Minimize
+DashButton.Size = UDim2.new(0, 30, 0, 30)
+DashButton.Position = UDim2.new(1, -30, 0, 0)
+DashButton.Text = "—"
+DashButton.TextColor3 = Color3.new(1, 1, 1)
+DashButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+DashButton.Parent = Frame
+
 -- Minimized Frame Settings
 MinimizedFrame.Size = UDim2.new(0, 50, 0, 50)
 MinimizedFrame.Position = Frame.Position
@@ -40,26 +49,28 @@ MinimizedFrame.Visible = false
 MinimizedFrame.Parent = ScreenGui
 
 -- Toggle Button for Minimized Frame
-ToggleButton.Size = UDim2.new(1, 0, 1, 0)
-ToggleButton.Text = "S"
-ToggleButton.TextColor3 = Color3.new(1, 1, 1)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-ToggleButton.Parent = MinimizedFrame
-
--- Toggle Visibility
-local function toggleVisibility()
-    if Frame.Visible then
-        Frame.Visible = false
-        MinimizedFrame.Visible = true
-    else
+local isMinimized = false
+local function toggleMinimize()
+    if isMinimized then
         Frame.Visible = true
         MinimizedFrame.Visible = false
+        isMinimized = false
+    else
+        Frame.Visible = false
+        MinimizedFrame.Visible = true
+        isMinimized = true
     end
 end
 
-ToggleButton.MouseButton1Click:Connect(toggleVisibility)
+DashButton.MouseButton1Click:Connect(toggleMinimize)
 
--- Dragging Feature for Minimized Box
+-- Minimized Frame to Reopen
+MinimizedFrame.MouseButton1Click:Connect(function()
+    toggleMinimize()
+    setSpeed()
+end)
+
+-- Dragging Feature for Minimized and Normal GUI
 local dragging
 local dragInput
 local dragStart
@@ -67,40 +78,49 @@ local startPos
 
 local function update(input)
     local delta = input.Position - dragStart
-    MinimizedFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    if Frame.Visible then
+        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    elseif MinimizedFrame.Visible then
+        MinimizedFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
 end
 
-MinimizedFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+local function onInputBegan(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         dragStart = input.Position
-        startPos = MinimizedFrame.Position
+        startPos = (Frame.Visible and Frame.Position) or MinimizedFrame.Position
         input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then
                 dragging = false
             end
         end)
     end
-end)
+end
 
-MinimizedFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        dragInput = input
-    end
-end)
-
-game:GetService("UserInputService").InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
+local function onInputChanged(input)
+    if input.UserInputType == Enum.UserInputType.Touch and dragging then
         update(input)
     end
+end
+
+Frame.InputBegan:Connect(onInputBegan)
+MinimizedFrame.InputBegan:Connect(onInputBegan)
+game:GetService("UserInputService").InputChanged:Connect(onInputChanged)
+
+-- Speed Update Function (adjusted for persistence)
+local function setSpeed()
+    local player = game.Players.LocalPlayer
+    local humanoid = player.Character:WaitForChild("Humanoid")
+    humanoid.WalkSpeed = tonumber(TextInput.Text) or 16
+end
+
+game.Players.LocalPlayer.CharacterAdded:Connect(function()
+    setSpeed()  -- Set speed after respawn
 end)
 
--- Speed Update Function
 TextInput.FocusLost:Connect(function(enterPressed)
     if enterPressed then
-        local speed = tonumber(TextInput.Text)
-        if speed and speed > 0 then
-            game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = speed
-        end
+        setSpeed()
     end
 end)
