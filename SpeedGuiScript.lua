@@ -5,15 +5,16 @@ local MinimizedFrame = Instance.new("Frame")
 local ToggleButton = Instance.new("TextButton")
 local TextInput = Instance.new("TextBox")
 local TitleLabel = Instance.new("TextLabel")
-local DashButton = Instance.new("TextButton") -- Dash Button for minimization
+local DashButton = Instance.new("TextButton")
+local PlusButton = Instance.new("TextButton") -- Plus Button for re-opening minimized frame
 
 -- Parent GUI to PlayerGui
 ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.Name = "SpeedGui"
 
 -- Frame Settings
-Frame.Size = UDim2.new(0, 120, 0, 100) -- Smaller width
-Frame.Position = UDim2.new(0.1, 0, 0.1, 0) -- Position to left
+Frame.Size = UDim2.new(0, 120, 0, 100)
+Frame.Position = UDim2.new(0.1, 0, 0.1, 0)
 Frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 Frame.BorderSizePixel = 2
 Frame.Parent = ScreenGui
@@ -41,6 +42,14 @@ DashButton.TextColor3 = Color3.new(1, 1, 1)
 DashButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
 DashButton.Parent = Frame
 
+-- Plus Button for Minimized Frame Reopen
+PlusButton.Size = UDim2.new(0, 50, 0, 50)
+PlusButton.Position = UDim2.new(0, 0, 0, 0)
+PlusButton.Text = "+"
+PlusButton.TextColor3 = Color3.new(1, 1, 1)
+PlusButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+PlusButton.Parent = MinimizedFrame
+
 -- Minimized Frame Settings
 MinimizedFrame.Size = UDim2.new(0, 50, 0, 50)
 MinimizedFrame.Position = Frame.Position
@@ -63,6 +72,12 @@ local function toggleMinimize()
 end
 
 DashButton.MouseButton1Click:Connect(toggleMinimize)
+
+-- Plus Button to Reopen Minimized Frame
+PlusButton.MouseButton1Click:Connect(function()
+    toggleMinimize()
+    setSpeed()
+end)
 
 -- Minimized Frame to Reopen
 MinimizedFrame.MouseButton1Click:Connect(function()
@@ -123,4 +138,10 @@ TextInput.FocusLost:Connect(function(enterPressed)
     if enterPressed then
         setSpeed()
     end
+end)
+
+-- Keep GUI after reset by reapplying the script on respawn
+game.Players.LocalPlayer.CharacterAdded:Connect(function()
+    wait(1)  -- Wait a moment for the character to load
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/SquishyPanda52/RobloxScripts/refs/heads/main/SpeedGuiScript.lua"))()
 end)
