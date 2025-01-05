@@ -127,7 +127,12 @@ game:GetService("UserInputService").InputChanged:Connect(onInputChanged)
 local function setSpeed()
     local player = game.Players.LocalPlayer
     local humanoid = player.Character:WaitForChild("Humanoid")
-    humanoid.WalkSpeed = tonumber(TextInput.Text) or 16
+    local speedValue = tonumber(TextInput.Text)
+    if speedValue and speedValue > 0 then
+        humanoid.WalkSpeed = speedValue
+    else
+        humanoid.WalkSpeed = 16
+    end
 end
 
 game.Players.LocalPlayer.CharacterAdded:Connect(function()
@@ -143,5 +148,8 @@ end)
 -- Keep GUI after reset by reapplying the script on respawn
 game.Players.LocalPlayer.CharacterAdded:Connect(function()
     wait(1)  -- Wait a moment for the character to load
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/SquishyPanda52/RobloxScripts/refs/heads/main/SpeedGuiScript.lua"))()
+    -- Ensure the GUI is loaded back after respawn
+    if not ScreenGui.Parent then
+        ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+    end
 end)
