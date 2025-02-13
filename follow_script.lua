@@ -1,14 +1,16 @@
 local player = game.Players.LocalPlayer
 
+-- Function to create the follow script
 local function createFollowScript()
     local character = player.Character or player.CharacterAdded:Wait()
-
-    -- Create necessary objects and services for pathfinding
     local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
     local humanoid = character:WaitForChild("Humanoid")
     local pathfindingService = game:GetService("PathfindingService")
-    local isFollowing = false  -- Flag to track if following is active
-    local followCoroutine = nil  -- Store the coroutine to restart it if needed
+
+    -- Variables for tracking
+    local isFollowing = false
+    local targetPlayer = nil
+    local followCoroutine = nil
 
     -- Function to make the executor follow the target player with pathfinding
     local function followPlayer(targetPlayer)
@@ -55,9 +57,8 @@ local function createFollowScript()
     end
 
     -- Function to start following the target player
-    local function startFollowing()
-        local targetName = "TargetPlayerName"  -- Replace with the player's name dynamically
-        local targetPlayer = game.Players:FindFirstChild(targetName)
+    local function startFollowing(targetName)
+        targetPlayer = game.Players:FindFirstChild(targetName)
 
         if targetPlayer and targetPlayer ~= player then
             print("Following player: " .. targetName)
@@ -80,17 +81,22 @@ local function createFollowScript()
         end
     end
 
-    -- Function to stop following
+    -- Function to stop following the target player
     local function stopFollowing()
         print("Stop following button clicked!")
         isFollowing = false
     end
 
-    -- Example Usage: Start Following Player
-    startFollowing()
+    -- Input for target player name
+    local targetName = "TargetPlayerName"  -- Replace with dynamic input value in your executor
+    print("Enter player name: " .. targetName)
 
-    -- Example Usage: Stop Following Player (after some time or event)
-    -- stopFollowing()
+    -- Call start following to begin the action
+    startFollowing(targetName)
+
+    -- After some time, you can stop following (simulating button press)
+    wait(10)  -- Example time to follow before stopping
+    stopFollowing()
 
     -- Handle character respawn and rebind the follow script
     player.CharacterAdded:Connect(function()
@@ -106,4 +112,3 @@ end
 
 -- Run the function to create the follow script
 createFollowScript()
-
