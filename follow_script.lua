@@ -36,18 +36,22 @@ local function followPlayer(targetPlayer)
 
     if not humanoidRootPart or not targetRootPart then return end
 
+    local humanoid = character:FindFirstChild("Humanoid")
+
     while targetCharacter and targetCharacter.Parent do
         if not targetRootPart then break end
-        humanoidRootPart.CFrame = targetRootPart.CFrame
+
+        -- Calculate direction to target
+        local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
+        local moveDirection = direction * humanoid.WalkSpeed
+
+        -- Move towards target using a gradual approach (walking)
+        humanoidRootPart.CFrame = humanoidRootPart.CFrame + moveDirection * 0.1
 
         -- Mimic jump
-        local humanoid = character:FindFirstChild("Humanoid")
         local targetHumanoid = targetCharacter:FindFirstChild("Humanoid")
-
-        if humanoid and targetHumanoid then
-            if targetHumanoid.Jump then
-                humanoid.Jump = true
-            end
+        if targetHumanoid and targetHumanoid.Jump then
+            humanoid.Jump = true
         end
 
         wait(0.1) -- Adjust the delay if necessary
@@ -64,3 +68,4 @@ Button.MouseButton1Click:Connect(function()
         warn("Player not found or invalid")
     end
 end)
+
