@@ -40,7 +40,7 @@ local function createFollowScript()
         local humanoid = character:WaitForChild("Humanoid")
         local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
         
-        -- Loop that continuously updates the executor's position to follow the target
+        -- Continuous follow loop
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart do
             local targetPosition = targetRootPart.Position
             local distance = (targetPosition - humanoidRootPart.Position).magnitude
@@ -51,8 +51,9 @@ local function createFollowScript()
             humanoid.PlatformStand = targetHumanoid.PlatformStand
 
             -- Handle Jumping
-            if targetHumanoid:GetState() == Enum.HumanoidStateType.Physics and targetHumanoid.MoveDirection.magnitude > 0 then
-                -- Make executor jump if the target is jumping or in the air
+            if targetHumanoid:GetState() == Enum.HumanoidStateType.Seated then
+                humanoid:ChangeState(Enum.HumanoidStateType.Seated)
+            elseif targetHumanoid:GetState() == Enum.HumanoidStateType.Physics and targetHumanoid.MoveDirection.magnitude > 0 then
                 if targetHumanoid.Jump then
                     humanoid:ChangeState(Enum.HumanoidStateType.Physics)
                     humanoid.Jump = true
@@ -101,5 +102,6 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
+
 
 
