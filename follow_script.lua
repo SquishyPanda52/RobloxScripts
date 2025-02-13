@@ -1,5 +1,43 @@
 local player = game.Players.LocalPlayer
 
+-- Create GUI components
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = player.PlayerGui
+
+-- Create a frame for the GUI
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 300, 0, 200)
+frame.Position = UDim2.new(0.5, -150, 0.5, -100)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.Parent = screenGui
+
+-- Create a TextBox for target player input
+local inputBox = Instance.new("TextBox")
+inputBox.Size = UDim2.new(0, 200, 0, 50)
+inputBox.Position = UDim2.new(0.5, -100, 0.2, 0)
+inputBox.PlaceholderText = "Enter player name"
+inputBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+inputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+inputBox.Parent = frame
+
+-- Create a Follow button
+local followButton = Instance.new("TextButton")
+followButton.Size = UDim2.new(0, 100, 0, 50)
+followButton.Position = UDim2.new(0.5, -50, 0.5, 0)
+followButton.Text = "Follow"
+followButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+followButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+followButton.Parent = frame
+
+-- Create a Stop button
+local stopButton = Instance.new("TextButton")
+stopButton.Size = UDim2.new(0, 100, 0, 50)
+stopButton.Position = UDim2.new(0.5, -50, 0.8, 0)
+stopButton.Text = "Stop"
+stopButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+stopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+stopButton.Parent = frame
+
 -- Function to create the follow script
 local function createFollowScript()
     local character = player.Character or player.CharacterAdded:Wait()
@@ -66,18 +104,19 @@ local function createFollowScript()
         isFollowing = false
     end
 
-    -- Input for target player name
-    local targetName = "TargetPlayerName"  -- Replace with dynamic input value in your executor
+    -- Handle button click events
+    followButton.MouseButton1Click:Connect(function()
+        local targetName = inputBox.Text
+        if targetName and targetName ~= "" then
+            startFollowing(targetName)
+        else
+            print("Please enter a valid player name.")
+        end
+    end)
 
-    -- Example input via executor (you can adjust this based on how you're passing the input in the executor)
-    print("Enter player name to follow: " .. targetName)
-
-    -- Call start following to begin the action
-    startFollowing(targetName)
-
-    -- After some time, you can stop following (simulating button press or executor pause)
-    wait(10)  -- Example time to follow before stopping
-    stopFollowing()
+    stopButton.MouseButton1Click:Connect(function()
+        stopFollowing()
+    end)
 
     -- Handle character respawn and rebind the follow script
     player.CharacterAdded:Connect(function()
@@ -92,5 +131,5 @@ local function createFollowScript()
 end
 
 -- Run the function to create the follow script
-createFollowScript() 
+createFollowScript()
 
