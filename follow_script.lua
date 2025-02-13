@@ -38,25 +38,23 @@ local function createFollowScript()
         local targetRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
 
         local humanoid = character:WaitForChild("Humanoid")
-        local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
 
-        -- Loop to follow the target player
+        -- Continuous loop to follow the target player
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart do
             -- Calculate the direction to move in
             local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
             local distance = (targetRootPart.Position - humanoidRootPart.Position).magnitude
 
-            -- Move the character towards the target
+            -- Make the executor's humanoid walk towards the target
             humanoid:MoveTo(targetRootPart.Position)
 
-            -- Stop the loop if the target is close enough
+            -- Stop the loop if the target is close enough (within 5 studs)
             if distance < 5 then
                 humanoid:MoveTo(humanoidRootPart.Position)  -- Stop the movement if near
                 break
             end
 
-            -- Wait for a small time to prevent freezing
-            wait(0.1)
+            wait(0.1) -- Adjust the delay if necessary
         end
     end
 
@@ -87,3 +85,4 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
+
