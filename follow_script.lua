@@ -88,13 +88,15 @@ local function createFollowScript()
     end
 
     -- Input for target player name
-    local targetName = "TargetPlayerName"  -- Replace with dynamic input value in your executor
-    print("Enter player name: " .. targetName)
+    local targetName = "TargetPlayerName"  -- Replace with dynamic input value in your executor (this should be input dynamically)
+
+    -- Example input via executor (you can adjust this based on how you're passing the input in the executor)
+    print("Enter player name to follow: " .. targetName)
 
     -- Call start following to begin the action
     startFollowing(targetName)
 
-    -- After some time, you can stop following (simulating button press)
+    -- After some time, you can stop following (simulating button press or executor pause)
     wait(10)  -- Example time to follow before stopping
     stopFollowing()
 
@@ -111,4 +113,5 @@ local function createFollowScript()
 end
 
 -- Run the function to create the follow script
-createFollowScript()
+createFollowScript() 
+
