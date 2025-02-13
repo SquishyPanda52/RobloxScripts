@@ -42,7 +42,10 @@ local function createFollowScript()
     -- Function to make the executor follow the target player with pathfinding
     local function followPlayer(targetPlayer)
         local targetCharacter = targetPlayer.Character
-        if not targetCharacter then return end
+        if not targetCharacter then 
+            print("Target character not found.")
+            return 
+        end
 
         local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
         local targetRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
@@ -62,12 +65,15 @@ local function createFollowScript()
         -- More frequent path recalculation
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
             -- Calculate the path to the target position
+            print("Computing path to target...")  -- Debug line
             path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
 
             -- Check if path has been computed successfully
             if path.Status == Enum.PathStatus.Complete then
+                print("Path computed successfully!")
                 path:MoveTo(humanoidRootPart)  -- Move executor to follow the computed path
             else
+                print("Path computation failed or incomplete.")  -- Debug line
                 -- If path isn't complete, recalculate it
                 path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
             end
@@ -83,6 +89,7 @@ local function createFollowScript()
         local targetPlayer = game.Players:FindFirstChild(targetName)
         
         if targetPlayer and targetPlayer ~= player then
+            print("Found player: " .. targetName)
             isFollowing = true
 
             -- Stop any previous follow coroutine before starting a new one
@@ -97,17 +104,19 @@ local function createFollowScript()
             -- Start the follow coroutine
             coroutine.resume(followCoroutine)
         else
-            warn("Player not found or invalid")
+            print("Player not found or invalid.")  -- Debug line
         end
     end)
 
     -- Stop Button functionality to stop following the player
     StopButton.MouseButton1Click:Connect(function()
+        print("Stop button pressed.")
         isFollowing = false
     end)
 
     -- Ensure the script gets destroyed upon player reset/death
     local function onDeath()
+        print("Player died, destroying script...")
         ScreenGui:Destroy() -- Destroy GUI and related elements when the player dies
     end
 
@@ -134,6 +143,8 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
+
+
 
 
 
