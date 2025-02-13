@@ -39,7 +39,7 @@ local function createFollowScript()
     local isFollowing = false  -- Flag to track if following is active
     local followCoroutine = nil  -- Store the coroutine to restart it if needed
 
-    -- Function to make the executor follow the target player
+    -- Function to make the executor follow the target player with pathfinding
     local function followPlayer(targetPlayer)
         local targetCharacter = targetPlayer.Character
         if not targetCharacter then return end
@@ -50,37 +50,32 @@ local function createFollowScript()
         local humanoid = character:WaitForChild("Humanoid")
         local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
 
+        local pathfindingService = game:GetService("PathfindingService")
+        local path = pathfindingService:CreatePath({
+            AgentRadius = 2,
+            AgentHeight = 5,
+            AgentCanJump = true,
+            AgentJumpHeight = humanoid.JumpHeight,
+            AgentMaxSlope = 45
+        })
+
         -- Continuous follow loop
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
-            local targetPosition = targetRootPart.Position
-            local distance = (targetPosition - humanoidRootPart.Position).magnitude
-            
-            -- Mimic movement
-            humanoid.WalkSpeed = targetHumanoid.WalkSpeed
-            humanoid.JumpHeight = targetHumanoid.JumpHeight
-            humanoid.PlatformStand = targetHumanoid.PlatformStand
+            -- Calculate a path to the target
+            path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
 
-            -- Handle Jumping
-            if targetHumanoid:GetState() == Enum.HumanoidStateType.Seated then
-                humanoid:ChangeState(Enum.HumanoidStateType.Seated)
-            elseif targetHumanoid:GetState() == Enum.HumanoidStateType.Physics and targetHumanoid.MoveDirection.magnitude > 0 then
-                if targetHumanoid.Jump then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-                    humanoid.Jump = true
-                else
-                    humanoid.Jump = false
-                end
-            end
+            -- Wait until path is computed
+            path:MoveTo(humanoidRootPart)
 
-            -- If the target is within 5 studs, stop moving
-            if distance < 5 then
-                humanoid:MoveTo(humanoidRootPart.Position)  -- Stop moving if near the target
+            -- Update movement based on path
+            if path.Status == Enum.PathStatus.Complete then
+                humanoid:MoveTo(path.Status)
             else
-                -- Move the executor's humanoid towards the target position
-                humanoid:MoveTo(targetPosition)
+                -- Keep updating path if it's incomplete or interrupted by obstacles
+                path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
             end
 
-            -- Wait for a small time before updating the position again
+            -- Wait for a short time before checking again
             wait(0.1)
         end
     end
