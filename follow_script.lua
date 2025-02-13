@@ -49,7 +49,7 @@ local function createFollowScript()
     local targetPlayer = nil
     local followCoroutine = nil
 
-    -- Function to make the executor follow the target player by moving CFrame
+    -- Function to make the executor follow the target player by moving humanoid
     local function followPlayer(targetPlayer)
         print("Attempting to follow player...")
 
@@ -65,8 +65,18 @@ local function createFollowScript()
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
             print("Following target...")
 
-            -- Move the player's character towards the target's position
-            humanoidRootPart.CFrame = CFrame.new(targetRootPart.Position + Vector3.new(0, 0, 2)) -- Adjust distance
+            -- Move towards the target's position using humanoid
+            humanoid:MoveTo(targetRootPart.Position)
+
+            -- Wait until the humanoid starts moving towards the target
+            while humanoid.MoveToFinished == false and isFollowing do
+                wait(0.1) -- Check every 0.1 seconds
+            end
+
+            -- If the target is moving, we follow again
+            if targetRootPart and targetCharacter and targetCharacter.Parent then
+                humanoid:MoveTo(targetRootPart.Position) -- Keep following
+            end
 
             -- Wait before checking again
             wait(0.1)
