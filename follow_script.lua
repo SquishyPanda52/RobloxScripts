@@ -7,15 +7,17 @@ local function createFollowScript()
     local ScreenGui = Instance.new("ScreenGui")
     local Frame = Instance.new("Frame")
     local TextBox = Instance.new("TextBox")
-    local Button = Instance.new("TextButton")
+    local ButtonFollow = Instance.new("TextButton")
+    local ButtonStop = Instance.new("TextButton")
 
     ScreenGui.Parent = game.CoreGui
     Frame.Parent = ScreenGui
     TextBox.Parent = Frame
-    Button.Parent = Frame
+    ButtonFollow.Parent = Frame
+    ButtonStop.Parent = Frame
 
     -- GUI Properties
-    Frame.Size = UDim2.new(0, 200, 0, 100)
+    Frame.Size = UDim2.new(0, 200, 0, 150)
     Frame.Position = UDim2.new(0.5, -100, 0.1, 0)
     Frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 
@@ -24,10 +26,15 @@ local function createFollowScript()
     TextBox.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     TextBox.PlaceholderText = "Enter Player Name"
 
-    Button.Size = UDim2.new(1, 0, 0.5, 0)
-    Button.Position = UDim2.new(0, 0, 0.5, 0)
-    Button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    Button.Text = "Follow"
+    ButtonFollow.Size = UDim2.new(1, 0, 0.25, 0)
+    ButtonFollow.Position = UDim2.new(0, 0, 0.5, 0)
+    ButtonFollow.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    ButtonFollow.Text = "Follow"
+
+    ButtonStop.Size = UDim2.new(1, 0, 0.25, 0)
+    ButtonStop.Position = UDim2.new(0, 0, 0.75, 0)
+    ButtonStop.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    ButtonStop.Text = "Stop Following"
 
     -- Function to make the executor follow the target player
     local function followPlayer(targetPlayer)
@@ -40,51 +47,30 @@ local function createFollowScript()
         local humanoid = character:WaitForChild("Humanoid")
         local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
 
-        -- Set a minimum distance (gap) to avoid collision
-        local minDistance = 3  -- 3 studs of space between the player and target
-
-        -- Check if the target is moving (comparing positions over time)
         local previousPosition = targetRootPart.Position
 
         -- Loop to follow the target player
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart do
-            -- Calculate the direction to move in
             local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
             local distance = (targetRootPart.Position - humanoidRootPart.Position).magnitude
 
-            -- Check if the target is moving by comparing their current and previous position
             if distance > 2 then
-                -- If the target is moving, follow them
                 humanoid:MoveTo(targetRootPart.Position)
-                previousPosition = targetRootPart.Position  -- Update the previous position
+                previousPosition = targetRootPart.Position
             else
-                -- If the target is stopped, check again if they have moved
                 if (targetRootPart.Position - previousPosition).magnitude > 0.1 then
-                    -- Target has started moving again, resume following
                     humanoid:MoveTo(targetRootPart.Position)
-                    previousPosition = targetRootPart.Position  -- Update the previous position
+                    previousPosition = targetRootPart.Position
                 else
-                    -- Target is still stopped, pause following
-                    wait(0.5)  -- Pause before checking again
+                    wait(0.5)
                 end
             end
-
-            -- Adjust to maintain a minimum gap between the player and the target
-            if distance < minDistance then
-                -- If too close, stop moving
-                humanoid:MoveTo(humanoidRootPart.Position)  -- Keep position without moving
-            else
-                -- If the gap is enough, continue moving toward the target
-                humanoid:MoveTo(targetRootPart.Position - direction * minDistance)  -- Maintain the gap
-            end
-
-            -- Wait for a short time to simulate walking
             wait(0.1)
         end
     end
 
     -- Button functionality to start following the player
-    Button.MouseButton1Click:Connect(function()
+    ButtonFollow.MouseButton1Click:Connect(function()
         local targetName = TextBox.Text
         local targetPlayer = game.Players:FindFirstChild(targetName)
         
@@ -95,18 +81,24 @@ local function createFollowScript()
         end
     end)
 
+    -- Button functionality to stop following the player
+    ButtonStop.MouseButton1Click:Connect(function()
+        -- Stop following logic
+        character:FindFirstChild("Humanoid"):MoveTo(character.HumanoidRootPart.Position)
+        print("Stopped following")
+    end)
+
     -- Ensure the script gets destroyed upon player reset/death
     character:WaitForChild("Humanoid").Died:Connect(function()
-        ScreenGui:Destroy() -- Destroy GUI and related elements when the player dies
+        ScreenGui:Destroy()
     end)
+
+    ScreenGui.Enabled = true
 end
 
--- Run the function to create the follow script
 createFollowScript()
 
--- Recreate the follow script if the character resets or dies
 player.CharacterAdded:Connect(function()
-    -- Wait a bit for the character to fully load before creating the script
     wait(1)
     createFollowScript()
 end)
