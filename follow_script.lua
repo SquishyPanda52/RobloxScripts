@@ -38,23 +38,39 @@ local function createFollowScript()
         local targetRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
 
         local humanoid = character:WaitForChild("Humanoid")
-
-        -- Continuous loop to follow the target player
+        local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
+        
+        -- Loop that continuously updates the executor's position to follow the target
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart do
-            -- Calculate the direction to move in
-            local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
-            local distance = (targetRootPart.Position - humanoidRootPart.Position).magnitude
+            local targetPosition = targetRootPart.Position
+            local distance = (targetPosition - humanoidRootPart.Position).magnitude
+            
+            -- Mimic movement
+            humanoid.WalkSpeed = targetHumanoid.WalkSpeed
+            humanoid.JumpHeight = targetHumanoid.JumpHeight
+            humanoid.PlatformStand = targetHumanoid.PlatformStand
 
-            -- Make the executor's humanoid walk towards the target
-            humanoid:MoveTo(targetRootPart.Position)
-
-            -- Stop the loop if the target is close enough (within 5 studs)
-            if distance < 5 then
-                humanoid:MoveTo(humanoidRootPart.Position)  -- Stop the movement if near
-                break
+            -- Handle Jumping
+            if targetHumanoid:GetState() == Enum.HumanoidStateType.Physics and targetHumanoid.MoveDirection.magnitude > 0 then
+                -- Make executor jump if the target is jumping or in the air
+                if targetHumanoid.Jump then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+                    humanoid.Jump = true
+                else
+                    humanoid.Jump = false
+                end
             end
 
-            wait(0.1) -- Adjust the delay if necessary
+            -- If the target is within 5 studs, stop moving
+            if distance < 5 then
+                humanoid:MoveTo(humanoidRootPart.Position)  -- Stop moving if near the target
+            else
+                -- Move the executor's humanoid towards the target position
+                humanoid:MoveTo(targetPosition)
+            end
+
+            -- Wait for a small time before updating the position again
+            wait(0.1)
         end
     end
 
@@ -85,4 +101,5 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
+
 
