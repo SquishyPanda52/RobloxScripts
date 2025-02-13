@@ -1,4 +1,5 @@
 local player = game.Players.LocalPlayer
+
 local function createFollowScript()
     local character = player.Character or player.CharacterAdded:Wait()
 
@@ -28,37 +29,38 @@ local function createFollowScript()
     Button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     Button.Text = "Follow"
 
+    -- Function to make the executor follow the target player
     local function followPlayer(targetPlayer)
         local targetCharacter = targetPlayer.Character
         if not targetCharacter then return end
 
-        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-        local targetRootPart = targetCharacter:FindFirstChild("HumanoidRootPart")
+        local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+        local targetRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
 
-        if not humanoidRootPart or not targetRootPart then return end
+        local humanoid = character:WaitForChild("Humanoid")
+        local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
 
-        local humanoid = character:FindFirstChild("Humanoid")
-
-        while targetCharacter and targetCharacter.Parent do
-            if not targetRootPart then break end
-
-            -- Calculate direction to target
+        -- Loop to follow the target player
+        while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart do
+            -- Calculate the direction to move in
             local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
-            local moveDirection = direction * humanoid.WalkSpeed
+            local distance = (targetRootPart.Position - humanoidRootPart.Position).magnitude
 
-            -- Move towards target using a gradual approach (walking)
-            humanoidRootPart.CFrame = humanoidRootPart.CFrame + moveDirection * 0.1
+            -- Move the character towards the target
+            humanoid:MoveTo(targetRootPart.Position)
 
-            -- Mimic jump
-            local targetHumanoid = targetCharacter:FindFirstChild("Humanoid")
-            if targetHumanoid and targetHumanoid.Jump then
-                humanoid.Jump = true
+            -- Stop the loop if the target is close enough
+            if distance < 5 then
+                humanoid:MoveTo(humanoidRootPart.Position)  -- Stop the movement if near
+                break
             end
 
-            wait(0.1) -- Adjust the delay if necessary
+            -- Wait for a small time to prevent freezing
+            wait(0.1)
         end
     end
 
+    -- Button functionality to start following the player
     Button.MouseButton1Click:Connect(function()
         local targetName = TextBox.Text
         local targetPlayer = game.Players:FindFirstChild(targetName)
