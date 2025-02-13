@@ -1,141 +1,90 @@
 local player = game.Players.LocalPlayer
 
--- Create GUI components
-local screenGui = Instance.new("ScreenGui")
-screenGui.Parent = player.PlayerGui
-
--- Create a frame for the GUI
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 300, 0, 200)
-frame.Position = UDim2.new(0.5, -150, 0.5, -100)
-frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-frame.Parent = screenGui
-
--- Create a TextBox for target player input
-local inputBox = Instance.new("TextBox")
-inputBox.Size = UDim2.new(0, 200, 0, 50)
-inputBox.Position = UDim2.new(0.5, -100, 0.2, 0)
-inputBox.PlaceholderText = "Enter player name"
-inputBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-inputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-inputBox.Parent = frame
-
--- Create a Follow button
-local followButton = Instance.new("TextButton")
-followButton.Size = UDim2.new(0, 100, 0, 50)
-followButton.Position = UDim2.new(0.5, -50, 0.5, 0)
-followButton.Text = "Follow"
-followButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-followButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-followButton.Parent = frame
-
--- Create a Stop button
-local stopButton = Instance.new("TextButton")
-stopButton.Size = UDim2.new(0, 100, 0, 50)
-stopButton.Position = UDim2.new(0.5, -50, 0.8, 0)
-stopButton.Text = "Stop"
-stopButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-stopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-stopButton.Parent = frame
-
--- Function to create the follow script
 local function createFollowScript()
     local character = player.Character or player.CharacterAdded:Wait()
-    local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-    local humanoid = character:WaitForChild("Humanoid")
 
-    -- Variables for tracking
-    local isFollowing = false
-    local targetPlayer = nil
-    local followCoroutine = nil
+    -- Create GUI
+    local ScreenGui = Instance.new("ScreenGui")
+    local Frame = Instance.new("Frame")
+    local TextBox = Instance.new("TextBox")
+    local Button = Instance.new("TextButton")
 
-    -- Function to make the executor follow the target player by walking
+    ScreenGui.Parent = game.CoreGui
+    Frame.Parent = ScreenGui
+    TextBox.Parent = Frame
+    Button.Parent = Frame
+
+    -- GUI Properties
+    Frame.Size = UDim2.new(0, 200, 0, 100)
+    Frame.Position = UDim2.new(0.5, -100, 0.1, 0)
+    Frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+
+    TextBox.Size = UDim2.new(1, 0, 0.5, 0)
+    TextBox.Position = UDim2.new(0, 0, 0, 0)
+    TextBox.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    TextBox.PlaceholderText = "Enter Player Name"
+
+    Button.Size = UDim2.new(1, 0, 0.5, 0)
+    Button.Position = UDim2.new(0, 0, 0.5, 0)
+    Button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    Button.Text = "Follow"
+
+    -- Function to make the executor follow the target player
     local function followPlayer(targetPlayer)
-        print("Attempting to follow player...")
-
         local targetCharacter = targetPlayer.Character
-        if not targetCharacter then
-            print("Target player character not found!")
-            return
-        end
+        if not targetCharacter then return end
 
+        local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
         local targetRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
 
-        -- Continuous follow loop
-        while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
-            print("Following target...")
+        local humanoid = character:WaitForChild("Humanoid")
+        local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
 
-            -- Calculate the direction to the target
+        -- Loop to follow the target player
+        while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart do
+            -- Calculate the direction to move in
             local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
             local distance = (targetRootPart.Position - humanoidRootPart.Position).magnitude
 
-            -- If the target is far enough, move towards it smoothly
+            -- Only move towards the target if they are not too close
             if distance > 2 then
-                humanoid:MoveTo(humanoidRootPart.Position + direction * 5)
+                humanoid:MoveTo(targetRootPart.Position)
+            else
+                humanoid:MoveTo(humanoidRootPart.Position)  -- Stop the movement if near
+                break
             end
 
-            -- Wait before checking again
+            -- Wait for a short time to simulate walking
             wait(0.1)
         end
     end
 
-    -- Function to start following the target player
-    local function startFollowing(targetName)
-        targetPlayer = game.Players:FindFirstChild(targetName)
-
+    -- Button functionality to start following the player
+    Button.MouseButton1Click:Connect(function()
+        local targetName = TextBox.Text
+        local targetPlayer = game.Players:FindFirstChild(targetName)
+        
         if targetPlayer and targetPlayer ~= player then
-            print("Following player: " .. targetName)
-            isFollowing = true
-
-            -- Stop any previous follow coroutine before starting a new one
-            if followCoroutine then
-                print("Stopping previous follow coroutine...")
-                coroutine.close(followCoroutine)
-            end
-
-            followCoroutine = coroutine.create(function()
-                followPlayer(targetPlayer)
-            end)
-
-            -- Start the follow coroutine
-            coroutine.resume(followCoroutine)
+            followPlayer(targetPlayer)
         else
-            print("Player not found or invalid!")
-        end
-    end
-
-    -- Function to stop following the target player
-    local function stopFollowing()
-        print("Stop following button clicked!")
-        isFollowing = false
-    end
-
-    -- Handle button click events
-    followButton.MouseButton1Click:Connect(function()
-        local targetName = inputBox.Text
-        if targetName and targetName ~= "" then
-            startFollowing(targetName)
-        else
-            print("Please enter a valid player name.")
+            warn("Player not found or invalid")
         end
     end)
 
-    stopButton.MouseButton1Click:Connect(function()
-        stopFollowing()
-    end)
-
-    -- Handle character respawn and rebind the follow script
-    player.CharacterAdded:Connect(function()
-        print("Player respawned! Re-creating follow script...")
-        wait(1)
-
-        -- Restart the follow script if the player was previously following
-        if isFollowing and followCoroutine then
-            coroutine.resume(followCoroutine)
-        end
+    -- Ensure the script gets destroyed upon player reset/death
+    character:WaitForChild("Humanoid").Died:Connect(function()
+        ScreenGui:Destroy() -- Destroy GUI and related elements when the player dies
     end)
 end
 
 -- Run the function to create the follow script
 createFollowScript()
+
+-- Recreate the follow script if the character resets or dies
+player.CharacterAdded:Connect(function()
+    -- Wait a bit for the character to fully load before creating the script
+    wait(1)
+    createFollowScript()
+end)
+
 
