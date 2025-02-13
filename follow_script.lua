@@ -5,11 +5,16 @@ local function createFollowScript()
     local character, ScreenGui, Frame, TextBox, Button, StopButton = player.Character or player.CharacterAdded:Wait(), Instance.new("ScreenGui"), Instance.new("Frame"), Instance.new("TextBox"), Instance.new("TextButton"), Instance.new("TextButton")
     ScreenGui.Parent, Frame.Parent, TextBox.Parent, Button.Parent, StopButton.Parent = game.CoreGui, ScreenGui, Frame, Frame, Frame
 
-    -- GUI properties
-    Frame.Size, Frame.Position, Frame.BackgroundColor3 = UDim2.new(0, 200, 0, 200), UDim2.new(0, 0, 1, -200), Color3.fromRGB(50, 50, 50)  -- Positioned at bottom left
+    -- GUI properties with new color theme
+    Frame.Size, Frame.Position = UDim2.new(0, 200, 0, 200), UDim2.new(0, 0, 1, -200)  -- Positioned at bottom left
+    Frame.BackgroundColor3, Frame.BorderColor3 = Color3.fromRGB(75, 0, 130), Color3.fromRGB(0, 0, 0)  -- Dark purple with black border
+
     TextBox.Size, TextBox.Position, TextBox.PlaceholderText = UDim2.new(1, 0, 0.25, 0), UDim2.new(0, 0, 0, 0), "Enter Player Name"
+    TextBox.BackgroundColor3 = Color3.fromRGB(204, 153, 255)  -- Light purple
+
     Button.Size, Button.Position, Button.BackgroundColor3, Button.Text = UDim2.new(1, 0, 0.25, 0), UDim2.new(0, 0, 0.25, 0), Color3.fromRGB(100, 100, 100), "Follow"
-    StopButton.Size, StopButton.Position, StopButton.BackgroundColor3, StopButton.Text = UDim2.new(1, 0, 0.25, 0), UDim2.new(0, 0, 0.5, 0), Color3.fromRGB(200, 100, 100), "Stop Following"
+
+    StopButton.Size, StopButton.Position, StopButton.BackgroundColor3, StopButton.Text = UDim2.new(1, 0, 0.25, 0), UDim2.new(0, 0, 0.5, 0), Color3.fromRGB(255, 0, 0), "Stop Following"  -- Red for Stop button
 
     -- Set last saved text in TextBox if any
     TextBox.Text = savedText
