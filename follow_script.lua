@@ -40,6 +40,9 @@ local function createFollowScript()
         local humanoid = character:WaitForChild("Humanoid")
         local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
 
+        -- Set a minimum distance (gap) to avoid collision
+        local minDistance = 3  -- 3 studs of space between the player and target
+
         -- Check if the target is moving (comparing positions over time)
         local previousPosition = targetRootPart.Position
 
@@ -64,6 +67,15 @@ local function createFollowScript()
                     -- Target is still stopped, pause following
                     wait(0.5)  -- Pause before checking again
                 end
+            end
+
+            -- Adjust to maintain a minimum gap between the player and the target
+            if distance < minDistance then
+                -- If too close, stop moving
+                humanoid:MoveTo(humanoidRootPart.Position)  -- Keep position without moving
+            else
+                -- If the gap is enough, continue moving toward the target
+                humanoid:MoveTo(targetRootPart.Position - direction * minDistance)  -- Maintain the gap
             end
 
             -- Wait for a short time to simulate walking
@@ -98,5 +110,3 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
-
-
