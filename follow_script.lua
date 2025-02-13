@@ -49,7 +49,7 @@ local function createFollowScript()
     local targetPlayer = nil
     local followCoroutine = nil
 
-    -- Function to make the executor follow the target player by moving humanoid
+    -- Function to make the executor follow the target player by walking
     local function followPlayer(targetPlayer)
         print("Attempting to follow player...")
 
@@ -65,17 +65,13 @@ local function createFollowScript()
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
             print("Following target...")
 
-            -- Move towards the target's position using humanoid
-            humanoid:MoveTo(targetRootPart.Position)
+            -- Calculate the direction to the target
+            local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
+            local distance = (targetRootPart.Position - humanoidRootPart.Position).magnitude
 
-            -- Wait until the humanoid starts moving towards the target
-            while humanoid.MoveToFinished == false and isFollowing do
-                wait(0.1) -- Check every 0.1 seconds
-            end
-
-            -- If the target is moving, we follow again
-            if targetRootPart and targetCharacter and targetCharacter.Parent then
-                humanoid:MoveTo(targetRootPart.Position) -- Keep following
+            -- If the target is far enough, move towards it smoothly
+            if distance > 2 then
+                humanoid:MoveTo(humanoidRootPart.Position + direction * 5)
             end
 
             -- Wait before checking again
