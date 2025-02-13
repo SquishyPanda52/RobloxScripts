@@ -1,72 +1,50 @@
-local player, following = game.Players.LocalPlayer, false
-local savedText = ""  -- Variable to store last entered text
-
+local player, following, savedText = game.Players.LocalPlayer, false, ""
 local function createFollowScript()
     local character, ScreenGui, Frame, TextBox, Button, StopButton = player.Character or player.CharacterAdded:Wait(), Instance.new("ScreenGui"), Instance.new("Frame"), Instance.new("TextBox"), Instance.new("TextButton"), Instance.new("TextButton")
     ScreenGui.Parent, Frame.Parent, TextBox.Parent, Button.Parent, StopButton.Parent = game.CoreGui, ScreenGui, Frame, Frame, Frame
 
-    -- GUI properties with new color theme
-    Frame.Size, Frame.Position = UDim2.new(0, 200, 0, 200), UDim2.new(0, 0, 1, -200)  -- Positioned at bottom left
-    Frame.BackgroundColor3, Frame.BorderColor3 = Color3.fromRGB(75, 0, 130), Color3.fromRGB(0, 0, 0)  -- Dark purple with black border
+    -- GUI styling
+    Frame.Size, Frame.Position = UDim2.new(0, 200, 0, 200), UDim2.new(0, 0, 1, -200)
+    Frame.BackgroundColor3, Frame.BorderColor3, Frame.BorderSizePixel = Color3.fromRGB(75, 0, 130), Color3.fromRGB(0, 0, 0), 4
+    TextBox.Size, TextBox.Position, TextBox.PlaceholderText = UDim2.new(0.8, 0, 0.25, 0), UDim2.new(0.1, 0, 0, 0), "Enter Player Name"
+    TextBox.BackgroundColor3, TextBox.TextColor3, TextBox.TextSize, TextBox.Font = Color3.fromRGB(50, 50, 50), Color3.fromRGB(0, 0, 0), 16, Enum.Font.SourceSansBold
+    Button.Size, Button.Position, Button.BackgroundColor3, Button.Text = UDim2.new(0.8, 0, 0.25, 0), UDim2.new(0.1, 0, 0.25, 0), Color3.fromRGB(100, 100, 100), "Follow"
+    Button.TextColor3, Button.Font, Button.TextSize = Color3.fromRGB(0, 0, 0), Enum.Font.SourceSansBold, 16
+    StopButton.Size, StopButton.Position, StopButton.BackgroundColor3, StopButton.Text = UDim2.new(0.8, 0, 0.25, 0), UDim2.new(0.1, 0, 0.5, 0), Color3.fromRGB(255, 0, 0), "Stop Following"
+    StopButton.TextColor3, StopButton.Font, StopButton.TextSize = Color3.fromRGB(0, 0, 0), Enum.Font.SourceSansBold, 16
 
-    TextBox.Size, TextBox.Position, TextBox.PlaceholderText = UDim2.new(1, 0, 0.25, 0), UDim2.new(0, 0, 0, 0), "Enter Player Name"
-    TextBox.BackgroundColor3 = Color3.fromRGB(204, 153, 255)  -- Light purple
-
-    Button.Size, Button.Position, Button.BackgroundColor3, Button.Text = UDim2.new(1, 0, 0.25, 0), UDim2.new(0, 0, 0.25, 0), Color3.fromRGB(100, 100, 100), "Follow"
-
-    StopButton.Size, StopButton.Position, StopButton.BackgroundColor3, StopButton.Text = UDim2.new(1, 0, 0.25, 0), UDim2.new(0, 0, 0.5, 0), Color3.fromRGB(255, 0, 0), "Stop Following"  -- Red for Stop button
-
-    -- Set last saved text in TextBox if any
     TextBox.Text = savedText
 
-    -- Follow logic
+    -- Follow function
     local function followPlayer(targetPlayer)
-        local targetCharacter, humanoidRootPart, targetRootPart = targetPlayer.Character, character:WaitForChild("HumanoidRootPart"), targetPlayer.Character:WaitForChild("HumanoidRootPart")
-        if not targetCharacter then return end
-        local humanoid, previousPosition = character:WaitForChild("Humanoid"), targetRootPart.Position
-
-        while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and following do
-            local direction = (targetRootPart.Position - humanoidRootPart.Position).unit
-            local distance = (targetRootPart.Position - humanoidRootPart.Position).magnitude
-
-            -- Keep player a few studs behind the target
-            if distance > 6 then
-                humanoid:MoveTo(targetRootPart.Position)
-            elseif distance > 4 then
-                humanoid:MoveTo(targetRootPart.Position)
-            else
-                -- Align player right behind the target
-                local gap = 4
-                local behindPosition = targetRootPart.Position - direction * gap  -- Move behind the target
-                humanoid:MoveTo(behindPosition)
-            end
-
+        local humanoidRootPart, targetRootPart = character:WaitForChild("HumanoidRootPart"), targetPlayer.Character:WaitForChild("HumanoidRootPart")
+        while targetPlayer.Character and humanoidRootPart and targetRootPart and following do
+            local dir, dist = (targetRootPart.Position - humanoidRootPart.Position).unit, (targetRootPart.Position - humanoidRootPart.Position).magnitude
+            if dist > 6 then humanoidRootPart.Parent.Humanoid:MoveTo(targetRootPart.Position)
+            elseif dist > 4 then humanoidRootPart.Parent.Humanoid:MoveTo(targetRootPart.Position)
+            else humanoidRootPart.Parent.Humanoid:MoveTo(targetRootPart.Position - dir * 4) end
             wait(0.1)
         end
     end
 
-    -- Button functions
+    -- Button connections
     Button.MouseButton1Click:Connect(function()
-        savedText = TextBox.Text  -- Save the current text in the TextBox
+        savedText = TextBox.Text
         local targetPlayer = game.Players:FindFirstChild(savedText)
-        if targetPlayer and targetPlayer ~= player then following = true followPlayer(targetPlayer) else warn("Player not found or invalid") end
+        if targetPlayer and targetPlayer ~= player then following = true followPlayer(targetPlayer) end
     end)
-
     StopButton.MouseButton1Click:Connect(function() following = false end)
 
     -- Cleanup on death
-    character:WaitForChild("Humanoid").Died:Connect(function()
-        ScreenGui:Destroy()  -- Destroy GUI when player dies
-    end)
+    character:WaitForChild("Humanoid").Died:Connect(function() ScreenGui:Destroy() end)
 end
 
 createFollowScript()
 
--- Recreate the script and load saved text upon respawn
+-- Recreate and load saved text on respawn
 player.CharacterAdded:Connect(function()
-    wait(1)  -- Wait for character to fully load
-    createFollowScript() 
-    local character = player.Character or player.CharacterAdded:Wait()
+    wait(1)
+    createFollowScript()
     local textBox = game.CoreGui:WaitForChild(player.Name):WaitForChild("ScreenGui"):WaitForChild("Frame"):WaitForChild("TextBox")
-    textBox.Text = savedText  -- Reload the last saved text
+    textBox.Text = savedText
 end)
