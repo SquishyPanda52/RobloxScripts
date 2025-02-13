@@ -64,11 +64,11 @@ local function createFollowScript()
             -- Calculate a path to the target
             path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
 
-            -- Wait until path is computed
+            -- Wait until path is computed and check if it was successful
             path:MoveTo(humanoidRootPart)
 
-            -- Update movement based on path
             if path.Status == Enum.PathStatus.Complete then
+                -- Move the humanoid to the target path
                 humanoid:MoveTo(path.Status)
             else
                 -- Keep updating path if it's incomplete or interrupted by obstacles
@@ -90,7 +90,7 @@ local function createFollowScript()
 
             -- Stop any previous follow coroutine before starting a new one
             if followCoroutine then
-                coroutine.close(followCoroutine)
+                followCoroutine = nil  -- Reset previous coroutine
             end
 
             followCoroutine = coroutine.create(function()
