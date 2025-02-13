@@ -52,31 +52,28 @@ local function createFollowScript()
 
         local pathfindingService = game:GetService("PathfindingService")
         local path = pathfindingService:CreatePath({
-            AgentRadius = 2,
-            AgentHeight = 5,
+            AgentRadius = 2,  -- Adjust radius for smoother navigation
+            AgentHeight = 5,  -- Match the agent's height
             AgentCanJump = true,
             AgentJumpHeight = humanoid.JumpHeight,
-            AgentMaxSlope = 45
-        })
-
-        -- Continuous follow loop
+            AgentMaxSlope = 45,  -- Allow a wider slope for better pathfinding
+            })
+        
+        -- More frequent path recalculation
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
-            -- Calculate a path to the target
+            -- Calculate the path to the target position
             path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
 
-            -- Wait until path is computed
-            path:MoveTo(humanoidRootPart)
-
-            -- Update movement based on path
+            -- Check if path has been computed successfully
             if path.Status == Enum.PathStatus.Complete then
-                humanoid:MoveTo(path.Status)
+                path:MoveTo(humanoidRootPart)  -- Move executor to follow the computed path
             else
-                -- Keep updating path if it's incomplete or interrupted by obstacles
+                -- If path isn't complete, recalculate it
                 path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
             end
 
-            -- Wait for a short time before checking again
-            wait(0.1)
+            -- More frequent updates to the pathfinding
+            wait(0.2)
         end
     end
 
@@ -137,6 +134,7 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
+
 
 
 
