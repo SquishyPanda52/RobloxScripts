@@ -5,14 +5,13 @@ local function createFollowScript()
     local character = player.Character or player.CharacterAdded:Wait()
     local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
     local humanoid = character:WaitForChild("Humanoid")
-    local pathfindingService = game:GetService("PathfindingService")
 
     -- Variables for tracking
     local isFollowing = false
     local targetPlayer = nil
     local followCoroutine = nil
 
-    -- Function to make the executor follow the target player with pathfinding
+    -- Function to make the executor follow the target player by moving CFrame
     local function followPlayer(targetPlayer)
         print("Attempting to follow player...")
 
@@ -24,34 +23,14 @@ local function createFollowScript()
 
         local targetRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
 
-        -- Create a path for the character to follow the target
-        local path = pathfindingService:CreatePath({
-            AgentRadius = 2,
-            AgentHeight = 5,
-            AgentCanJump = true,
-            AgentJumpHeight = humanoid.JumpHeight,
-            AgentMaxSlope = 45
-        })
-
         -- Continuous follow loop
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
             print("Following target...")
 
-            -- Calculate a path to the target
-            path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
+            -- Move the player's character towards the target's position
+            humanoidRootPart.CFrame = CFrame.new(targetRootPart.Position + Vector3.new(0, 0, 2)) -- Adjust distance
 
-            -- Wait until path is computed and check if it was successful
-            path:MoveTo(humanoidRootPart)
-
-            if path.Status == Enum.PathStatus.Complete then
-                print("Path complete. Moving humanoid.")
-                humanoid:MoveTo(path.Status)
-            else
-                print("Path incomplete. Retrying...")
-                path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
-            end
-
-            -- Wait for a short time before checking again
+            -- Wait before checking again
             wait(0.1)
         end
     end
@@ -88,7 +67,7 @@ local function createFollowScript()
     end
 
     -- Input for target player name
-    local targetName = "TargetPlayerName"  -- Replace with dynamic input value in your executor (this should be input dynamically)
+    local targetName = "TargetPlayerName"  -- Replace with dynamic input value in your executor
 
     -- Example input via executor (you can adjust this based on how you're passing the input in the executor)
     print("Enter player name to follow: " .. targetName)
