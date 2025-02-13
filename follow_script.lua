@@ -42,10 +42,7 @@ local function createFollowScript()
     -- Function to make the executor follow the target player with pathfinding
     local function followPlayer(targetPlayer)
         local targetCharacter = targetPlayer.Character
-        if not targetCharacter then 
-            print("Target character not found.")
-            return 
-        end
+        if not targetCharacter then return end
 
         local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
         local targetRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
@@ -55,30 +52,30 @@ local function createFollowScript()
 
         local pathfindingService = game:GetService("PathfindingService")
         local path = pathfindingService:CreatePath({
-            AgentRadius = 2,  -- Adjust radius for smoother navigation
-            AgentHeight = 5,  -- Match the agent's height
+            AgentRadius = 2,
+            AgentHeight = 5,
             AgentCanJump = true,
             AgentJumpHeight = humanoid.JumpHeight,
-            AgentMaxSlope = 45,  -- Allow a wider slope for better pathfinding
-            })
-        
-        -- More frequent path recalculation
+            AgentMaxSlope = 45
+        })
+
+        -- Continuous follow loop
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
-            -- Calculate the path to the target position
-            print("Computing path to target...")  -- Debug line
+            -- Calculate a path to the target
             path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
 
-            -- Check if path has been computed successfully
+            -- Wait until path is computed and valid
+            path:MoveTo(humanoidRootPart)
+
+            -- Update movement based on path
             if path.Status == Enum.PathStatus.Complete then
-                print("Path computed successfully!")
-                path:MoveTo(humanoidRootPart)  -- Move executor to follow the computed path
+                humanoid:MoveTo(path:GetPointAlongPath(1))  -- Move to the last point of the path
             else
-                print("Path computation failed or incomplete.")  -- Debug line
-                -- If path isn't complete, recalculate it
+                -- Keep updating path if it's incomplete or interrupted by obstacles
                 path:ComputeAsync(humanoidRootPart.Position, targetRootPart.Position)
             end
 
-            -- More frequent updates to the pathfinding
+            -- Wait for a short time before checking again to prevent constant recalculation
             wait(0.2)
         end
     end
@@ -89,12 +86,11 @@ local function createFollowScript()
         local targetPlayer = game.Players:FindFirstChild(targetName)
         
         if targetPlayer and targetPlayer ~= player then
-            print("Found player: " .. targetName)
             isFollowing = true
 
             -- Stop any previous follow coroutine before starting a new one
             if followCoroutine then
-                coroutine.close(followCoroutine)
+                followCoroutine = nil  -- Reset coroutine
             end
 
             followCoroutine = coroutine.create(function()
@@ -104,19 +100,17 @@ local function createFollowScript()
             -- Start the follow coroutine
             coroutine.resume(followCoroutine)
         else
-            print("Player not found or invalid.")  -- Debug line
+            warn("Player not found or invalid")
         end
     end)
 
     -- Stop Button functionality to stop following the player
     StopButton.MouseButton1Click:Connect(function()
-        print("Stop button pressed.")
         isFollowing = false
     end)
 
     -- Ensure the script gets destroyed upon player reset/death
     local function onDeath()
-        print("Player died, destroying script...")
         ScreenGui:Destroy() -- Destroy GUI and related elements when the player dies
     end
 
@@ -143,9 +137,3 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
-
-
-
-
-
-
