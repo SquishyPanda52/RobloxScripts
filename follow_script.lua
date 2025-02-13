@@ -37,7 +37,6 @@ local function createFollowScript()
     StopButton.Text = "Stop Following"
 
     local isFollowing = false  -- Flag to track if following is active
-    local followCoroutine = nil  -- Store the coroutine to restart it if needed
 
     -- Function to make the executor follow the target player
     local function followPlayer(targetPlayer)
@@ -49,7 +48,7 @@ local function createFollowScript()
 
         local humanoid = character:WaitForChild("Humanoid")
         local targetHumanoid = targetCharacter:WaitForChild("Humanoid")
-
+        
         -- Continuous follow loop
         while targetCharacter and targetCharacter.Parent and humanoidRootPart and targetRootPart and isFollowing do
             local targetPosition = targetRootPart.Position
@@ -92,18 +91,7 @@ local function createFollowScript()
         
         if targetPlayer and targetPlayer ~= player then
             isFollowing = true
-
-            -- Stop any previous follow coroutine before starting a new one
-            if followCoroutine then
-                coroutine.close(followCoroutine)
-            end
-
-            followCoroutine = coroutine.create(function()
-                followPlayer(targetPlayer)
-            end)
-
-            -- Start the follow coroutine
-            coroutine.resume(followCoroutine)
+            followPlayer(targetPlayer)
         else
             warn("Player not found or invalid")
         end
@@ -115,21 +103,8 @@ local function createFollowScript()
     end)
 
     -- Ensure the script gets destroyed upon player reset/death
-    local function onDeath()
+    character:WaitForChild("Humanoid").Died:Connect(function()
         ScreenGui:Destroy() -- Destroy GUI and related elements when the player dies
-    end
-
-    character:WaitForChild("Humanoid").Died:Connect(onDeath)
-
-    -- Handle character respawn and rebind the follow script
-    player.CharacterAdded:Connect(function()
-        -- Wait a bit for the character to fully load before creating the script
-        wait(1)
-
-        -- Restart the follow script if the player was previously following
-        if isFollowing and followCoroutine then
-            coroutine.resume(followCoroutine)
-        end
     end)
 end
 
@@ -142,3 +117,4 @@ player.CharacterAdded:Connect(function()
     wait(1)
     createFollowScript()
 end)
+
