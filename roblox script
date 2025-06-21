@@ -1,0 +1,3076 @@
+--Services
+local LocalPlayer = game.Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local Camera = workspace.CurrentCamera
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
+local UserGameSettings = UserSettings():GetService("UserGameSettings")
+--local GameSettings = UserSettings():GetService("GameSettings")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
+local Mouse = LocalPlayer:GetMouse()
+--Replicated
+local ReplicatedEvents = ReplicatedStorage:WaitForChild("ReplicatedEvents")
+local ProjectileHit = ReplicatedEvents.ProjectileHit
+local ProjectileStart = ReplicatedEvents.ProjectileStart
+local ProjectileDamage = ReplicatedEvents.ProjectileDamage
+local LocalStart = ReplicatedEvents.LocalStart
+local ReplicateAimEvent = ReplicatedEvents.ReplicateAim
+local DoBlood = ReplicatedEvents.DoBlood
+local DoSpark = ReplicatedEvents.DoSpark
+local ReplicateChargeEvent = ReplicatedEvents.ReplicateCharge
+local HandleIntegrityEvent = ReplicatedEvents.HandleIntegrity
+local FireCannon = ReplicatedEvents.FireCannon
+local ShieldHit = ReplicatedEvents.ShieldHit
+
+local GeneralReplicated = ReplicatedStorage:WaitForChild("GeneralReplicated")
+local Blood = GeneralReplicated.Blood
+local BloodSplatter = Blood.BloodSplatter
+local BloodParticle = Blood.BloodParticle
+local BloodSplatterParticle = Blood.BloodSplatterParticle
+local Sparks = GeneralReplicated.Sparks
+local SparkParticle = Sparks.SparkParticle
+
+local ArtilleryReplicated = ReplicatedStorage:WaitForChild("ArtilleryReplicated")
+local CannonFire = ReplicatedStorage.ArtilleryReplicated.CannonFire:GetChildren()
+local MortarFire = ReplicatedStorage.ArtilleryReplicated.MortarFire:GetChildren()
+
+local ArtilleryEvents = ArtilleryReplicated.ArtilleryEvents
+local MoveArcade = ArtilleryEvents.MoveArcade
+local ElevateArcade = ArtilleryEvents.ElevateArcade
+
+local MoveRealistic = ArtilleryEvents.MoveRealistic
+local ElevateRealistic = ArtilleryEvents.ElevateRealistic
+
+local FirearmsReplicated = ReplicatedStorage.FirearmsReplicated
+local MusketFire = FirearmsReplicated.MusketFire:GetChildren()
+local CarbineFire = FirearmsReplicated.CarbineFire:GetChildren()
+local PistolFire = FirearmsReplicated.PistolFire:GetChildren()
+local RifleFire = FirearmsReplicated.RifleFire:GetChildren()
+local ArcusFire = FirearmsReplicated.ArcusFire:GetChildren()
+--Cframe shenanigans
+local base1 = CFrame.new(-1, 0.5, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+local base2 = CFrame.new(1, 0.5, 0, 0, 0, 1, 0, 1, 0, -1, -0, -0)
+local base3 = CFrame.new(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0)
+
+local arrayPoints = { --used for roundshot angle detection
+	Vector3.new(2,0,2),
+	Vector3.new(2,0,1),
+	Vector3.new(2,0,0),
+	Vector3.new(2,0,-1),
+	Vector3.new(2,0,-2),
+
+	Vector3.new(1,0,2),
+	Vector3.new(1,0,1),
+	Vector3.new(1,0,0),
+	Vector3.new(1,0,-1),
+	Vector3.new(1,0,-2),
+
+	Vector3.new(0,0,2),
+	Vector3.new(0,0,1),
+	Vector3.new(0,0,0),
+	Vector3.new(0,0,-1),
+	Vector3.new(0,0,-2),
+
+	Vector3.new(-1,0,2),
+	Vector3.new(-1,0,1),
+	Vector3.new(-1,0,0),
+	Vector3.new(-1,0,-1),
+	Vector3.new(-1,0,-2),
+
+	Vector3.new(-2,0,2),
+	Vector3.new(-2,0,1),
+	Vector3.new(-2,0,0),
+	Vector3.new(-2,0,-1),
+	Vector3.new(-2,0,-2)
+
+}
+--Misc
+local QualityLevel = 1
+local Stamina = 100
+--Roots
+local MusketRoot = Instance.new("Part")
+MusketRoot.Anchored = true
+MusketRoot.CanCollide = false
+MusketRoot.Name = "MusketProjectile"
+MusketRoot.Size = Vector3.new(.2,.2,.2)
+MusketRoot.Shape = "Ball"
+MusketRoot.Color = Color3.fromRGB(66, 66, 66)
+MusketRoot.Material = "Metal"
+local FirstAttach = Instance.new("Attachment")
+FirstAttach.Name = "FirstAttach"
+FirstAttach.Position = Vector3.new(0,0.1,0)
+FirstAttach.Parent = MusketRoot
+local SecondAttach = Instance.new("Attachment")
+SecondAttach.Name = "SecondAttach"
+SecondAttach.Position = Vector3.new(0,-0.1,0)
+SecondAttach.Parent = MusketRoot
+local Trail = Instance.new("Trail")
+Trail.Lifetime = .1
+Trail.Transparency = NumberSequence.new(0)
+Trail.Attachment0 = FirstAttach
+Trail.Attachment1 = SecondAttach
+Trail.FaceCamera = true
+Trail.Parent = MusketRoot
+
+local TowingSomething = false
+local UsingSomething = false
+
+--arcade shells
+local ArcadeTwelve = ArtilleryReplicated.Projectiles.ArcadeTwelve:Clone()
+local ArcadeSix = ArtilleryReplicated.Projectiles.ArcadeSix:Clone()
+local ArcadeShell = ArtilleryReplicated.Projectiles.ArcadeShell:Clone()
+local ArcadeCanister = ArtilleryReplicated.Projectiles.ArcadeCanister:Clone()
+local MortarShotProjectile = ArtilleryReplicated.Projectiles.MortarShotProjectile:Clone()
+local MortarShellProjectile = ArtilleryReplicated.Projectiles.MortarShellProjectile:Clone()
+local GatlingProjectile = ArtilleryReplicated.Projectiles.GatlingProjectile:Clone()
+local ShellFragment = ArtilleryReplicated.Projectiles.ShellFragment:Clone()
+local RocketFragment = ArtilleryReplicated.Projectiles.RocketFragment:Clone()
+local ExplosiveRocket = ArtilleryReplicated.Projectiles.ExplosiveRocket:Clone()
+local ShellRocket = ArtilleryReplicated.Projectiles.ShellRocket:Clone()
+
+--Sounds
+local BulletHitSound = FirearmsReplicated.BulletHit:GetChildren()
+local ExplosionHitSound = ArtilleryReplicated.Explosions:GetChildren()
+local LaunchSound = ArtilleryReplicated.Launches:GetChildren()
+local FuseSound = ArtilleryReplicated.Fuses:GetChildren()
+local IncomingSound = ArtilleryReplicated.Incomings:GetChildren()
+local Tick = tick()
+
+local MaterialsTable = {
+	["Ground"] = {
+		Enum.Material.Grass,
+		Enum.Material.LeafyGrass,
+		Enum.Material.Mud,
+		Enum.Material.Ground,
+		Enum.Material.Plastic,
+		Enum.Material.SmoothPlastic
+	},
+	["Rock"] = {
+		Enum.Material.Rock,
+		Enum.Material.Concrete,
+		Enum.Material.Cobblestone,
+		Enum.Material.Pavement,
+		Enum.Material.Granite,
+		Enum.Material.Asphalt,
+		Enum.Material.Pebble,
+		Enum.Material.Basalt,
+		Enum.Material.Slate,
+		Enum.Material.Fabric
+	},
+	["Snow"] = {
+		Enum.Material.Snow,
+		Enum.Material.Marble,
+		Enum.Material.Glacier,
+		Enum.Material.Salt,
+		Enum.Material.Ice
+	},
+	["Metal"] = {
+		Enum.Material.CorrodedMetal,
+		Enum.Material.DiamondPlate,
+		Enum.Material.Foil,
+		Enum.Material.Metal
+	},
+	["Brick"] = {
+		Enum.Material.Sandstone,
+		Enum.Material.Brick
+	},
+	["Sand"] = {
+		Enum.Material.Limestone,
+		Enum.Material.Sand
+	},
+	["Wood"] = {
+		Enum.Material.WoodPlanks,
+		Enum.Material.Wood
+	}
+}
+
+local ClickTable = {
+	"12 lber. Cannon",
+	"6 lber. Cannon",
+	"5 in. Howitzer",
+	"8 in. Mortar",
+	"18 lber. Rockets",
+	"Gatling Gun",
+	"Ammunition Chest",
+	"Magazine Chest",
+	"Artillery Limber",
+	"Horse"
+}
+
+local function packStrings(items, ...) 
+	local fNumber = ""
+	for i=1, items do
+		fNumber = fNumber .. "f"
+	end
+	return string.pack(fNumber, ...)
+end
+
+
+local function roundDecimals(num, places) 
+	places = math.pow(10, places or 0)
+	num = num * places
+	if num >= 0 then 
+		num = math.floor(num + 0.5) 
+	else 
+		num = math.ceil(num - 0.5) 
+	end
+	local Result = num/places
+	if Result == -0 then
+		Result = 0
+	end
+	return Result
+end
+
+local function roundVector(vector, places)
+	return Vector3.new(roundDecimals(vector.X, places), roundDecimals(vector.Y, places), roundDecimals(vector.Z, places))
+end
+
+local function MakeWeld(FirstPart, SecondPart, Name, Parent)
+	local Weld = Instance.new("Weld")
+	if Name then
+		Weld.Name = Name
+	else
+		Weld.Name = SecondPart.Name .. "Weld"
+	end
+	Weld.Part0 = FirstPart 
+	Weld.Part1 = SecondPart
+	Weld.C0 = FirstPart.CFrame:ToObjectSpace(SecondPart.CFrame)
+	Weld.C1 = CFrame.new()
+	Weld.Parent = Parent
+end
+
+local function returnMagnitude(position1, position2)
+	local Camera = workspace.CurrentCamera
+	if Camera.CFrame and not position2 then
+		local Magnitude = (Camera.CFrame.Position - position1).Magnitude
+		return Magnitude
+	elseif position1 and position2 then
+		local Magnitude = (position1 - position2).Magnitude
+		return Magnitude
+	else
+		return 0--incase the torso isn't found lol
+	end
+end
+
+local function PlaySoundWithDistance(sound, position)
+	coroutine.resume(coroutine.create(function()
+		local Magnitude = returnMagnitude(position)
+		local MinDistance = sound.RollOffMinDistance
+		local MaxDistance = sound.RollOffMaxDistance
+		local Multiplier = (Magnitude - MinDistance)/MaxDistance
+		if Magnitude <= MinDistance then
+			Multiplier = 0
+		end
+		
+		local Equalizer = Instance.new("EqualizerSoundEffect")
+		Equalizer.HighGain = -80 * Multiplier
+		Equalizer.MidGain = 80 + (-80 * Multiplier * 2)
+		if Equalizer.HighGain >= -40 then
+			Equalizer.MidGain = 0
+		end
+		Equalizer.LowGain = 0
+		Equalizer.Parent = sound
+		wait(Magnitude/900)
+		sound:Play()
+		Debris:AddItem(Equalizer, sound.TimeLength + 1)
+	end))
+end
+
+local function CheckForHumanoid(part, recursive)
+	if not recursive then
+		recursive = 0
+	elseif recursive >= 6 then
+		print("tried too many times")
+		return false
+	end
+	if part then
+		local PartParent = part.Parent
+		if PartParent and PartParent ~= workspace then
+			local FHum = PartParent:FindFirstChildWhichIsA("Humanoid")
+			if not FHum then
+				recursive = recursive + 1
+				return CheckForHumanoid(PartParent, recursive)
+			elseif FHum.Health > 0 then
+				return FHum, PartParent
+			else
+				return false
+			end
+		else
+			return false
+		end
+	else
+		return false
+	end
+end
+
+local function ReturnHumanoidData(hitpart)
+	local Humanoid, Character = CheckForHumanoid(hitpart)
+	local Player = Players:GetPlayerFromCharacter(Character)
+	local IsHorse = false
+	if Character and (Character.Name == "Horse" or Humanoid:FindFirstAncestor("Horse")) then
+		IsHorse = true
+	end
+	return Humanoid, Character, Player, IsHorse
+end
+
+local function CheckTick(TickSent, HeartbeatTime)
+	if HeartbeatTime > 0.013 then
+		Tick = tick()
+		return true
+	elseif TickSent - Tick > 0.007 then
+		Tick = tick()
+		return true
+	else
+		return false
+	end
+end
+
+
+
+local function TweenCannonRecoil(Cannon)
+	local All = Cannon:GetDescendants()
+	local CannonRoot = Cannon.Chassis.CannonRoot
+	local ElevatedParts = Cannon.ElevatedParts
+	local Muzzle = ElevatedParts.Muzzle
+	local Thumbhole = ElevatedParts.Thumbhole
+	local MoveEnabled = Cannon.Values.MoveEnabled
+	local Setting = Cannon.Settings.Features:FindFirstChild("EnableCannonRecoil")
+	local RootTween
+	local LWCFrame
+	local RWCFrame
+	local RootCFrame
+	if (Cannon.Name == "6 lber. Cannon" or Cannon.Name == "5 in. Howitzer" or Cannon.Name == "12 lber. Cannon") and Setting and Setting.Value then	
+		local LWheelRoot = Cannon.LeftWheel.LWheelRoot
+		local RWheelRoot = Cannon.RightWheel.RWheelRoot
+		MoveEnabled.Value = false
+		
+		for i =1, #All do
+			if All[i]:IsA("BasePart") then
+				if All[i].Parent ~= Cannon.LeftWheel and All[i].Parent ~= Cannon.RightWheel and All[i] ~= CannonRoot then
+					MakeWeld(All[i], CannonRoot, nil, CannonRoot)
+					All[i].Anchored = false
+				end
+			end
+		end
+		local LWheelChildren = Cannon.LeftWheel:GetChildren()
+		for i=1, #LWheelChildren do
+			if LWheelChildren[i] ~= LWheelRoot then
+				MakeWeld(LWheelChildren[i], LWheelRoot, nil, LWheelRoot)
+				LWheelChildren[i].Anchored = false
+			end
+		end
+		local RWheelChildren = Cannon.RightWheel:GetChildren()
+		for i=1, #RWheelChildren do
+			if RWheelChildren[i] ~= RWheelRoot then
+				MakeWeld(RWheelChildren[i], RWheelRoot, nil, RWheelRoot)
+				RWheelChildren[i].Anchored = false
+			end
+		end
+		
+		LWheelRoot.CFrame = CannonRoot.CFrame * Cannon.Values.LWheelCFrame.Value
+		RWheelRoot.CFrame = CannonRoot.CFrame * Cannon.Values.RWheelCFrame.Value
+		
+		LWCFrame = LWheelRoot.CFrame
+		RWCFrame = RWheelRoot.CFrame
+		RootCFrame = CannonRoot.CFrame
+		
+		local TweenBackRandom = math.random(120, 180)/100
+		local Distance = 6
+		local Radius = 150
+		if Cannon.Name == "6 lber. Cannon" then
+			Distance = 9
+			Radius = 170
+		end
+		local TweenInformation = TweenInfo.new(TweenBackRandom, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, 0)
+		
+		RootTween = TweenService:Create(CannonRoot, TweenInformation, {CFrame = CannonRoot.CFrame:ToWorldSpace(CFrame.new(0,0,Distance))})
+		local LeftWheelTween = TweenService:Create(LWheelRoot, TweenInformation, {CFrame = LWheelRoot.CFrame:ToWorldSpace(CFrame.new(0,0,Distance)) * CFrame.Angles(math.rad(-Radius),0,0)})
+		
+		local RightWheelTween = TweenService:Create(RWheelRoot, TweenInformation, {CFrame = RWheelRoot.CFrame:ToWorldSpace(CFrame.new(0,0,-Distance)) * CFrame.Angles(math.rad(Radius),0,0)})
+		RootTween:Play()
+		LeftWheelTween:Play()
+		RightWheelTween:Play()
+	end
+	Thumbhole.Sparks.Enabled = false
+	local RandomFire = CannonFire[math.random(1, #CannonFire)]
+	if Cannon.Name == "8 in. Mortar" then
+		RandomFire = MortarFire[math.random(1, #MortarFire)]
+	end
+	
+	Muzzle.Fire.SoundId = RandomFire.SoundId
+	
+	if Cannon.Name == "6 lber. Cannon" then
+		Muzzle.Fire.PlaybackSpeed = math.random(90,130)/100
+		Muzzle.Fire2.PlaybackSpeed = math.random(100, 130)/100
+	else
+		Muzzle.Fire.PlaybackSpeed = math.random(70,110)/100
+		Muzzle.Fire2.PlaybackSpeed = math.random(80,120)/100
+	end
+	Muzzle.Fire.Volume = math.random(30, 50)/10
+	
+	PlaySoundWithDistance(Muzzle.Fire, Muzzle.Position)
+	PlaySoundWithDistance(Muzzle.Fire2, Muzzle.Position)
+	for i,v in pairs(Muzzle:GetChildren()) do
+		if v:IsA("ParticleEmitter") then
+			v:Emit(v.Rate)
+		elseif v:IsA("SpotLight") or v:IsA("PointLight") or v:IsA("SurfaceLight") then
+			v.Enabled = true
+		end
+	end
+	Thumbhole.Smoke:Emit(Thumbhole.Smoke.Rate)
+	wait(0.2)
+	
+	for i,v in pairs(Muzzle:GetChildren()) do
+		if v:IsA("SpotLight") or v:IsA("PointLight") or v:IsA("SurfaceLight") then
+			v.Enabled = false
+		end
+	end
+	if (Cannon.Name == "6 lber. Cannon" or Cannon.Name == "5 in. Howitzer" or Cannon.Name == "12 lber. Cannon") and Setting and Setting.Value then
+		local LWheelRoot = Cannon.LeftWheel.LWheelRoot
+		local RWheelRoot = Cannon.RightWheel.RWheelRoot
+		
+		local ReTweenInformation = TweenInfo.new(6, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, 0, false, 0)
+		local RootReTween = TweenService:Create(CannonRoot, ReTweenInformation, {CFrame = RootCFrame})
+		local LeftWheelReTween = TweenService:Create(LWheelRoot, ReTweenInformation, {CFrame = LWCFrame})
+		local RightWheelReTween = TweenService:Create(RWheelRoot, ReTweenInformation, {CFrame = RWCFrame})
+		
+		RootTween.Completed:Wait()
+		wait(1)
+		RightWheelReTween:Play()
+		LeftWheelReTween:Play()
+		RootReTween:Play()
+		RootReTween.Completed:Wait()
+		for i =1, #All do
+			if All[i]:IsA("BasePart") then
+				All[i].Anchored = true
+			elseif All[i]:IsA("Weld") then
+				All[i]:Destroy()
+			end
+		end
+	end
+	
+	MoveEnabled.Value = true
+end
+
+local function makeEffectsOrRecoil(Object)
+	local Tool = Object:FindFirstChildWhichIsA("Model")
+	local Muzzle = nil
+	local SideBlast = nil
+	if Object.Name == "Gatling Gun" then
+		Muzzle = Object.ElevatedParts.Muzzle
+		local AmmunitionLeft = Object.Values.AmmunitionLeft
+		coroutine.resume(coroutine.create(function()
+			local Click = Object.ElevatedParts.Handle.HandleRotation.Click:Clone()
+			Debris:AddItem(Click, 5)
+			Click.Parent = Object.ElevatedParts.Handle.HandleRotation
+			Click:Play()
+			if AmmunitionLeft.Value > 0 then
+				local FireSound = Muzzle.Fire:Clone()
+				Debris:AddItem(FireSound, 5)
+				FireSound.PlaybackSpeed = math.random(90,110)/100
+				FireSound.Volume = math.random(20,50)/10
+				FireSound.Parent = Muzzle
+				FireSound:Play()
+				for i,v in pairs(Muzzle:GetChildren()) do 
+					if v:IsA("ParticleEmitter") then
+						v:Emit(v.Rate * 0.1)
+					end
+				end
+			end
+		end))
+		return
+	elseif Object.Name == "LeftPart" or Object.Name == "RightPart" then
+		Muzzle = Object
+		local RandomLaunch = LaunchSound[math.random(1, #LaunchSound)]:Clone()
+		Debris:AddItem(RandomLaunch, 5)
+		RandomLaunch.Parent = Muzzle
+		RandomLaunch.PlaybackSpeed = math.random(90,110)/100
+		RandomLaunch.Volume = math.random(180, 230)/100
+		RandomLaunch:Play()
+		return
+	elseif Object:IsA("Model") and string.find(Object.Name, "Rocket") then
+		Muzzle = Object.Muzzle
+		local Particles = Muzzle:GetChildren()
+		for i,v in pairs(Particles) do
+			if v:IsA("ParticleEmitter") then
+				v.Enabled = true
+			end
+		end
+		local RandomFuse = FuseSound[math.random(1, #FuseSound)]:Clone()
+		Debris:AddItem(RandomFuse, 30)
+		RandomFuse.Parent = Muzzle
+		RandomFuse.PlaybackSpeed = math.random(90,110)/100
+		RandomFuse.Volume = math.random(200, 240)/100
+		RandomFuse:Play()
+		return
+	end
+	if Tool.Name == "Musket" then
+		local RandomFire = MusketFire[math.random(1, #MusketFire)]
+		Muzzle = Tool.Muzzle
+		SideBlast = Tool.SideBlast
+		
+		Muzzle.Fire.PlaybackSpeed = math.random(80,130)/100
+		Muzzle.Fire.SoundId = RandomFire.SoundId
+		Muzzle.Fire.Volume = math.random(150, 180)/100
+		
+		Muzzle.DefaultFire.PlaybackSpeed = math.random(80,120)/100
+	elseif Tool.Name == "Pistol" then
+		local RandomFire = PistolFire[math.random(1, #PistolFire)]
+		Muzzle = Tool.Muzzle
+		SideBlast = Tool.SideBlast
+
+		Muzzle.Fire.PlaybackSpeed = math.random(110,160)/100
+		Muzzle.Fire.SoundId = RandomFire.SoundId
+		Muzzle.Fire.Volume = math.random(150,180)/100
+		
+		Muzzle.DefaultFire.PlaybackSpeed = math.random(140,190)/100
+	elseif Tool.Name == "Arcus" then
+		local RandomFire = ArcusFire[math.random(1, #ArcusFire)]
+		Muzzle = Tool.Muzzle
+		SideBlast = Tool.SideBlast
+
+		Muzzle.Fire.PlaybackSpeed = math.random(110,160)/100
+		Muzzle.Fire.SoundId = RandomFire.SoundId
+		Muzzle.Fire.Volume = math.random(150,180)/100
+
+		Muzzle.DefaultFire.PlaybackSpeed = math.random(80,120)/100
+	elseif Tool.Name == "Carbine" then
+		local RandomFire = CarbineFire[math.random(1, #CarbineFire)]
+		Muzzle = Tool.Muzzle
+		SideBlast = Tool.SideBlast
+
+		Muzzle.Fire.PlaybackSpeed = math.random(80,130)/100
+		Muzzle.Fire.SoundId = RandomFire.SoundId
+		Muzzle.Fire.Volume = math.random(180, 230)/100
+
+		Muzzle.DefaultFire.PlaybackSpeed = math.random(110,130)/100
+	elseif Tool.Name == "Rifle" then
+		local RandomFire = RifleFire[math.random(1, #RifleFire)]
+		Muzzle = Tool.Muzzle
+		SideBlast = Tool.SideBlast
+
+		Muzzle.Fire.PlaybackSpeed = math.random(80,110)/100
+		Muzzle.Fire.SoundId = RandomFire.SoundId
+		Muzzle.Fire.Volume = math.random(150, 180)/100
+
+		Muzzle.DefaultFire.PlaybackSpeed = math.random(80,120)/100
+	end
+	coroutine.resume(coroutine.create(function()
+		Muzzle.Fire:Play()
+		Muzzle.DefaultFire:Play()
+		
+		local MuzzleClone = Instance.new("Part")
+		Debris:AddItem(MuzzleClone, 20)
+		MuzzleClone.Anchored = true
+		MuzzleClone.CanCollide = false
+		MuzzleClone.Transparency = 1
+		MuzzleClone.CFrame = Muzzle.CFrame
+		MuzzleClone.Size = Muzzle.Size
+		MuzzleClone.Parent = workspace
+		
+		local SideBlastClone = MuzzleClone:Clone()
+		Debris:AddItem(SideBlastClone, 20)
+		SideBlastClone.CFrame = SideBlast.CFrame
+		SideBlastClone.Size = SideBlast.Size
+		SideBlastClone.Parent = workspace
+		
+		for i,v in pairs(Muzzle:GetChildren()) do
+			if v:IsA("ParticleEmitter") then
+				local vClone = v:Clone()
+				vClone.Parent = MuzzleClone
+				vClone:Emit(vClone.Rate * 0.1)
+			end
+		end
+		local FlashClone = Muzzle.Flash:Clone()
+		FlashClone.Parent = MuzzleClone
+		FlashClone.Enabled = true
+		for i,v in pairs(SideBlast:GetChildren()) do
+			if v:IsA("ParticleEmitter") then
+				local vClone = v:Clone()
+				vClone.Parent = SideBlastClone
+				vClone:Emit(vClone.Rate * 0.1)
+			end
+		end
+		wait(0.1)
+		FlashClone.Enabled = false
+	end))
+end
+
+local function DoRecoil(ProvidedNumber)
+	coroutine.resume(coroutine.create(function()
+		local RecoilNumber = ProvidedNumber
+		local Negative = false
+		for i=1, ProvidedNumber * 10 do
+			RunService.RenderStepped:Wait()
+			if RecoilNumber <= 0 then return end
+			local Recoil = (math.random(math.abs(RecoilNumber), math.abs(RecoilNumber) * 100))/100
+			if Negative then
+				Recoil = -Recoil
+			end
+			Camera.CFrame = Camera.CFrame * CFrame.Angles(math.rad(math.random(-1,1) * Recoil), math.rad(math.random(-1,1) * Recoil), 0)
+			if Recoil > 1 or Recoil < -1 then
+				RecoilNumber = RecoilNumber - 0.125
+			else
+				RecoilNumber = RecoilNumber - 0.075
+			end
+			if Negative then
+				Negative = false
+			else
+				Negative = true
+			end
+		end
+	end))
+end
+
+local function MakeExplosion(radiusexplosion, position, cannon)
+	local stuff = string.pack("ffff", position.X, position.Y, position.Z, radiusexplosion)
+	ProjectileHit:FireServer("ffff", stuff, 3, cannon)
+end
+
+local function CheckScreen(position, ProjectileName) -- not used once but may be handy
+	local Camera = workspace.CurrentCamera
+	local vector, onScreen = Camera:WorldToViewportPoint(position)
+	if onScreen then
+		local origin = Camera.CFrame.Position
+		local ray = Ray.new(origin, position - origin)
+		local hit = workspace:FindPartOnRay(ray)
+		if hit and hit.Name ~= ProjectileName then return false end
+		if (origin - position).Magnitude >= 1000 then return false end
+	else
+		return false
+	end
+	return true
+end
+
+local function canTeamKill(targetchar, tksetting)
+	local targetplr = Players:GetPlayerFromCharacter(targetchar)
+	if not targetplr or tksetting or targetplr == LocalPlayer or (not tksetting and targetplr.Team ~= LocalPlayer.Team) then --dummy
+		return true
+	else
+		return false
+	end
+end
+
+local function HandleIntegrity(part, shotdamage, shotintegrity, playerowner)
+	if not part or part == workspace then return false end --return false on an undestroyable object
+	if part:IsA("Model") then
+		local Integrity = part:FindFirstChild("Integrity")
+		local destroyedbool
+		local integrityvalue
+		if Integrity and Integrity:IsA("NumberValue") then
+			if Integrity.Value > 0 then
+				local startingintegrity = Integrity.Value
+				integrityvalue = Integrity.Value - shotdamage
+				Integrity.Value = integrityvalue
+				if integrityvalue < 0 then --overdamage, structure destroyed
+					destroyedbool = true --destroyed structure
+					integrityvalue = 0 --final integral value
+					shotintegrity = shotintegrity - startingintegrity --integrity of shot is the shot health minus the whole integrity
+				else --underdamage, shot destroyed
+					destroyedbool = false --standing structure
+					shotintegrity = 0 --self explanatory
+				end
+			else
+				destroyedbool = true
+			end
+			if integrityvalue and playerowner then
+				HandleIntegrityEvent:FireServer(part, integrityvalue)
+			end
+			return part, shotintegrity, destroyedbool
+		else
+			return HandleIntegrity(part.Parent, shotdamage, shotintegrity, playerowner)
+		end
+	else
+		return HandleIntegrity(part.Parent, shotdamage, shotintegrity, playerowner)
+	end
+end
+
+local function SearchForMaterial(passedmaterial)
+	for i,v in pairs(MaterialsTable) do
+		if table.find(v, passedmaterial) then
+			return i
+		end
+	end
+	return false
+end
+
+
+
+local function SplashEffect(player, hitpart, position, particlevector, shotfolder, rolloverride)
+	local particlefolder = GeneralReplicated.ImpactParts.Ground
+	local soundfolder = GeneralReplicated.ImpactSounds.Ground
+	local particlepart
+	local killRadius = shotfolder.KillRadius.Value
+	local impactRadius = shotfolder.ImpactRadius.Value
+	local shotSize = shotfolder.ShotSize.Value
+
+	local ReturnedMaterial = SearchForMaterial(hitpart.Material)
+
+	if ReturnedMaterial then
+		particlefolder = GeneralReplicated.ImpactParts:FindFirstChild(ReturnedMaterial)
+		soundfolder = GeneralReplicated.ImpactSounds:FindFirstChild(ReturnedMaterial)
+	end
+	
+	if rolloverride then -- rolling roundshots
+		particlepart = GeneralReplicated.ImpactParts.Ground.RollHit:Clone()
+		soundfolder = soundfolder.Firearms
+		killRadius = 2
+		impactRadius = 6	
+	elseif shotSize == "Large" then --unused in realistic artillery
+		particlepart = particlefolder.LargeHit:Clone()
+		soundfolder = soundfolder.Artillery
+	elseif shotSize == "Small" then --canister shots
+		particlepart = particlefolder.SmallHit:Clone()
+		soundfolder = soundfolder.Firearms
+	elseif shotSize == "Explosion" then -- all shells
+		particlepart = GeneralReplicated.ImpactParts.ExplosionHit:Clone()
+		soundfolder = ArtilleryReplicated.Explosions
+		local IgnoreList = {}
+		for i=1, 30 do
+			coroutine.resume(coroutine.create(function()
+				local lifetime = math.random(10, 30)/100
+				local Fragment = RocketFragment:Clone()
+				Fragment.Position = position
+				Fragment.Parent = workspace.CurrentCamera
+				table.insert(IgnoreList, Fragment)
+				Debris:AddItem(Fragment, 4)
+				local Velocity = (Fragment.CFrame:VectorToWorldSpace(Vector3.new(math.random(-100,100)/100,math.random(10,100)/100,math.random(-100,100)/100))) * 4
+				local NewStartTick = tick()
+				repeat
+					RunService.Heartbeat:Wait()
+					local ray = Ray.new(Fragment.Position,Velocity)
+					local hit,position = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+					Fragment.Position = position
+					Velocity = Velocity - Vector3.new(0, 0.05,0)
+					if hit then
+						Debris:AddItem(Fragment, 2)
+						return
+					end
+				until tick() - NewStartTick >= lifetime
+			end))
+		end
+	else --medium is explicitly excluded from the list, becomes default
+		particlepart = particlefolder.MediumHit:Clone()
+		soundfolder = soundfolder.Artillery
+	end
+	
+	
+	--splash damage for an explosion
+	if player == LocalPlayer then
+		local overlap = OverlapParams.new()
+		overlap.FilterType = Enum.RaycastFilterType.Exclude
+		local Box = workspace:GetPartBoundsInBox(CFrame.new(position), Vector3.new(impactRadius*2, impactRadius*2, impactRadius*2), overlap)
+		local HumanoidBlacklist = {}
+		
+		for i,parts in pairs(Box) do
+			local Humanoid, Char = CheckForHumanoid(parts)
+			
+			if Humanoid and not table.find(HumanoidBlacklist, Humanoid) and Humanoid.Health ~= 0 and parts.Name == "Torso" and returnMagnitude(parts.Position, position) <= impactRadius then
+				local dmg = 40
+				if returnMagnitude(parts.Position, position) > killRadius and returnMagnitude(parts.Position, position) <= impactRadius then -- assuming the distance is greater than the kill radius
+					dmg = 40 
+				end
+				table.insert(HumanoidBlacklist, Humanoid)
+				ReplicatedEvents.HumanoidDamage:FireServer(Humanoid.Parent, packStrings(5, dmg, 2, (parts.Position - position).Unit.X, (parts.Position - position).Unit.Y, (parts.Position - position).Unit.Z))
+			end
+		end
+	end
+	
+	particlepart.Parent = workspace.CurrentCamera
+	Debris:AddItem(particlepart)
+	soundfolder = soundfolder:GetChildren()
+	particlepart.CFrame = CFrame.lookAt(position, position + particlevector)
+
+	local Magnitude = returnMagnitude(position)
+	if Magnitude <= 30 then
+		DoRecoil(-Magnitude/6 + 5)
+	end
+	
+	coroutine.resume(coroutine.create(function()
+		if shotSize == "Explosion" then
+			local Default = particlepart:WaitForChild("DefaultExplosion")
+			Default.PlaybackSpeed = math.random(80,120)/100
+			PlaySoundWithDistance(Default, particlepart.Position)
+		end
+		local randomsound = soundfolder[math.random(1, #soundfolder)]:Clone()
+		randomsound.Parent = particlepart
+		randomsound.PlaybackSpeed = math.random(80,120)/100
+		if shotSize == "Medium" then
+			randomsound.Volume = 4
+		else
+			randomsound.Volume = 2
+		end
+		if shotSize ~= "Roll" then
+			PlaySoundWithDistance(randomsound, particlepart.Position)
+		end
+		local Effect = particlepart:GetChildren()
+		for i=1, #Effect do
+			if Effect[i]:IsA("ParticleEmitter") then
+				Effect[i]:Emit(Effect[i].Rate)
+			end
+		end
+	end))
+end
+
+
+
+local function FireProjectile(player, Cannon, Shot, Seed, startingCFrame)
+	local Blacklist = {}
+	local ShotList = {}
+	local Settings = Cannon.Settings
+	local EnableTK = Settings.Features.EnableTK.Value
+	
+	local ShotSettings = Cannon.Settings[Shot]
+	local Projectile = ShotSettings.ProjectileReference.Value
+	if not Projectile and ArtilleryReplicated.Projectiles:FindFirstChild(Shot) then
+		Projectile = ArtilleryReplicated.Projectiles[Shot]
+	else
+		warn(Cannon.Name .. " has an invalid projectile reference for " .. Shot .. "! Please use cooldeath49's diagnostic plugin for assistance.")
+		return
+	end
+	local Accuracy = ShotSettings.AccuracyAt200.Value / 200
+	for i=1, ShotSettings.PelletCount.Value do
+		local TableProjectile = Projectile:Clone()
+		local vector = startingCFrame:VectorToWorldSpace(Vector3.new(math.random(-Accuracy * 100,Accuracy * 100)/100,math.random(-Accuracy * 100,Accuracy * 100)/100,-2))
+		TableProjectile:PivotTo(CFrame.lookAt(startingCFrame.Position, startingCFrame.Position + vector))
+
+		TableProjectile.Parent = workspace.CurrentCamera
+		table.insert(Blacklist, TableProjectile)
+		table.insert(ShotList, TableProjectile)
+	end
+	
+	local Magnitude = returnMagnitude(startingCFrame.Position)
+	if Magnitude <= 30 then
+		DoRecoil(-Magnitude/6 + 5)
+	end
+
+	local TravelKill = ShotSettings.TravelKillRadius.Value
+	local ImpactRadius = ShotSettings.ImpactRadius.Value
+	local KillRadius = ShotSettings.KillRadius.Value
+	local AccuracyAt200 = ShotSettings.AccuracyAt200.Value
+	local ShotSpeed = ShotSettings.SpeedPerFrame.Value
+	local ShotDrop = ShotSettings.DropPerFrame.Value
+	local MaxBounce = ShotSettings.MaxBounce.Value
+	local MaxImpactAngle = ShotSettings.MaxImpactAngle.Value
+	local useAlgorithm = ShotSettings.UseComplexBounceAlgorithm.Value
+	local canRoll = ShotSettings.CanRoll.Value
+	local IntegrityDamage = ShotSettings.IntegrityDamage.Value
+	local ShotSize = ShotSettings.ShotSize.Value
+	
+	table.insert(Blacklist, Cannon)
+	local CastParams = RaycastParams.new()
+	CastParams.FilterType = Enum.RaycastFilterType.Exclude
+	CastParams.FilterDescendantsInstances = {Blacklist}
+	CastParams.IgnoreWater = true
+	
+	for i,v in pairs(ShotList) do
+		--new variables
+		local PreviousAngleOfImpact = 90
+		local BounceTime = 0
+		local Timer = 0
+		local Distance = 0
+		local ProjectileLoop = nil
+		local HumanoidBlacklist = {}
+		local LoopProjectile = ShotList[i]
+		local Speed = ShotSpeed
+		local ShotIntegrity = IntegrityDamage
+		local shotTick = tick()
+		ProjectileLoop = RunService.Stepped:Connect(function()
+		--while true do
+			--wait(1)
+			local tickCompensation = math.floor((tick() - shotTick) * 60) --compensates for laggy physics
+			if tickCompensation == 0 then
+				tickCompensation = 1
+			end
+			shotTick = tick()
+			for i=1, tickCompensation do --begin actual loop
+				local ForwardCastHit
+				local MoreHumanoids = false
+				local Recursions = 0
+				repeat --check surroundings of projectile for kills
+					MoreHumanoids = false
+					ForwardCastHit = workspace:Raycast(LoopProjectile:GetPivot().Position, LoopProjectile:GetPivot().LookVector * Speed, CastParams)
+					if ForwardCastHit then
+						local Humanoid, Char = CheckForHumanoid(ForwardCastHit.Instance)
+						if Humanoid and not table.find(HumanoidBlacklist, Humanoid) then
+							table.insert(Blacklist, Char)
+							table.insert(HumanoidBlacklist, Humanoid)
+							CastParams.FilterDescendantsInstances = {Blacklist}
+							if player == LocalPlayer and canTeamKill(Char, EnableTK) then
+								ReplicatedEvents.HumanoidDamage:FireServer(Humanoid.Parent, packStrings(5, 100, 1, LoopProjectile:GetPivot().LookVector.X, LoopProjectile:GetPivot().LookVector.Y, LoopProjectile:GetPivot().LookVector.Z))
+							end
+							MoreHumanoids = true
+							ForwardCastHit = workspace:Raycast(LoopProjectile:GetPivot().Position, LoopProjectile:GetPivot().LookVector * Speed, CastParams)
+						end
+					end
+					Recursions += 1
+				until not MoreHumanoids or Recursions > 50
+
+				if player == LocalPlayer and TravelKill > 0 then --if there is a travel kill radius
+					local Region = workspace:GetPartBoundsInBox(LoopProjectile:GetPivot(), Vector3.new(TravelKill,TravelKill,TravelKill)) -- travel kill radius
+					for i,v in pairs(Region) do
+						local Humanoid = CheckForHumanoid(v)
+						if Humanoid and not table.find(HumanoidBlacklist, Humanoid) and canTeamKill(Humanoid.Parent, EnableTK) then
+							table.insert(HumanoidBlacklist, Humanoid)
+							ReplicatedEvents.HumanoidDamage:FireServer(Humanoid.Parent, packStrings(5, 100, 1, LoopProjectile:GetPivot().LookVector.X, LoopProjectile:GetPivot().LookVector.Y, LoopProjectile:GetPivot().LookVector.Z))
+						end
+					end
+				end
+				
+				if ForwardCastHit and ForwardCastHit.Instance.CanCollide and ForwardCastHit.Instance.Transparency ~= 1 then --hit something
+					LoopProjectile:TranslateBy(ForwardCastHit.Position - LoopProjectile:GetPivot().Position)
+					BounceTime += 1
+
+					local VelocityVector = LoopProjectile:GetPivot().LookVector * Speed
+					local UpVector = ForwardCastHit.Normal
+					local RightVector = LoopProjectile:GetPivot().RightVector
+					local LookVector = UpVector:Cross(RightVector)
+					local reflectNormal = (VelocityVector - (2 * VelocityVector:Dot(UpVector) * UpVector))
+					local UseStraightCast = false
+					
+					if IntegrityDamage > 0 then
+						local returnedpart, remaininghealthofshot, destroyedbool = HandleIntegrity(ForwardCastHit.Instance, IntegrityDamage, ShotIntegrity, player == LocalPlayer)
+						if returnedpart then
+							SplashEffect(player, ForwardCastHit.Instance, ForwardCastHit.Position, UpVector, ShotSettings)
+							if remaininghealthofshot > 20 then
+								ShotIntegrity = remaininghealthofshot
+								Speed = Speed * (remaininghealthofshot/IntegrityDamage)
+							else
+								Debris:AddItem(LoopProjectile)
+								ProjectileLoop:Disconnect()
+							end
+						elseif useAlgorithm then --integrity and bounce trajectory calculation
+							local averageNormal = Vector3.new(0,0,0) --calculate complex bounce trajectory 
+							local count = 0
+							local PointParams = RaycastParams.new()
+							PointParams.FilterType = Enum.RaycastFilterType.Exclude
+							PointParams.FilterDescendantsInstances = {Blacklist}
+							PointParams.IgnoreWater = true
+							for i,vector in pairs(arrayPoints) do
+								local PointRay = workspace:Raycast(LoopProjectile:GetPivot():PointToWorldSpace(vector + UpVector * 3), -UpVector * 6, PointParams)
+								if PointRay then
+									count += 1
+									averageNormal = averageNormal + PointRay.Normal
+								else
+									print("Vector " .. vector.X .. vector.Y .. vector.Z .. " could not find an intersection point")
+								end
+							end
+							averageNormal /= count
+							
+							if (VelocityVector - (2 * VelocityVector:Dot(averageNormal) * averageNormal)).Y > 0 then
+								reflectNormal = (VelocityVector - (2 * VelocityVector:Dot(averageNormal) * averageNormal))
+							end
+						end
+					elseif useAlgorithm then --integrity and bounce trajectory calculation
+						local averageNormal = Vector3.new(0,0,0) --calculate complex bounce trajectory 
+						local count = 0
+						local PointParams = RaycastParams.new()
+						PointParams.FilterType = Enum.RaycastFilterType.Exclude
+						PointParams.FilterDescendantsInstances = {Blacklist}
+						PointParams.IgnoreWater = true
+						for i,vector in pairs(arrayPoints) do
+							local PointRay = workspace:Raycast(LoopProjectile:GetPivot():PointToWorldSpace(vector + UpVector * 3), -UpVector * 6, PointParams)
+							if PointRay then
+								count += 1
+								averageNormal = averageNormal + PointRay.Normal
+							else
+								print("Vector " .. vector.X .. vector.Y .. vector.Z .. " could not find an intersection point")
+							end
+						end
+						averageNormal /= count
+						
+						if (VelocityVector - (2 * VelocityVector:Dot(averageNormal) * averageNormal)).Y > 0 then
+							reflectNormal = (VelocityVector - (2 * VelocityVector:Dot(averageNormal) * averageNormal))
+						end
+					end
+					
+					--post integrity calculation
+					local AngleOfImpact = math.abs(90 - math.deg(math.acos(UpVector.Unit:Dot(reflectNormal.Unit))))
+					PreviousAngleOfImpact = AngleOfImpact
+					Speed = Speed/(1 + (AngleOfImpact^1.5)/28)
+					
+					
+					if Shot == "Shell" then --detonate shell on impact
+						SplashEffect(player, ForwardCastHit.Instance, ForwardCastHit.Position, UpVector, ShotSettings)
+						Debris:AddItem(LoopProjectile)
+						ProjectileLoop:Disconnect()
+					else --begin calculating bounce equation
+						if Speed > 2 and Shot == "Roundshot" then
+							SplashEffect(player, ForwardCastHit.Instance, ForwardCastHit.Position, UpVector, ShotSettings)
+						else
+							SplashEffect(player, ForwardCastHit.Instance, ForwardCastHit.Position, UpVector, ShotSettings)
+						end
+						if AngleOfImpact > MaxImpactAngle or Speed < 0.1 or BounceTime > MaxBounce then
+							Debris:AddItem(LoopProjectile)
+							print("Disconnected due to high impact, low speed, or excess bounce") 
+							ProjectileLoop:Disconnect()
+							table.remove(ShotList, i)
+						elseif AngleOfImpact > 1.75 and Speed > 1.25 then
+							reflectNormal = Vector3.new(reflectNormal.X, reflectNormal.Y/1.25, reflectNormal.Z)
+							--LoopProjectile:PivotTo(CFrame.lookAt(LoopProjectile:GetPivot().Position, LoopProjectile:GetPivot().Position + reflectNormal))
+						else
+							--LoopProjectile:PivotTo(CFrame.lookAt(LoopProjectile:GetPivot().Position, LoopProjectile:GetPivot().Position + LookVector))
+						end
+						LoopProjectile:PivotTo(CFrame.lookAt(LoopProjectile:GetPivot().Position, LoopProjectile:GetPivot().Position + reflectNormal))
+						
+					end
+				else
+					if canRoll then --rolling algorithm
+						local DownCastHit = workspace:Raycast(LoopProjectile:GetPivot():PointToWorldSpace(Vector3.new(0,4,0)), -LoopProjectile:GetPivot().UpVector * 6, CastParams)
+						if DownCastHit and (PreviousAngleOfImpact < 2 or Speed < 1.25) and DownCastHit.Instance.CanCollide and DownCastHit.Instance.Transparency ~= 1 then
+							if Speed <= 0.5 then
+								print("Roundshot fired ended, low speed")
+								Debris:AddItem(LoopProjectile)
+								ProjectileLoop:Disconnect()
+							else
+								Speed = Speed/(1.01 + (0.01 * (-Speed/8 + 1)))
+							end
+							local FrontVector = -LoopProjectile:GetPivot().RightVector:Cross(DownCastHit.Normal)
+							local Stretch = GeneralReplicated.ImpactParts.Ground.RoundshotStretch:Clone()
+							Stretch.CFrame = CFrame.lookAt(DownCastHit.Position + (LoopProjectile:GetPivot().LookVector * Speed/2), DownCastHit.Position + FrontVector)
+							Stretch.Size = Vector3.new(Stretch.Size.X, Stretch.Size.Y, Speed)
+							Stretch.Parent = workspace
+							Debris:AddItem(Stretch)
+							
+							LoopProjectile:TranslateBy(LoopProjectile:GetPivot().LookVector * Speed)
+							--LoopProjectile:GetPivot().Position = LoopProjectile:GetPivot().Position + (LoopProjectile:GetPivot().LookVector * Speed)
+							LoopProjectile:PivotTo(CFrame.lookAt(DownCastHit.Position, DownCastHit.Position + FrontVector))
+							Distance = Distance + Speed --what is this? look at this later
+							if Distance > 4 then
+								SplashEffect(player, DownCastHit.Instance, DownCastHit.Position, DownCastHit.Normal, ShotSettings, true)
+								Distance = 0
+							end		
+						else
+							LoopProjectile:TranslateBy(LoopProjectile:GetPivot().LookVector * Speed)
+							--LoopProjectile:GetPivot().Position = LoopProjectile:GetPivot().Position + (LoopProjectile:GetPivot().LookVector * Speed)
+							LoopProjectile:PivotTo(CFrame.lookAt(LoopProjectile:GetPivot().Position, (LoopProjectile:GetPivot().Position + (LoopProjectile:GetPivot().LookVector * Speed) - Vector3.new(0,ShotDrop * ShotSpeed/Speed,0))))
+						end
+					else
+						LoopProjectile:TranslateBy(LoopProjectile:GetPivot().LookVector * Speed)
+						--LoopProjectile:GetPivot().Position = LoopProjectile:GetPivot().Position + (LoopProjectile:GetPivot().LookVector * Speed)
+						LoopProjectile:PivotTo(CFrame.lookAt(LoopProjectile:GetPivot().Position, (LoopProjectile:GetPivot().Position + (LoopProjectile:GetPivot().LookVector * Speed) - Vector3.new(0,ShotDrop * ShotSpeed/Speed,0))))
+					end
+					
+				end
+				--begin the stupid calculations woohoo
+				local Relation = LoopProjectile:GetPivot():PointToObjectSpace(Character.Torso.Position)
+				if Relation.Z < 0 and Relation.Z > -Speed*60 and math.abs(Relation.X) <= 50 and not LoopProjectile.PrimaryPart:FindFirstChild("IncomingSound") then -- very cool beans it is in front and within distance, meaning within one second (*60) it will reach the player 
+					local Incoming = IncomingSound[math.random(1, #IncomingSound)]:Clone()
+					Incoming.Name = "IncomingSound"
+					Incoming.PlaybackSpeed = math.random(90, 110)/100
+					Incoming.Parent = LoopProjectile.PrimaryPart
+					Incoming:Play()
+					Debris:AddItem(Incoming, Incoming.TimeLength * 2)
+				end
+				Timer = Timer + tickCompensation
+				
+				if Timer > 600 then
+					print("Shot fired by ended, end by timer")
+					Debris:AddItem(LoopProjectile, 2)
+					ProjectileLoop:Disconnect()
+				end
+			end
+		end)
+	end
+end	
+
+local function CannonFireRealistic(player, Cannon, Shot, Seed) --messsy :3
+	local CannonRoot = Cannon.Chassis.CannonRoot
+	local ElevatedParts = Cannon.ElevatedParts
+	local Muzzle = ElevatedParts.Muzzle
+	local Thumbhole = ElevatedParts.Thumbhole
+	local RandomFire = Muzzle.RandomFire
+	local DefaultFire = Muzzle.DefaultFire
+	local LeftHinge = Cannon.Chassis.WheelAxle.LeftHinge
+	local RightHinge = Cannon.Chassis.WheelAxle.RightHinge
+	
+	if player == LocalPlayer and Cannon.Settings.Features.EnableRecoil.Value then --basically, the person who lit the cannon gets "control" of the recoil. 
+		--creates a bodyvelocity and gyro that gets parented to the cannon, and is controlled by the lit-player
+		--this is replicated to everyone so there's no issue there
+		local Velocity = Instance.new("BodyVelocity")
+		Velocity.Name = "CannonVelocity"
+		Velocity.MaxForce = Vector3.new(math.huge, 100, math.huge)
+		Velocity.P = 10000
+		Velocity.Parent = CannonRoot
+
+		local Gyro = Instance.new("BodyGyro")
+		Gyro.Name = "CannonGyro"
+		Gyro.MaxTorque = Vector3.new(120000, 1200, 1200)
+		Gyro.P = 50000
+		Gyro.D = 1000
+		Gyro.CFrame = CannonRoot.CFrame
+		Gyro.Parent = CannonRoot
+
+		local VelocityNumber = Instance.new("NumberValue") --BodyVelocity follows this number for the velocity of the "recoil" of the gun, really stupid
+		VelocityNumber.Value = 10
+
+		Thumbhole.Sparks.Enabled = true
+		Thumbhole.Fuse:Play()
+		Thumbhole.Fuse.Ended:Wait()
+		Thumbhole.Sparks.Enabled = false
+		
+		local ArtilleryLoop 
+		ArtilleryLoop = RunService.Stepped:Connect(function() --runservice stepped loop to calculate the recoil stuff
+			local UpVector = Vector3.new(0,2,0)
+			local DownRay = CannonRoot.CFrame.UpVector * -40
+			local BackRay = CannonRoot.CFrame.LookVector * -7
+			local Params = RaycastParams.new()
+			Params.FilterType = Enum.RaycastFilterType.Exclude
+			Params.FilterDescendantsInstances = {Cannon}
+			local Ray1 = workspace:Raycast(CannonRoot.CFrame:PointToWorldSpace(Vector3.new(0,0,6)), DownRay, Params)
+			local Ray2 = workspace:Raycast(CannonRoot.CFrame:PointToWorldSpace(Vector3.new(-2,0,0)), DownRay, Params)
+			local Ray3 = workspace:Raycast(CannonRoot.CFrame:PointToWorldSpace(Vector3.new(2,0,0)), DownRay, Params)
+			
+			if Ray1 and Ray2 and Ray3 and Ray1.Normal and Ray2.Normal and Ray3.Normal then
+				UpVector = ((Ray2.Position - Ray1.Position):Cross(Ray2.Position - Ray3.Position)).Unit
+			else
+				UpVector = Vector3.new(0,1,0)
+			end
+			if UpVector.Y <= 0.8 then
+				UpVector = Vector3.new(UpVector.X, 0.8, UpVector.Z)
+			end
+			local RightVector = Gyro.CFrame.LookVector:Cross(UpVector).Unit
+			Gyro.CFrame = CFrame.new() * CFrame.fromMatrix(CannonRoot.Position, RightVector, UpVector)
+
+			Velocity.Velocity = CannonRoot.CFrame:VectorToWorldSpace(Vector3.new(0,0,VelocityNumber.Value)) --reverse
+			LeftHinge.AngularVelocity = -VelocityNumber.Value/2
+			RightHinge.AngularVelocity = VelocityNumber.Value/2
+
+			Gyro.CFrame = Gyro.CFrame *CFrame.Angles(0, 0.005, 0) --left
+			Gyro.CFrame = Gyro.CFrame *CFrame.Angles(0, -0.005, 0) --right
+			
+			--the whole thing above basically calculates movement of cannon when recoiling
+		end)
+		FireProjectile(player, Cannon, Shot, Seed, Cannon.ElevatedParts.Muzzle.CFrame) --fire projectile part
+		
+		local VelocityInfo = TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local VelocityTween = TweenService:Create(VelocityNumber, VelocityInfo, {Value = 0})
+
+		local RotationWeld = Cannon.ElevatedParts.Rotation.RotationWeld
+		local Weld1Info = TweenInfo.new(0.1, Enum.EasingStyle.Linear)
+		local Weld2Info = TweenInfo.new(1.25, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out)
+		local Weld1Tween = TweenService:Create(RotationWeld, Weld1Info, {C0 = RotationWeld.C0 * CFrame.Angles(math.rad(-15),0,0)})
+		local Weld2Tween = TweenService:Create(RotationWeld, Weld2Info, {C0 = RotationWeld.C0})
+		
+		
+		if Cannon.Settings.Features.EnableBarrelRecoil.Value then
+			coroutine.resume(coroutine.create(function()
+				Weld1Tween:Play()
+				Weld1Tween.Completed:Wait()
+				Weld2Tween:Play()
+			end))
+		end
+		VelocityTween:Play()
+		
+		local RandomFireID = CannonFire[math.random(1, #CannonFire)].SoundId
+		RandomFire.SoundId = RandomFireID
+		RandomFire.PlaybackSpeed = math.random(70,110)/100
+		DefaultFire.PlaybackSpeed = math.random(80,120)/100
+		RandomFire.Volume = math.random(30, 50)/10
+		PlaySoundWithDistance(RandomFire, Muzzle.Position)
+		PlaySoundWithDistance(DefaultFire, Muzzle.Position)
+
+		for i,v in pairs(Muzzle:GetChildren()) do
+			if v:IsA("ParticleEmitter") then
+				v:Emit(v.Rate)
+			elseif v:IsA("SpotLight") or v:IsA("PointLight") or v:IsA("SurfaceLight") then
+				v.Enabled = true
+			end
+		end
+		Thumbhole.Smoke:Emit(Thumbhole.Smoke.Rate)
+
+		wait(0.2)
+
+		for i,v in pairs(Muzzle:GetChildren()) do
+			if v:IsA("SpotLight") or v:IsA("PointLight") or v:IsA("SurfaceLight") then
+				v.Enabled = false
+			end
+		end
+		VelocityTween.Completed:Connect(function()
+			ArtilleryLoop:Disconnect()
+			Gyro:Destroy()
+			Velocity:Destroy()
+			FireCannon:FireServer(Cannon)
+		end)				
+	else --this is what everyone else experiences besides the lit-player
+		Thumbhole.Sparks.Enabled = true
+		Thumbhole.Fuse:Play()
+		Thumbhole.Fuse.Ended:Wait()
+		Thumbhole.Sparks.Enabled = false
+
+		FireProjectile(player, Cannon, Shot, Seed, Cannon.ElevatedParts.Muzzle.CFrame)
+		local VelocityNumber = Instance.new("NumberValue") --BodyVelocity follows this number for the velocity of the "recoil" of the gun, really stupid
+		VelocityNumber.Value = 10
+		local VelocityInfo = TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local VelocityTween = TweenService:Create(VelocityNumber, VelocityInfo, {Value = 0})
+
+		local RotationWeld = Cannon.ElevatedParts.Rotation.RotationWeld
+		local Weld1Info = TweenInfo.new(0.1, Enum.EasingStyle.Linear)
+		local Weld2Info = TweenInfo.new(1.25, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out)
+		local Weld1Tween = TweenService:Create(RotationWeld, Weld1Info, {C0 = RotationWeld.C0 * CFrame.Angles(math.rad(-15),0,0)})
+		local Weld2Tween = TweenService:Create(RotationWeld, Weld2Info, {C0 = RotationWeld.C0})
+		
+		local ArtilleryLoop 
+		ArtilleryLoop = RunService.Stepped:Connect(function()
+			LeftHinge.AngularVelocity = -VelocityNumber.Value/2
+			RightHinge.AngularVelocity = VelocityNumber.Value/2
+		end)
+		
+		if Cannon.Settings.Features.EnableBarrelRecoil.Value then
+			coroutine.resume(coroutine.create(function()
+				Weld1Tween:Play()
+				Weld1Tween.Completed:Wait()
+				Weld2Tween:Play()
+			end))
+		end
+		VelocityTween:Play()
+		
+		local RandomFireID = CannonFire[math.random(1, #CannonFire)].SoundId
+		RandomFire.SoundId = RandomFireID
+		RandomFire.PlaybackSpeed = math.random(70,110)/100
+		DefaultFire.PlaybackSpeed = math.random(80,120)/100
+		RandomFire.Volume = math.random(30, 50)/10
+		PlaySoundWithDistance(RandomFire, Muzzle.Position)
+		PlaySoundWithDistance(DefaultFire, Muzzle.Position)
+
+		for i,v in pairs(Muzzle:GetChildren()) do
+			if v:IsA("ParticleEmitter") then
+				v:Emit(v.Rate)
+			elseif v:IsA("SpotLight") or v:IsA("PointLight") or v:IsA("SurfaceLight") then
+				v.Enabled = true
+			end
+		end
+		Thumbhole.Smoke:Emit(Thumbhole.Smoke.Rate)
+
+		wait(0.2)
+
+		for i,v in pairs(Muzzle:GetChildren()) do
+			if v:IsA("SpotLight") or v:IsA("PointLight") or v:IsA("SurfaceLight") then
+				v.Enabled = false
+			end
+		end
+		VelocityTween.Completed:Connect(function()
+			ArtilleryLoop:Disconnect()
+			if player == LocalPlayer then
+				FireCannon:FireServer(Cannon)
+			end
+		end)
+	end
+end
+
+local function ReceiveProjectileHit(Format, Stuff, Type, var1)
+	local XPos, YPos, ZPos = string.unpack(Format, Stuff)
+	local position = Vector3.new(XPos, YPos, ZPos)
+	if Type == 0 then -- musketball
+		coroutine.resume(coroutine.create(function()
+			local Dirt = FirearmsReplicated.HitParts.BulletHitDirt:Clone()
+			Debris:AddItem(Dirt, 3)
+			local Effect = Dirt:GetChildren()
+			local Impact = Instance.new("Sound")
+			Impact.PlaybackSpeed = math.random(80,130)/100
+			local RandomHit = BulletHitSound[math.random(1, #BulletHitSound)]
+			Impact.SoundId = RandomHit.SoundId
+			Impact.Parent = Dirt
+			Dirt.Position = position
+			Dirt.Parent = workspace.CurrentCamera
+			for i=1, #Effect do
+				if Effect[i]:IsA("ParticleEmitter") then
+					Effect[i].Enabled = true
+				end
+			end
+			Impact:Play()
+			local Magnitude = returnMagnitude(position)
+			if Type == 0 then
+				if Magnitude <= 15 then
+					DoRecoil(-(Magnitude - 15)/10)
+				end
+			elseif Type == 9 then
+				if Magnitude <= 25 then
+					DoRecoil(-(Magnitude - 25)/13)
+				end
+			end
+			wait(0.2)
+			for i=1, #Effect do
+				if Effect[i]:IsA("ParticleEmitter") then
+					Effect[i].Enabled = false
+				end
+			end
+		end))
+	elseif Type == 1 or Type == 1.5 or Type == 2 then -- small, medium or large
+		local hitpart = var1
+		local a,b,c, XNorm, YNorm, ZNorm = string.unpack(Format, Stuff)
+		local particlevector = Vector3.new(XNorm, YNorm, ZNorm)
+		
+		local particlefolder
+		local soundfolder
+		local particlepart
+		
+		local ReturnedMaterial = SearchForMaterial(hitpart.Material)
+		
+		if ReturnedMaterial then
+			particlefolder = GeneralReplicated.ImpactParts:FindFirstChild(ReturnedMaterial)
+			soundfolder = GeneralReplicated.ImpactSounds:FindFirstChild(ReturnedMaterial)
+		elseif not ReturnedMaterial or not particlefolder or not soundfolder then
+			particlefolder = GeneralReplicated.ImpactParts.Ground
+			soundfolder = GeneralReplicated.ImpactSounds.Ground
+		end
+		
+		if Type == 1 then
+			particlepart = particlefolder.LargeHit:Clone()
+			soundfolder = soundfolder.Artillery
+		elseif Type == 1.5 then
+			particlepart = particlefolder.MediumHit:Clone()
+			soundfolder = soundfolder.Artillery
+		elseif Type == 2 then
+			particlepart = particlefolder.SmallHit:Clone()
+			soundfolder = soundfolder.Firearms
+		end
+		
+		particlepart.Parent = workspace.CurrentCamera
+		Debris:AddItem(particlepart)
+		soundfolder = soundfolder:GetChildren()
+		particlepart.CFrame = CFrame.lookAt(position, position + particlevector)
+		
+		local Magnitude = returnMagnitude(position)
+		if Magnitude <= 30 then
+			DoRecoil(-Magnitude/6 + 5)
+		end
+		coroutine.resume(coroutine.create(function()
+			local randomsound = soundfolder[math.random(1, #soundfolder)]:Clone()
+			randomsound.Parent = particlepart
+			randomsound.PlaybackSpeed = math.random(80,120)/100
+			PlaySoundWithDistance(randomsound, particlepart.Position)
+			local Effect = particlepart:GetChildren()
+			for i=1, #Effect do
+				if Effect[i]:IsA("ParticleEmitter") then
+					Effect[i]:Emit(Effect[i].Rate)
+				end
+			end
+		end))
+	elseif Type == 3 then -- any kind of explosion
+		local ExplosionParticle = Instance.new("Explosion")
+		ExplosionParticle.BlastPressure = 0
+		ExplosionParticle.BlastRadius = 0
+		ExplosionParticle.ExplosionType = Enum.ExplosionType.NoCraters
+		ExplosionParticle.DestroyJointRadiusPercent = 0
+		ExplosionParticle.Position = position
+		ExplosionParticle.Parent = workspace
+		
+		coroutine.resume(coroutine.create(function()
+			local Dirt = GeneralReplicated.ImpactParts.ExplosionHit:Clone()
+			Debris:AddItem(Dirt, 10)
+			Dirt.Position = position
+			Dirt.Parent = workspace.CurrentCamera
+			local Explosion = Dirt:WaitForChild("Explosion")
+			local RandomExplosion = ExplosionHitSound[math.random(1, #ExplosionHitSound)]:Clone()
+			RandomExplosion.Parent = Dirt
+			RandomExplosion.PlaybackSpeed = math.random(70,130)/100
+			
+			local Children = Dirt:GetChildren()
+			for i=1, #Children do
+				if Children[i]:IsA("ParticleEmitter") then
+					Children[i]:Emit(Children[i].Rate * 0.2)
+				elseif Children[i]:IsA("Sound") then
+					PlaySoundWithDistance(Children[i], Dirt.Position)
+				end
+			end
+			
+			local IgnoreList = {}
+			table.insert(IgnoreList, Dirt)
+			for i=1, 30 do
+				coroutine.resume(coroutine.create(function()
+					local lifetime = math.random(10, 30)/100
+					local Fragment = RocketFragment:Clone()
+					Fragment.Position = position
+					Fragment.Parent = workspace.CurrentCamera
+					table.insert(IgnoreList, Fragment)
+					Debris:AddItem(Fragment, 4)
+					local Velocity = (Fragment.CFrame:VectorToWorldSpace(Vector3.new(math.random(-100,100)/100,math.random(-100,100)/100,math.random(-100,100)/100))) * 4
+					local NewStartTick = tick()
+					repeat
+						RunService.Heartbeat:Wait()
+						local ray = Ray.new(Fragment.Position,Velocity)
+						local hit,position = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+						Fragment.Position = position
+						Velocity = Velocity - Vector3.new(0, 0.05,0)
+						if hit then
+							Debris:AddItem(Fragment, 2)
+							return
+						end
+					until tick() - NewStartTick >= lifetime
+				end))
+			end
+			local Magnitude = returnMagnitude(position)
+			if Magnitude <= 100 then
+				DoRecoil(-(Magnitude - 100)/10)
+			end
+		end))
+	end
+end
+
+local function ReceiveProjectileStart(player, Format, Stuff, Type, PossibleObject)
+	local XPosition, YPosition, ZPosition, XVelocity, YVelocity, ZVelocity, BulletDrop, RecoilEffect = nil
+	XPosition, YPosition, ZPosition, XVelocity, YVelocity, ZVelocity = string.unpack(Format, Stuff)
+	if Format == "ffffffff" then
+		XPosition, YPosition, ZPosition, XVelocity, YVelocity, ZVelocity, BulletDrop, RecoilEffect = string.unpack(Format, Stuff)
+	end
+	local FormulatedPosition = Vector3.new(XPosition, YPosition, ZPosition)
+	local Velocity = Vector3.new(XVelocity, YVelocity, ZVelocity)
+	local IgnoreList = {}
+	if Type == 5 or Type == 6 or Type == 7 or Type == 8 then -- musket
+		if player == 0 then
+			player = LocalPlayer
+		elseif player == LocalPlayer then
+			return
+		end
+		local Part = MusketRoot:Clone()
+		Part.Position = FormulatedPosition
+		Part.Parent = workspace
+		Debris:AddItem(Part)
+		local TKEnabled = PossibleObject.Settings:FindFirstChild("EnableTK", true).Value
+		local EnableBlood = PossibleObject.Settings:FindFirstChild("EnableBlood", true).Value
+		coroutine.resume(coroutine.create(function()
+			local StartTick = tick()
+			repeat
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				if CheckTick(tick(), HeartbeatTime) then
+					local ray = Ray.new(Part.Position, Velocity)
+					local hit,position,surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+					local PastPosition = Part.Position
+					Part.Position = position
+					local Region = Region3.new(position + Vector3.new(0.5,0.5,0.5), position - Vector3.new(0.5,0.5,0.5))
+					local FindParts = workspace:FindPartsInRegion3WithIgnoreList(Region, IgnoreList, 200)
+					local Humanoid, Character, Player, IsHorse = nil, nil, nil, nil
+					for i,v in pairs(FindParts) do
+						if not hit then
+							Humanoid, Character, Player, IsHorse = ReturnHumanoidData(v)
+							if Humanoid then
+								hit = v
+							end
+						end
+					end
+					local Magnitude = returnMagnitude(position)
+					if Magnitude <= 20 and player.Team ~= LocalPlayer.Team and player ~= LocalPlayer then --all this does is calculate the camera shake/bullet whiz
+						Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+						local PossibleValue = Character.Head:FindFirstChild("WhizzValue")
+						local Value = nil
+						if PossibleValue then
+							Value = PossibleValue.Value
+						end
+						if not PossibleValue or (PossibleValue and Value and Value ~= Part) then
+							DoRecoil(-(Magnitude - 20)/20)
+							local Pass = Instance.new("Sound")
+							local RandomHit = BulletHitSound[math.random(1, #BulletHitSound)]
+							Pass.SoundId = RandomHit.SoundId
+							Pass.PlaybackSpeed = math.random(60, 120)/100
+							Pass.RollOffMode = Enum.RollOffMode.InverseTapered
+							Pass.Name = LocalPlayer.Name
+							Pass.Volume = 5
+							local ObjectValue = Instance.new("ObjectValue")
+							ObjectValue.Name = "WhizzValue"
+							ObjectValue.Value = Part
+							ObjectValue.Parent = Character.Head
+							Pass.Parent = Character.Head
+							Pass:Play()
+							Debris:AddItem(Pass, Pass.TimeLength)
+							Debris:AddItem(ObjectValue, Pass.TimeLength)
+						end
+					end
+					if hit then
+						local XPos = position.X
+						local YPos = position.Y
+						local ZPos = position.Z
+						local XNormal = surfacenormal.X
+						local YNormal = surfacenormal.Y
+						local ZNormal = surfacenormal.Z
+						local DamageDealt = 0
+						local Max100 = nil
+						local Expression = nil
+						Humanoid, Character, Player, IsHorse = ReturnHumanoidData(hit)
+						if Humanoid and player == LocalPlayer then -- valid humanoid
+							print("Localplayer hit " .. Character.Name .. " humanoid with a musketball.")
+							if Player and Player.Team and ((Player.Team ~= LocalPlayer.Team) or (Player.Team == LocalPlayer.Team and TKEnabled)) or (not Player and Character) then
+								-- Set default damage values
+								DamageDealt = 35 -- Default damage for unknown tools
+
+								-- Check the tool name and assign damage
+								if PossibleObject and PossibleObject:IsA("Tool") then
+									if PossibleObject.Name == "Arquebus" then
+										DamageDealt = 100
+									elseif PossibleObject.Name == "Musket" or PossibleObject.Name == "Pistol" then
+										DamageDealt = 100
+									elseif PossibleObject.Name == "Carbine" or PossibleObject.Name == "Rifle" then
+										DamageDealt = 100
+									end
+								end
+
+								-- Adjust damage based on hit location
+								if hit.Name == "Head" then
+									DamageDealt = DamageDealt * 1.5 -- Headshots deal 1.5x damage
+								elseif hit.Name == "Torso" then
+									DamageDealt = DamageDealt * 1.0 -- Torso retains base damage
+								elseif hit.Name == "Left Arm" or hit.Name == "Right Arm" or hit.Name == "Left Leg" or hit.Name == "Right Leg" then
+									DamageDealt = DamageDealt * 0.50 -- Limbs deal 75% damage
+								end
+
+								-- Handle shields
+								if hit.Parent.Name == "SteelShield" then
+									print("Hit Shield")
+									ShieldHit:FireServer(hit, position, PossibleObject)
+									return
+								end
+
+								-- Prepare data for the server
+								local BloodEnabled = EnableBlood and 1 or 0
+								local newStuff = string.pack("fffffffff", XPos, YPos, ZPos, XVelocity, YVelocity, ZVelocity, DamageDealt, Magnitude, BloodEnabled)
+								ProjectileDamage:FireServer("fffffffff", newStuff, Humanoid, 0)
+								Debris:AddItem(Part, 0)
+							elseif hit.CanCollide then
+								print("Localplayer hit collidable part " .. hit.Name .. " with a musketball.")
+								local newStuff = string.pack("ffffff", XPos, YPos, ZPos, XNormal, YNormal, ZNormal)
+								ProjectileHit:FireServer("ffffff", newStuff, 2, nil, hit)
+							elseif not hit.CanCollide then
+								Part.Position = PastPosition + Velocity
+							end
+						end
+
+						return
+					end
+					Velocity = Velocity - Vector3.new(0,BulletDrop,0)
+				end
+			until tick() - StartTick >= 10
+		end))
+		makeEffectsOrRecoil(PossibleObject)
+		if player == LocalPlayer then
+			DoRecoil(RecoilEffect)
+		end
+		return
+	elseif Type == 0.5 then --any blank
+		local Cannon = PossibleObject
+		local CameraShake = Cannon.Settings.Features.MaxCameraShake.Value
+		
+		local Magnitude = returnMagnitude(FormulatedPosition)
+		if Magnitude <= 10 then
+			DoRecoil(CameraShake)
+		end
+		TweenCannonRecoil(Cannon)
+	elseif Type == 1 or Type == 1.5 then -- roundshots
+		local Cannon = PossibleObject
+		table.insert(IgnoreList, Cannon)
+		
+		local TKEnabled = Cannon.Settings.Features.EnableTK.Value
+		local Drop = Cannon.Settings.Roundshot.RoundshotDropPerFrame.Value
+		local CameraShake = Cannon.Settings.Features.MaxCameraShake.Value
+		local ShotDamage = Cannon.Settings.Roundshot.IntegrityDamage.Value
+		local EnableBlood = Cannon.Settings.Features.EnableBlood.Value
+		local ShotIntegrity = ShotDamage
+		
+		local Part
+		local damagenumber
+		if Type == 1 then
+			Part = ArcadeTwelve:Clone()
+			damagenumber = 1
+		elseif Type == 1.5 then
+			Part = ArcadeSix:Clone()
+			damagenumber = 2
+		end
+		if EnableBlood then
+			EnableBlood = 1
+		else
+			EnableBlood = 0
+		end
+		Part.Position = FormulatedPosition
+		Part.Parent = workspace
+		local CountBounce = 0 
+		local StartTick = tick()
+		local Magnitude = returnMagnitude(FormulatedPosition)
+		if Magnitude <= 10 then
+			DoRecoil(CameraShake)
+		end
+		coroutine.resume(coroutine.create(function()		
+			repeat
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				if CheckTick(tick(), HeartbeatTime) then
+					local ray = Ray.new(Part.Position, Velocity)
+					local hit,position,surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+					local PastPosition = Part.Position
+					Part.Position = position
+					local Region = Region3.new(position - Vector3.new(3,3,3), position + Vector3.new(3,3,3))
+					local FindParts = workspace:FindPartsInRegion3WithIgnoreList(Region, IgnoreList, 200)
+					local Humanoid, Character, Player, IsHorse = nil, nil, nil, nil
+					for i,v in pairs(FindParts) do
+						if not hit then
+							Humanoid, Character, Player, IsHorse = ReturnHumanoidData(v)
+							if Humanoid then
+								hit = v
+							end
+						end
+					end
+					if hit then
+						local XPos = position.X
+						local YPos = position.Y
+						local ZPos = position.Z
+						local XNormal = surfacenormal.X
+						local YNormal = surfacenormal.Y
+						local ZNormal = surfacenormal.Z
+						local VelocityX = Velocity.X
+						local VelocityY = Velocity.Y
+						local VelocityZ = Velocity.Z
+						if player == LocalPlayer then
+							Humanoid, Character, Player, IsHorse = ReturnHumanoidData(hit)
+							if Humanoid then --valid humanoid
+								print("Localplayer hit " .. Character.Name .. " humanoid with a cannonball.")
+								if Player and Player.Team and ((Player.Team ~= LocalPlayer.Team) or (Player.Team == LocalPlayer.Team and TKEnabled)) or (not Player and Character) then
+									if player == LocalPlayer then
+										local newStuff = string.pack("fffffffff", XPos, YPos, ZPos, XVelocity, YVelocity, ZVelocity, 1000, Magnitude, EnableBlood)
+										ProjectileDamage:FireServer("fffffffff", newStuff, hit, 1)
+									end
+								end
+							elseif hit.CanCollide then
+								print("Localplayer hit collidable part " .. hit.Name .. " with a cannonball.")
+								local CanRicochet = true
+								if player == LocalPlayer then
+									local newFormat = "ffffff"
+									local newStuff = string.pack(newFormat, XPos, YPos, ZPos, XNormal, YNormal, ZNormal)
+									ProjectileHit:FireServer(newFormat, newStuff, 1.5, Cannon, hit)
+								end
+								local returnedpart, remaininghealthofshot, destroyedbool = HandleIntegrity(hit, ShotDamage, ShotIntegrity, player == LocalPlayer)
+								if (returnedpart and (not destroyedbool or remaininghealthofshot < 20)) then
+									Debris:AddItem(Part)
+									return
+								elseif returnedpart and remaininghealthofshot then
+									ShotIntegrity = remaininghealthofshot
+									Velocity = Velocity * (remaininghealthofshot/ShotDamage)
+									CanRicochet = false
+								end
+								if CanRicochet then
+									CountBounce = CountBounce + 1
+									local reflectNormal = (Velocity - (2 * Velocity:Dot(surfacenormal) * surfacenormal))
+									local AngleOfImpact = 90 - math.deg(math.acos(surfacenormal.Unit:Dot(reflectNormal.Unit)))
+									local DivideNumber = 1 + (AngleOfImpact^2.5)/28
+									Velocity = Vector3.new(VelocityX, reflectNormal.Y, VelocityZ)/DivideNumber
+									if AngleOfImpact > 15 or AngleOfImpact <= 1.2 or Velocity.Magnitude <= 3 or CountBounce >= Cannon.Settings.Roundshot.MaxBounce.Value + 1 then
+										Debris:AddItem(Part)
+										return
+									end
+								end
+								Part.Position = position
+							end
+						end
+					end
+					Velocity = Velocity - Vector3.new(0,Drop,0)
+				end
+			until tick() - StartTick >= 20
+			Debris:AddItem(Part, 10)
+		end))
+		TweenCannonRecoil(Cannon)
+	elseif Type == 2 then -- any canister
+		local Cannon = PossibleObject
+		table.insert(IgnoreList, Cannon)
+
+		local TKEnabled = Cannon.Settings.Features.EnableTK.Value
+		local Drop = Cannon.Settings.Canister.CanisterDropPerFrame.Value
+		local AccuracyNumber = Cannon.Settings.Canister.CanisterAccuracyAt200.Value
+		local EnableBlood = Cannon.Settings.Features.EnableBlood.Value
+		
+		local Muzzle = Cannon.ElevatedParts.Muzzle
+		local StartTick = tick()
+		local CanisterList = {}
+		local BounceList = {}
+		local Magnitude = returnMagnitude(FormulatedPosition)
+		if Magnitude <= 10 then
+			DoRecoil(Cannon.Settings.Features.MaxCameraShake.Value)
+		end
+		if EnableBlood then
+			EnableBlood = 1
+		else
+			EnableBlood = 0
+		end
+		for i=1, Cannon.Settings.Canister.PelletCount.Value do
+			local Part = ArcadeCanister:Clone()
+			Part.Position = Muzzle.Position + Vector3.new(math.random(-10,10)/10, math.random(-10,10)/10, math.random(-10,10)/10)
+			Part.Parent = workspace
+			local InaccuracyFactor = Muzzle.CFrame:VectorToWorldSpace(Vector3.new(math.random(-AccuracyNumber * 5,AccuracyNumber * 5)/100,math.random(-AccuracyNumber * 2,AccuracyNumber * 2)/100,math.random(-10,10)/100))
+			local localVelocity = Velocity + InaccuracyFactor
+			table.insert(IgnoreList, Part)
+			Debris:AddItem(Part)
+			CanisterList[Part] = localVelocity
+			BounceList[Part] = 0
+		end
+		coroutine.resume(coroutine.create(function()
+			repeat
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				if CheckTick(tick(), HeartbeatTime) then
+					if not next(CanisterList) then return end
+					for Part, localVelocity in pairs(CanisterList) do
+						local ray = Ray.new(Part.Position, localVelocity)
+						local hit,position,surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+						local PastPosition = Part.Position
+						Part.Position = position
+						if tick() - StartTick > 1 then 
+							BounceList[Part] = 2
+						end
+						local Region = Region3.new(position + Vector3.new(0.1,0.1,0.1), position - Vector3.new(0.1,0.1,0.1))
+						local FindParts = workspace:FindPartsInRegion3WithIgnoreList(Region, IgnoreList, 200)
+						local Humanoid, Character, Player, IsHorse = nil, nil, nil, nil
+						for i,v in pairs(FindParts) do
+							if not hit then
+								Humanoid, Character, Player, IsHorse = ReturnHumanoidData(v)
+								if Humanoid then
+									hit = v
+								end
+							end
+						end
+						if hit then
+							local XPos = position.X
+							local YPos = position.Y
+							local ZPos = position.Z
+							local XNormal = surfacenormal.X
+							local YNormal = surfacenormal.Y
+							local ZNormal = surfacenormal.Z
+							local VelocityX = Velocity.X
+							local VelocityY = Velocity.Y
+							local VelocityZ = Velocity.Z
+							Humanoid, Character, Player, IsHorse = ReturnHumanoidData(hit)
+							if Humanoid then
+								CanisterList[Part] = localVelocity/2
+								BounceList[Part] = BounceList[Part] + 1
+								if player == LocalPlayer then
+									print("Localplayer hit " .. Character.Name .. " humanoid with a canister pellet.")
+									local Stuff = string.pack("fffffffff", XPos, YPos, ZPos, XVelocity, YVelocity, ZVelocity, 1000, Magnitude, EnableBlood)
+									ProjectileDamage:FireServer("fffffffff", Stuff, hit, 1)
+								end
+								if BounceList[Part] >= 2 then
+									Debris:AddItem(Part, 0)
+									CanisterList[Part] = nil
+									BounceList[Part] = nil
+								end
+							elseif hit.CanCollide then
+								local newStuff = string.pack("ffffff", XPos, YPos, ZPos, XNormal, YNormal, ZNormal)
+								ReceiveProjectileHit("ffffff", newStuff, 2, hit)
+								BounceList[Part] = BounceList[Part] + 1
+								local reflectNormal = (localVelocity - (2 * localVelocity:Dot(surfacenormal) * surfacenormal))
+								local AngleOfImpact = 90 - math.deg(math.acos(surfacenormal.Unit:Dot(reflectNormal.Unit)))
+								local DivideNumber = 1 + (AngleOfImpact^2.5)/28
+								CanisterList[Part] = Vector3.new(CanisterList[Part].X, reflectNormal.Y, CanisterList[Part].Z)/DivideNumber
+
+								if AngleOfImpact > 15 or AngleOfImpact <= 1.2 or CanisterList[Part].Magnitude <= 2 or BounceList[Part] >= 2 then 
+									Debris:AddItem(Part, 10)
+									CanisterList[Part] = nil
+									BounceList[Part] = nil
+								end
+							elseif not hit.CanCollide then
+								Part.Position = position
+							end
+						end
+						if CanisterList[Part] then
+							CanisterList[Part] = CanisterList[Part] - Vector3.new(0,Drop,0)
+						end
+					end
+				end
+			until tick() - StartTick >= 1
+		end))
+		TweenCannonRecoil(Cannon)
+	elseif Type == 3 then -- 5 shell	
+		local Cannon = PossibleObject
+		table.insert(IgnoreList, Cannon)
+		
+		local ShellLit = Cannon.Values.ShellLit
+		local Timer = Cannon.Values.Timer.Value
+		local TKEnabled = Cannon.Settings.Features.EnableTK.Value
+		local Drop = Cannon.Settings.Shell.ShellDropPerFrame.Value
+		local CameraShake = Cannon.Settings.Features.MaxCameraShake.Value
+		local ShotDamage = Cannon.Settings.Shell.IntegrityDamage.Value
+		local EnableBlood = Cannon.Settings.Features.EnableBlood.Value
+		local ShotIntegrity = ShotDamage
+		
+		local TimeValue = Timer
+		local Detonated = false
+		local Fused = false
+		
+		if ShellLit.Value then
+			Fused = true
+		end
+		if EnableBlood then
+			EnableBlood = 1
+		else
+			EnableBlood = 0
+		end
+		
+		local Part = ArcadeShell:Clone()
+		Part.Position = FormulatedPosition
+		Part.Parent = workspace
+		Debris:AddItem(Part, TimeValue)
+		
+		if Fused then
+			local Clone = Cannon.ElevatedParts.Muzzle.ShellFuse:Clone()
+			Clone.Parent = Part
+			Clone.TimePosition = Cannon.ElevatedParts.Muzzle.ShellFuse.TimePosition
+			Clone:Play()
+		end
+		local StartTick = tick()
+		local Magnitude = returnMagnitude(FormulatedPosition)
+		if Magnitude <= 10 then
+			DoRecoil(CameraShake)
+		end
+		coroutine.resume(coroutine.create(function()
+			while true do
+				if not Fused then return end
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				TimeValue = TimeValue - HeartbeatTime
+				if TimeValue <= 0 then
+					Detonated = true
+					local Pos = Part.Position
+					if player == LocalPlayer then
+						MakeExplosion(Cannon.Settings.Shell.ShellExplosionRadius.Value, Pos, Cannon)
+					end
+					return
+				end
+			end
+		end))
+		coroutine.resume(coroutine.create(function()		
+			repeat
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				if CheckTick(tick(), HeartbeatTime) then
+					if Detonated then Debris:AddItem(Part, 0) return end
+					local ray = Ray.new(Part.Position, Velocity)
+					local hit,position,surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+					local PastPosition = Part.Position
+					Part.Position = position
+					local Region = Region3.new(position + Vector3.new(2,2,2), position - Vector3.new(2,2,2))
+					local FindParts = workspace:FindPartsInRegion3WithIgnoreList(Region, IgnoreList, 200)
+					for i,v in pairs(FindParts) do
+						if CheckForHumanoid(v) then
+							if not hit then
+								hit = v
+							end
+						end
+					end
+					if hit then
+						local XPos = position.X
+						local YPos = position.Y
+						local ZPos = position.Z
+						local XNormal = surfacenormal.X
+						local YNormal = surfacenormal.Y
+						local ZNormal = surfacenormal.Z
+						local VelocityX = Velocity.X
+						local VelocityY = Velocity.Y
+						local VelocityZ = Velocity.Z
+						if CheckForHumanoid(hit) and player == LocalPlayer then
+							local Stuff = string.pack("fffffffff", XPos, YPos, ZPos, XVelocity, YVelocity, ZVelocity, 100, Magnitude, EnableBlood)
+							ProjectileDamage:FireServer("fffffffff", Stuff, hit, 1)
+						elseif hit.CanCollide and not CheckForHumanoid(hit) then
+							if player == LocalPlayer then
+								local newFormat = "ffffff"
+								local newStuff = string.pack(newFormat, XPos, YPos, ZPos, XNormal, YNormal, ZNormal)
+								ProjectileHit:FireServer(newFormat, newStuff, 1.5, Cannon, hit)
+							end
+							local returnedpart, remaininghealthofshot, destroyedbool = HandleIntegrity(hit, ShotDamage, ShotIntegrity, player == LocalPlayer)
+							if returnedpart and (not destroyedbool or remaininghealthofshot < 20) then
+								Debris:AddItem(Part, TimeValue)
+								return
+							elseif returnedpart and remaininghealthofshot then
+								ShotIntegrity = remaininghealthofshot
+								Velocity = Velocity * (remaininghealthofshot/ShotDamage)
+							elseif not returnedpart then
+								Debris:AddItem(Part, TimeValue)
+								return
+							end
+							
+						elseif not hit.CanCollide then
+							Part.Position = position
+						end
+					end
+					Velocity = Velocity - Vector3.new(0,Drop,0)
+				end
+			until tick() - StartTick >= 10
+			Debris:AddItem(Part)
+		end))
+		TweenCannonRecoil(Cannon)
+	elseif Type == 9 then -- gatling
+		local Cannon = PossibleObject
+		local Muzzle = Cannon.ElevatedParts.Muzzle
+		local Barrels = Cannon.ElevatedParts.Barrels
+		local Handle = Cannon.ElevatedParts.Handle
+		local BulletDrop = Cannon.ElevatedParts.BulletDrop
+		
+		local FiringStatus = Cannon.Values.FiringStatus
+		local AmmunitionLeft = Cannon.Values.AmmunitionLeft
+		local RPM = Cannon.Values.RPM
+		
+		local MinAccuracy = Cannon.Settings.Configurations.MinInaccuracyAt200
+		local MaxAccuracy = Cannon.Settings.Configurations.MaxInaccuracyAt200
+		local MaxRPM = Cannon.Settings.Configurations.MaxRPM
+		local MinRPM = Cannon.Settings.Configurations.MinRPM
+		local TKEnabled = Cannon.Settings.Features.EnableTK.Value
+		local EnableBlood = Cannon.Settings.Features.EnableBlood.Value
+		
+		local Drop = Cannon.Settings.Bullet.BulletDropPerFrame.Value
+		
+		local GatlingCasing = ArtilleryReplicated.Projectiles.GatlingCasing
+		
+		if EnableBlood then
+			EnableBlood = 1
+		else
+			EnableBlood = 0
+		end
+		
+		table.insert(IgnoreList, Cannon)
+		coroutine.resume(coroutine.create(function()
+			local RPMTick = tick()
+			while FiringStatus.Value == "Start" do
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				local Compensation = HeartbeatTime/0.016666
+				Barrels:SetPrimaryPartCFrame(Barrels.BarrelRotation.CFrame * CFrame.Angles(math.rad((360 * HeartbeatTime)/(1/(RPM.Value/60))/8), 0,0))
+				Handle:SetPrimaryPartCFrame(Handle.HandleRotation.CFrame * CFrame.Angles(math.rad((360 * HeartbeatTime)/(1/(RPM.Value/60))/6), 0,0))
+				if tick() - RPMTick >= 1/(RPM.Value/60) then
+					RPMTick = tick()
+					if AmmunitionLeft.Value == 1 then
+						Cannon.Events.ChangeLoadedStatus:InvokeServer(10)
+					elseif AmmunitionLeft.Value > 0 then
+						AmmunitionLeft.Value = AmmunitionLeft.Value - 1
+						local Part = GatlingProjectile:Clone()
+						Part.Position = Muzzle.Position
+						Part.Parent = workspace
+						
+						local Casing = GatlingCasing:Clone()
+						Casing.CFrame = BulletDrop.CFrame + Vector3.new(math.random(-10,10)/100, math.random(-10,10)/100, math.random(-10,10)/100)
+						Casing.Parent = workspace
+						Debris:AddItem(Casing, 5)
+						Debris:AddItem(Part, 5)
+						
+						local CurrentRPMProportion = ((1/(MaxRPM.Value - MinRPM.Value)) * RPM.Value) - MinRPM.Value/(MaxRPM.Value - MinRPM.Value)
+						local InaccuracyNumber = (MinAccuracy.Value + (CurrentRPMProportion * (MaxAccuracy.Value - MinAccuracy.Value))) * 5--gets the inaccuracy based off of that decimal, between the min and max
+						local PartVelocity = (Muzzle.CFrame.LookVector * XVelocity) + Muzzle.CFrame:VectorToWorldSpace(Vector3.new(math.random(-InaccuracyNumber,InaccuracyNumber)/100,math.random(-InaccuracyNumber/1.5,InaccuracyNumber/1.5)/100,math.random(-InaccuracyNumber,InaccuracyNumber)/100))
+						
+						local StartTick = tick()
+						coroutine.resume(coroutine.create(function()
+							repeat
+								local HeartbeatTime = RunService.Heartbeat:Wait()
+								if CheckTick(tick(), HeartbeatTime) then
+									local ray = Ray.new(Part.Position, PartVelocity)
+									local hit,position,surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+									local PastPosition = Part.Position
+									Part.Position = position
+									local Region = Region3.new(position + Vector3.new(1.5,1.5,1.5), position - Vector3.new(1.5,1.5,1.5))
+									local FindParts = workspace:FindPartsInRegion3WithIgnoreList(Region, IgnoreList, 200)
+									local Humanoid, Character, Player, IsHorse = nil, nil, nil, nil
+									for i,v in pairs(FindParts) do
+										if not hit then
+											Humanoid, Character, Player, IsHorse = ReturnHumanoidData(v)
+											if Humanoid then
+												hit = v
+											end
+										end
+									end
+									if hit then
+										local XPos = position.X
+										local YPos = position.Y
+										local ZPos = position.Z
+										local XNormal = surfacenormal.X
+										local YNormal = surfacenormal.Y
+										local ZNormal = surfacenormal.Z
+										local XVelocity = Velocity.X
+										local YVelocity = Velocity.Y
+										local ZVelocity = Velocity.Z
+										Humanoid, Character, Player, IsHorse = ReturnHumanoidData(hit)
+										if Humanoid and player == LocalPlayer then --valid humanoid
+											print("Localplayer hit " .. Character.Name .. " humanoid with a gatling ball.")
+											if Player and Player.Team and ((Player.Team ~= LocalPlayer.Team) or (Player.Team == LocalPlayer.Team and TKEnabled)) or (not Player and Character) then
+												local Magnitude = returnMagnitude(position)
+												local DamageDealt = 0
+												local Max100 = 40
+												local Expression = (-1/8 * (Magnitude - 100)) + 100
+
+												if Magnitude <= Max100 then
+													DamageDealt = 40
+												elseif Magnitude > Max100 then
+													DamageDealt = Expression
+												end
+												if DamageDealt < 0 then
+													DamageDealt = 0
+												end
+
+												if hit.Name == "Head" then
+													DamageDealt = 80
+													if hit.Name == "Torso" then
+														DamageDealt = 40
+													elseif (hit.Name == "Left Arm" or hit.Name == "Right Arm" or hit.Name == "Left Leg" or hit.Name == "Right Leg") and (Type == 5 or Type == 8) then
+														DamageDealt = 25
+													end
+												end
+												if hit.Parent.Name == "SteelShield" then
+													print("Hit Shield")
+													ShieldHit:FireServer (hit, position, PossibleObject)
+													return
+												end
+
+												local newStuff = string.pack("fffffffff", XPos, YPos, ZPos, XVelocity, YVelocity, ZVelocity, DamageDealt, Magnitude, EnableBlood)
+												ProjectileDamage:FireServer("fffffffff", newStuff, hit, 1)
+												Debris:AddItem(Part, 0)
+											end
+										elseif hit.CanCollide then
+											local newStuff = string.pack("ffffff", XPos, YPos, ZPos, XNormal, YNormal, ZNormal)
+											ReceiveProjectileHit("ffffff", newStuff, 2, hit)
+											Debris:AddItem(Part, 0)
+											return
+										elseif not hit.CanCollide then
+											Part.Position = position
+										end
+									end							
+									
+									PartVelocity = PartVelocity - Vector3.new(0,Drop,0)
+								end
+							until tick() - StartTick >= 5
+						end))
+					end
+					makeEffectsOrRecoil(Cannon)
+				end
+			end
+		end))
+	elseif Type == 10 or Type == 11 then -- rockets
+		local SpawnPart = PossibleObject
+		local RocketStand = SpawnPart.Parent.Parent
+		local StartTick = tick()
+		local Magnitude = returnMagnitude(FormulatedPosition)
+		local EnableBlood = RocketStand.Settings.Features.EnableBlood.Value
+		
+		local Rocket
+		local Side
+		local FuseObject
+		local Timer 
+		local Detonated --this is getting very messy
+		local Landed
+		local RocketString
+		local ShellFuse
+		
+		if Type == 10 then --explosive type
+			Rocket = ExplosiveRocket:Clone()
+			RocketString = "Explosive"
+		elseif Type == 11 then --shell type
+			Rocket = ShellRocket:Clone()
+			RocketString = "Shell"
+			Side = string.gsub(SpawnPart.Name, "Part", "")
+			FuseObject = RocketStand.Values:FindFirstChild(Side .. "Fuse").Value
+			Timer = FuseObject
+			Detonated = false
+			Landed = false
+		end
+		
+		if EnableBlood then
+			EnableBlood = 1
+		else
+			EnableBlood = 0
+		end
+		
+		local Muzzle = Rocket.Muzzle
+		local PrimaryPart = Rocket.PrimaryPart	
+		local SettingsFolder = RocketStand.Settings[RocketString]
+		local Drop = SettingsFolder[RocketString .. "DropPerFrame"].Value
+		local ImpactRadius = SettingsFolder:FindFirstChild(RocketString .. "ImpactRadius")
+		local ExplosionRadius = SettingsFolder:FindFirstChild(RocketString .. "ExplosionRadius")
+		local IntegrityDamage = SettingsFolder.IntegrityDamage.Value
+		
+		Rocket:SetPrimaryPartCFrame(SpawnPart.CFrame)
+		Rocket.Parent = workspace
+		Debris:AddItem(Rocket, 40)
+		
+		table.insert(IgnoreList, Rocket)
+		table.insert(IgnoreList, RocketStand)
+
+		coroutine.resume(coroutine.create(function()
+			Muzzle:WaitForChild("SetFuse"):Play()
+			
+			if Type == 11 then
+				ShellFuse = Muzzle:WaitForChild("ShellFuse")
+				ShellFuse:Play()
+			end
+			Muzzle:WaitForChild("Sparks").Enabled = true
+			wait(2)
+			makeEffectsOrRecoil(SpawnPart)
+			makeEffectsOrRecoil(Rocket)
+			repeat
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				if CheckTick(tick(), HeartbeatTime) then
+					if not PrimaryPart then
+						Rocket:SetPrimaryPart(Rocket.MainPart)
+					end
+					if Type == 11 then
+						Timer = Timer - HeartbeatTime
+						if Timer <= 0 and not Detonated then
+							Detonated = true
+							Landed = true
+							local Pos = PrimaryPart.Position
+							Muzzle.Parent = workspace
+							for i,v in pairs(Muzzle:GetChildren()) do
+								if v:IsA("ParticleEmitter") then
+									v.Enabled = false
+								elseif v:IsA("Sound") then
+									v:Stop() --stops all particles and sounds
+								end
+							end
+							Debris:AddItem(Rocket, 0)
+							Debris:AddItem(Muzzle)
+							if player == LocalPlayer then
+								MakeExplosion(ExplosionRadius.Value, Pos, RocketStand)
+							end
+							return
+						end
+					end
+					
+					if not Landed then
+						local ray = Ray.new(PrimaryPart.Position, Velocity)
+						local hit,position,surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+						local PastPosition = PrimaryPart.Position
+						local AddedPosition = position - PastPosition
+						Rocket:SetPrimaryPartCFrame(CFrame.lookAt(PrimaryPart.Position, position))
+						Rocket:SetPrimaryPartCFrame(PrimaryPart.CFrame + AddedPosition)
+						if hit then
+							if hit.CanCollide then
+								for i,v in pairs(Muzzle:GetChildren()) do
+									if v:IsA("ParticleEmitter") then
+										v.Enabled = false
+									elseif v:IsA("Sound") then
+										if v.Name ~= "ShellFuse" then --shellfuse only applies to shell rocket type, should not stop until explosion
+											v:Stop()
+										end
+									end
+								end
+								HandleIntegrity(hit, IntegrityDamage, IntegrityDamage, player == LocalPlayer)
+								if Type == 10 then
+									Muzzle.Parent = workspace
+									Debris:AddItem(Muzzle)
+									Debris:AddItem(Rocket, 0)
+									if player == LocalPlayer then
+										MakeExplosion(ImpactRadius.Value, position, RocketStand)
+									end
+									return
+								end
+								Landed = true
+							else
+								Rocket:SetPrimaryPartCFrame(CFrame.new(position))
+							end
+						end
+						Velocity = Velocity - Vector3.new(0,Drop,0)
+						if Velocity.Magnitude < 3 then
+							Velocity = Velocity * 1.05
+						end
+					end
+				end
+			until tick() - StartTick >= 40
+		end))
+	elseif Type == 12 or Type == 13 then -- 8 mortar
+		local Cannon = PossibleObject
+		table.insert(IgnoreList, Cannon)
+
+		local TKEnabled = Cannon.Settings.Features.EnableTK.Value
+		local CameraShake = Cannon.Settings.Features.MaxCameraShake.Value
+		local Timer = Cannon.Values.Timer.Value
+		local Detonated = false
+		local Impacted = false
+		local StartTick = tick()
+		local Magnitude = returnMagnitude(FormulatedPosition)
+		local EnableBlood = Cannon.Settings.Features.EnableBlood.Value
+		
+		local Part
+		local Drop
+		local ShotDamage
+		local ExplosionRadius
+		
+		if Type == 12 then
+			Part = MortarShotProjectile:Clone()
+			Drop = Cannon.Settings.Roundshot.RoundshotDropPerFrame.Value
+			ShotDamage = Cannon.Settings.Roundshot.IntegrityDamage.Value
+		elseif Type == 13 then
+			Part = MortarShellProjectile:Clone()
+			Drop = Cannon.Settings.Shell.ShellDropPerFrame.Value
+			ShotDamage = Cannon.Settings.Shell.IntegrityDamage.Value
+			ExplosionRadius = Cannon.Settings.Shell.ShellExplosionRadius
+		end
+		
+		local ShotIntegrity = ShotDamage
+		
+		table.insert(IgnoreList, Part)
+		Part.Position = FormulatedPosition
+		Part.Parent = workspace
+		Debris:AddItem(Part, 30)
+		
+		if Type == 13 then
+			local ShellFuse = Cannon.ElevatedParts.Muzzle.ShellFuse:Clone()
+			ShellFuse.Parent = Part
+			ShellFuse:Play()
+		end
+		
+		if EnableBlood then
+			EnableBlood = 1
+		else
+			EnableBlood = 0
+		end
+		
+		if Magnitude <= 10 then
+			DoRecoil(CameraShake) --camerashaek
+		end
+		coroutine.resume(coroutine.create(function()		
+			repeat
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				if CheckTick(tick(), HeartbeatTime) then
+					if Type == 13 then
+						Timer = Timer - HeartbeatTime
+						if Timer <= 0 and not Detonated then
+							Detonated = true
+							local Pos = Part.Position
+							Debris:AddItem(Part, 0)
+							if player == LocalPlayer then
+								MakeExplosion(ExplosionRadius.Value, Pos, Cannon)
+							end
+							Impacted = true
+							return
+						end
+					end
+					
+					if not Impacted then
+						local ray = Ray.new(Part.Position, Velocity)
+						local hit,position,surfacenormal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+						local PastPosition = Part.Position
+						Part.Position = position
+						local Region = Region3.new(position + Vector3.new(1.5,1.5,1.5), position - Vector3.new(1.5,1.5,1.5))
+						local FindParts = workspace:FindPartsInRegion3WithIgnoreList(Region, IgnoreList, 200)
+						local Humanoid, Character, Player, IsHorse = nil, nil, nil, nil
+						for i,v in pairs(FindParts) do
+							if not hit then
+								Humanoid, Character, Player, IsHorse = ReturnHumanoidData(v)
+								if Humanoid then
+									hit = v
+								end
+							end
+						end
+						if hit then
+							local XPos = position.X
+							local YPos = position.Y
+							local ZPos = position.Z
+							local XNormal = surfacenormal.X
+							local YNormal = surfacenormal.Y
+							local ZNormal = surfacenormal.Z
+							local VelocityX = Velocity.X
+							local VelocityY = Velocity.Y
+							local VelocityZ = Velocity.Z
+							Humanoid, Character, Player, IsHorse = ReturnHumanoidData(hit)
+							if player == LocalPlayer then
+								if Player and Player.Team and ((Player.Team ~= LocalPlayer.Team) or (Player.Team == LocalPlayer.Team and TKEnabled)) or (not Player and Character) then
+									print("Localplayer hit " .. Character.Name .. " humanoid with a mortar shot.")
+									local newStuff = string.pack("fffffffff", XPos, YPos, ZPos, XVelocity, YVelocity, ZVelocity, 100, Magnitude, EnableBlood)
+									ProjectileDamage:FireServer("fffffffff", newStuff, hit, 1)
+								end
+							elseif hit.CanCollide then
+								if player == LocalPlayer then
+									print("Localplayer hit collidable part " .. hit.Name .. " with a mortar shot.")
+									local newFormat = "ffffff"
+									local newStuff = string.pack(newFormat, XPos, YPos, ZPos, XNormal, YNormal, ZNormal)
+									ProjectileHit:FireServer(newFormat, newStuff, 1, Cannon, hit)
+								end
+								local returnedpart, remaininghealthofshot, destroyedbool = HandleIntegrity(hit, ShotDamage, ShotIntegrity, player == LocalPlayer)
+								if (returnedpart and (not destroyedbool or remaininghealthofshot < 20)) or (not returnedpart and not remaininghealthofshot and not destroyedbool) then
+									Debris:AddItem(Part, 10)
+									Impacted = true
+								elseif returnedpart and remaininghealthofshot then
+									ShotIntegrity = remaininghealthofshot
+									Velocity = Velocity * (remaininghealthofshot/ShotDamage)
+								end
+								
+							elseif not hit.CanCollide then
+								Part.Position = position
+							end
+						end
+						Velocity = Velocity - Vector3.new(0,Drop,0)
+					end
+					
+				end
+			until tick() - StartTick >= 20 or (Type == 12 and Impacted)
+			Debris:AddItem(Part, 10)
+		end))
+		TweenCannonRecoil(Cannon)
+	end
+	return
+end
+
+local function HandleSplatter(position, normal, size)
+	if QualityLevel < 9 then return end
+	local NewBlood = BloodSplatter:Clone()
+	NewBlood.CFrame = CFrame.new(position, position + normal) * CFrame.Angles(0,-math.pi/2,0)
+	local SizeNumber = size + math.random(-190,190)/100
+	if SizeNumber <= 0 then
+		SizeNumber = 0.2
+	end
+	NewBlood.Size = Vector3.new(0.05, 0 + SizeNumber, 0 + SizeNumber)
+	local FindSize = NewBlood.Size
+	--NewBlood.Size = Vector3.new(0,0,0)
+	NewBlood.Parent = workspace
+	--TweenService:Create(NewBlood, TweenInfo.new(SizeNumber/2), {Size = FindSize}):Play()
+	Debris:AddItem(NewBlood)
+	return
+end
+
+local function ReceiveBlood(format, stuff)
+	if QualityLevel < 7 then return end
+	local XPos, YPos, ZPos, XVel, YVel, ZVel, TotalDamage
+	if format == "ffff" then
+		XPos, YPos, ZPos, TotalDamage = string.unpack(format, stuff)
+	elseif format == "fffffff" then
+		XPos, YPos, ZPos, XVel, YVel, ZVel, TotalDamage = string.unpack(format, stuff)
+	end
+	local Position = Vector3.new(XPos, YPos, ZPos)
+	if (Position - Camera.CFrame.Position).Magnitude >= 100 then return end
+	local IgnoreList = {}
+	for i,v in pairs(workspace:GetChildren()) do
+		if v:IsA("Model") and v:FindFirstChild("Humanoid") then
+			table.insert(IgnoreList, v)
+		end
+	end
+	local QuantifyNumber = math.ceil(TotalDamage/30 * 5)
+	local NewStartTick = tick()
+	for i=1, QuantifyNumber/2 do
+		coroutine.resume(coroutine.create(function()
+			local Part = BloodSplatterParticle:Clone()
+			Part.Position = Position
+			Part.Parent = workspace.CurrentCamera
+			table.insert(IgnoreList, Part)
+			Debris:AddItem(Part, 1)
+			local Velocity = nil
+			if not XVel then
+				Velocity = Part.CFrame:VectorToWorldSpace(Vector3.new(math.random(-50,50)/100,math.random(-10,10)/100,math.random(-50,50)/100))
+			else
+				Velocity = Vector3.new(XVel, YVel, ZVel)
+				if Velocity.Magnitude > 3 then
+					Velocity = Velocity/(Velocity.Magnitude * 1.2)
+				end
+				local InaccuracyFactor = Part.CFrame:VectorToWorldSpace(Vector3.new(math.random(-80,80)/100,math.random(-40,40)/100,math.random(-80,80)/100))
+				Velocity = Velocity + InaccuracyFactor
+			end
+			repeat
+				RunService.Heartbeat:Wait()
+				local ray = Ray.new(Part.Position,Velocity)
+				local hit,position,normal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+				Part.Position = position
+				Velocity = Velocity - Vector3.new(0, 0.05,0)
+				if hit then
+					Debris:AddItem(Part,0)
+					HandleSplatter(position, normal, QuantifyNumber/8)
+					return
+				end
+			until tick() - NewStartTick >= 1
+			return
+		end))
+	end
+	for i=1, QuantifyNumber*2 do --this loop is just for particle effects, not the blood splatter itself
+		coroutine.resume(coroutine.create(function()
+			local Part = BloodParticle:Clone()
+			Part.Position = Position
+			Part.Parent = workspace.CurrentCamera
+			table.insert(IgnoreList, Part)
+			Debris:AddItem(Part, 1)
+			local Velocity = Part.CFrame:VectorToWorldSpace(Vector3.new(math.random(-30,30)/100,math.random(-30,30)/100,math.random(-30,30)/100))
+			repeat
+				RunService.Heartbeat:Wait()
+				local ray = Ray.new(Part.Position,Velocity)
+				local hit,position,normal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+				Part.Position = position
+				Velocity = Velocity - Vector3.new(0, 0.03,0)
+				if hit then
+					Debris:AddItem(Part,0)
+					return
+				end
+			until tick() - NewStartTick >= 0.25
+			return
+		end))
+	end
+	return
+end
+
+local function ReceiveSpark(format, stuff)
+	if QualityLevel < 7 then return end
+	local XPos, YPos, ZPos = string.unpack(format, stuff)
+	local unpackedPosition = Vector3.new(XPos, YPos, ZPos)
+	local NewStartTick = tick()
+	local IgnoreList = {}
+	for i,v in pairs(workspace:GetChildren()) do
+		if v:IsA("Model") and v:FindFirstChild("Humanoid") then
+			table.insert(IgnoreList, v)
+		end
+	end
+	for i=1, 15 do
+		coroutine.resume(coroutine.create(function()
+			local Part = SparkParticle:Clone()
+			Part.Position = unpackedPosition
+			Part.Trail.Lifetime = math.random(10,30)/100
+			Part.Parent = workspace.CurrentCamera
+			table.insert(IgnoreList, Part)
+			Debris:AddItem(Part, math.random(25, 150)/100)
+			local Velocity = Part.CFrame:VectorToWorldSpace(Vector3.new(math.random(-60,60)/100,math.random(-60,60)/100,math.random(-60,60)/100))
+			repeat
+				RunService.Heartbeat:Wait()
+				local ray = Ray.new(Part.Position,Velocity)
+				local hit,position,normal = workspace:FindPartOnRayWithIgnoreList(ray, IgnoreList)
+				Part.Position = position
+				if normal then
+					local reflectNormal = (Velocity - (2 * Velocity:Dot(normal) * normal))
+					Velocity = reflectNormal
+				end
+				Velocity = Velocity - Vector3.new(0, 0.01,0)
+			until tick() - NewStartTick >= 1
+			return
+		end))
+	end
+end
+
+local function CannonRotationArcade(Cannon, Status, Type) --arcade function only
+	local TurningStatus = Cannon.Values.TurningStatus
+	local Settings = Cannon.Settings
+	local CannonRoot = Cannon:FindFirstChild("CannonRoot", true)
+	local LeftWheel = Cannon:FindFirstChild("LeftWheel")
+	local RightWheel = Cannon:FindFirstChild("RightWheel")
+	
+	local Orientation
+	if Settings.Configurations.MaxLeft.Value < 180 and Settings.Configurations.MaxRight.Value < 180 and ((Settings.Features:FindFirstChild("EnableTow") and not Settings.Features.EnableTow.Value) or (not Settings.Features:FindFirstChild("EnableTow"))) then
+		Orientation = Cannon.Values:FindFirstChild("OrientationValue")
+		if not Orientation then
+			Orientation = Instance.new("NumberValue", Cannon.Values)
+			Orientation.Name = "OrientationValue"
+		end
+	end
+	local Number = 0
+	if Type == 0 or Type == 1 then --12 or how
+		Number = 0.1
+	elseif Type == 2 then -- 6 lber or gatling
+		Number = 0.15
+	elseif Type == 3 then -- mortar
+		Number = 0.05
+	elseif Type == 4 or Type == 5 then -- gatling or rocket
+		Number = 0.2
+	else
+		return
+	end
+	if Status == "Right" and TurningStatus.Value ~= "Right" then
+		TurningStatus.Value = "Right"
+		coroutine.resume(coroutine.create(function()
+			while TurningStatus.Value == "Right" do
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				local Compensation = HeartbeatTime/0.016666 
+				if Orientation then --positive numbers are to the left, negative numbers are to the right
+					if -Orientation.Value < Settings.Configurations.MaxRight.Value then --negative of orientation.value, because we have to get the absolute value 
+						Orientation.Value = Orientation.Value + (-Number * Compensation)
+						Cannon:SetPrimaryPartCFrame(CannonRoot.CFrame * CFrame.Angles(0,math.rad(-Number * Compensation),0))
+						if LeftWheel and RightWheel then
+							LeftWheel:SetPrimaryPartCFrame(LeftWheel.LWheelRoot.CFrame * CFrame.Angles(math.rad((Number * 2) * Compensation),0,0))
+							RightWheel:SetPrimaryPartCFrame(RightWheel.RWheelRoot.CFrame * CFrame.Angles(math.rad((Number * 2) * Compensation),0,0))
+						end
+					end
+				else
+					Cannon:SetPrimaryPartCFrame(CannonRoot.CFrame * CFrame.Angles(0,math.rad(-Number * Compensation),0))
+					if LeftWheel and RightWheel then
+						LeftWheel:SetPrimaryPartCFrame(LeftWheel.LWheelRoot.CFrame * CFrame.Angles(math.rad((Number * 2) * Compensation),0,0))
+						RightWheel:SetPrimaryPartCFrame(RightWheel.RWheelRoot.CFrame * CFrame.Angles(math.rad((Number * 2) * Compensation),0,0))
+					end
+				end
+			end
+		end))
+	elseif Status == "Left" and TurningStatus.Value ~= "Left" then
+		TurningStatus.Value = "Left"
+		coroutine.resume(coroutine.create(function()
+			while TurningStatus.Value == "Left" do
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				local Compensation = HeartbeatTime/0.016666
+				if Orientation then --positive numbers are to the left, negative numbers are to the right
+					if Orientation.Value < Settings.Configurations.MaxLeft.Value then --positive of orientation.value, because turning left is a positive number
+						Orientation.Value = Orientation.Value + (Number * Compensation)
+						Cannon:SetPrimaryPartCFrame(CannonRoot.CFrame * CFrame.Angles(0,math.rad(Number * Compensation),0))
+						if LeftWheel and RightWheel then
+							LeftWheel:SetPrimaryPartCFrame(LeftWheel.LWheelRoot.CFrame * CFrame.Angles(math.rad((Number * -2) * Compensation),0,0))
+							RightWheel:SetPrimaryPartCFrame(RightWheel.RWheelRoot.CFrame * CFrame.Angles(math.rad((Number * -2) * Compensation),0,0))
+						end
+					end
+				else
+					Cannon:SetPrimaryPartCFrame(CannonRoot.CFrame * CFrame.Angles(0,math.rad(Number * Compensation),0))
+					if LeftWheel and RightWheel then
+						LeftWheel:SetPrimaryPartCFrame(LeftWheel.LWheelRoot.CFrame * CFrame.Angles(math.rad((Number * -2) * Compensation),0,0))
+						RightWheel:SetPrimaryPartCFrame(RightWheel.RWheelRoot.CFrame * CFrame.Angles(math.rad((Number * -2) * Compensation),0,0))
+					end
+				end
+				
+			end
+		end))
+	elseif Status == "None" then
+		TurningStatus.Value = "None"
+	end
+end
+
+--[[local function CannonElevation(Cannon, Status, Type)
+	local ElevatingStatus = Cannon.Values.ElevatingStatus
+	local MaxPitch = Cannon.Settings.Configurations.MaxPitch.Value
+	local MinPitch = Cannon.Settings.Configurations.MinPitch.Value
+	local Pitch = Cannon.Values.Pitch
+	local ElevatedParts = Cannon:FindFirstChild("ElevatedParts", true)
+	local Rotation = Cannon:FindFirstChild("ChassisRotation", true)
+	local Number = 0
+	if Type == 0 then -- 12lber
+		Number = 0.025
+	elseif Type == 1 or Type == 2 then -- howitzer or 6lber
+		Number = 0.04
+	elseif Type == 3 or Type == 4 then --mortar or gatling
+		Number = 0.08
+	elseif Type == 5 then
+		Number = 0.12
+	else
+		return
+	end
+	if Status == "Up" and ElevatingStatus.Value ~= "Up" then
+		ElevatingStatus.Value = "Up"
+		coroutine.resume(coroutine.create(function()
+			while ElevatingStatus.Value == "Up" do
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				local Compensation = HeartbeatTime/0.016666
+				if Type == 0 or Type == 1 or Type == 2 or Type == 3 or Type == 4 or Type == 5 then
+					if Pitch.Value < MaxPitch then
+						Pitch.Value = Pitch.Value + (Number * Compensation)
+						ElevatedParts:SetPrimaryPartCFrame(Rotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value),0,0))
+						if Type == 5 then
+							local ChassisBipodRotation = Cannon:FindFirstChild("ChassisBipodRotation", true)
+							ElevatedParts.Bipod:SetPrimaryPartCFrame(ChassisBipodRotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value - 45) * 2,0,0))
+						end
+					end
+				end
+			end
+		end))
+	elseif Status == "Down" and ElevatingStatus.Value ~= "Down" then
+		ElevatingStatus.Value = "Down"
+		coroutine.resume(coroutine.create(function()
+			while ElevatingStatus.Value == "Down" do
+				local HeartbeatTime = RunService.Heartbeat:Wait()
+				local Compensation = HeartbeatTime/0.016666
+				if Type == 0 or Type == 1 or Type == 2 or Type == 3 or Type == 4 or Type == 5 then
+					if Pitch.Value > MinPitch then
+						Pitch.Value = Pitch.Value - (Number * Compensation)
+						ElevatedParts:SetPrimaryPartCFrame(Rotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value),0,0))
+						if Type == 5 then
+							local ChassisBipodRotation = Cannon:FindFirstChild("ChassisBipodRotation", true)
+							ElevatedParts.Bipod:SetPrimaryPartCFrame(ChassisBipodRotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value - 45) * 2,0,0))
+						end
+					end
+				end
+			end
+		end))
+	elseif Status == "None" then
+		ElevatingStatus.Value = "None"
+	end
+end]]
+
+local function CannonRotationRealistic(player, Cannon, Movement, Type) --realistic only
+	local LeftHinge = Cannon.Chassis.WheelAxle.LeftHinge
+	local RightHinge = Cannon.Chassis.WheelAxle.RightHinge
+	local MovingStatus = Cannon.Values.MovingStatus
+	local TurningStatus = Cannon.Values.TurningStatus
+	local WhosOnLeftWheel = Cannon.Values.WhosOnLeftWheel
+	local WhosOnRightWheel = Cannon.Values.WhosOnRightWheel
+	local WhosOnTrail = Cannon.Values.WhosOnTrail
+	local WhosOnGunner = Cannon.Values.WhosOnGunner
+	--[[local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {Cannon}
+	local leftRaycast = workspace:Raycast(Cannon.LeftWheel.LWheelRoot.Position, Cannon.Chassis.CannonRoot.CFrame:ToWorldSpace(Vector3.new(0,-20,0)),  params)
+	local rightRaycast = workspace:Raycast(Cannon.RightWheel.RWheelRoot.Position, Cannon.Chassis.CannonRoot.CFrame:ToWorldSpace(Vector3.new(0,-20,0)),  params)
+	
+	local LWheelRadius = 2
+	local RWheelRadius = 2
+	if leftRaycast then
+		LWheelRadius = (leftRaycast.Position - Cannon.LeftWheel.LWheelRoot.Position).Magnitude
+	end
+	if rightRaycast then
+		RWheelRadius = (rightRaycast.Position - Cannon.RightWheel.RWheelRoot.Position).Magnitude
+	end
+	
+	if Movement == "Left" and TurningStatus.Value == "Left" then
+		if MovingStatus.Value == "None" then --using the trail to turn the cannon
+			coroutine.resume(coroutine.create((function()
+				while TurningStatus.Value == "Left" do
+					
+				end
+			end)))
+		end
+	end]]
+	
+	--[[
+	Left Wheel
+	+ forward
+	- backward
+	Right Wheel
+	- forward
+	+ backward
+	]]
+	
+	if Movement == "Forward" then
+		if TurningStatus.Value == "Left" then
+			LeftHinge.AngularVelocity = 0
+			RightHinge.AngularVelocity = -0.6
+		elseif TurningStatus.Value == "Right" then
+			LeftHinge.AngularVelocity = 0.6
+			RightHinge.AngularVelocity = 0
+		elseif TurningStatus.Value == "None" then
+			if WhosOnRightWheel.Value and not WhosOnLeftWheel.Value then --go left
+				LeftHinge.AngularVelocity = 0
+				RightHinge.AngularVelocity = -0.3
+			elseif WhosOnLeftWheel.Value and not WhosOnRightWheel.Value then
+				LeftHinge.AngularVelocity = 0.3
+				RightHinge.AngularVelocity = 0
+			else
+				LeftHinge.AngularVelocity = 0.6
+				RightHinge.AngularVelocity = -0.6
+			end
+		end
+	elseif Movement == "Reverse" then
+		if TurningStatus.Value == "Left" then
+			LeftHinge.AngularVelocity = -0.6
+			RightHinge.AngularVelocity = 0
+		elseif TurningStatus.Value == "Right" then
+			LeftHinge.AngularVelocity = 0
+			RightHinge.AngularVelocity = 0.6
+		elseif TurningStatus.Value == "None" then
+			if WhosOnRightWheel.Value and not WhosOnLeftWheel.Value then --go left
+				LeftHinge.AngularVelocity = 0
+				RightHinge.AngularVelocity = 0.3
+			elseif WhosOnLeftWheel.Value and not WhosOnRightWheel.Value then
+				LeftHinge.AngularVelocity = -0.3
+				RightHinge.AngularVelocity = 0
+			else
+				LeftHinge.AngularVelocity = -0.6
+				RightHinge.AngularVelocity = 0.6
+			end
+		end
+	elseif Movement == "Left" then
+		if MovingStatus.Value == "Forward" then
+			LeftHinge.AngularVelocity = 0
+			RightHinge.AngularVelocity = -0.6
+		elseif MovingStatus.Value == "Reverse" then
+			LeftHinge.AngularVelocity = -0.6
+			RightHinge.AngularVelocity = 0
+		elseif MovingStatus.Value == "None" then
+			if not WhosOnLeftWheel.Value or not WhosOnRightWheel.Value then
+				LeftHinge.AngularVelocity = -0.15
+				RightHinge.AngularVelocity = -0.15
+			else
+				LeftHinge.AngularVelocity = -0.6
+				RightHinge.AngularVelocity = -0.6
+			end
+		end
+	elseif Movement == "Right" then
+		if MovingStatus.Value == "Forward" then
+			LeftHinge.AngularVelocity = 0.6
+			RightHinge.AngularVelocity = 0
+		elseif MovingStatus.Value == "Reverse" then
+			LeftHinge.AngularVelocity = 0
+			RightHinge.AngularVelocity = 0.6
+		elseif MovingStatus.Value == "None" then
+			if not WhosOnLeftWheel.Value or not WhosOnRightWheel.Value then
+				LeftHinge.AngularVelocity = 0.15
+				RightHinge.AngularVelocity = 0.15
+			else
+				LeftHinge.AngularVelocity = 0.6
+				RightHinge.AngularVelocity = 0.6
+			end
+			
+		end
+	elseif Movement == "TurnNone" then
+		if MovingStatus.Value == "Forward" then
+			LeftHinge.AngularVelocity = 0.6
+			RightHinge.AngularVelocity = -0.6
+		elseif MovingStatus.Value == "Reverse" then
+			LeftHinge.AngularVelocity = -0.6
+			RightHinge.AngularVelocity = 0.6
+		elseif MovingStatus.Value == "None" then
+			LeftHinge.AngularVelocity = 0
+			RightHinge.AngularVelocity = 0
+		end
+	elseif Movement == "MoveNone" then
+		if TurningStatus.Value == "Left" then
+			LeftHinge.AngularVelocity = -0.6
+			RightHinge.AngularVelocity = -0.6
+		elseif TurningStatus.Value == "Right" then
+			LeftHinge.AngularVelocity = 0.6
+			RightHinge.AngularVelocity = 0.6
+		elseif TurningStatus.Value == "None" then
+			LeftHinge.AngularVelocity = 0
+			RightHinge.AngularVelocity = 0
+		end
+	end
+end
+
+local function ElevationBarrelArcade(Cannon, Movement, Type) 
+	local ElevatingStatus = Cannon.Values.ElevatingStatus
+	local MaxPitch = Cannon.Settings.Configurations.MaxPitch.Value
+	local MinPitch = Cannon.Settings.Configurations.MinPitch.Value
+	local Pitch = Cannon.Values.Pitch
+	local ElevatedParts = Cannon:FindFirstChild("ElevatedParts", true)
+	local Rotation = Cannon:FindFirstChild("ChassisRotation", true)
+	local Number = 0
+	if Type == 0 then -- 12lber
+		Number = 0.025
+	elseif Type == 1 or Type == 2 then -- howitzer or 6lber
+		Number = 0.04
+	elseif Type == 3 or Type == 4 then --mortar or gatling
+		Number = 0.08
+	elseif Type == 5 then
+		Number = 0.12
+	else
+		return
+	end
+
+	if Movement == "Up" or Movement == "Down" then
+		if Movement == "Up" and ElevatingStatus.Value ~= "Up" then
+			ElevatingStatus.Value = "Up"
+			coroutine.resume(coroutine.create(function()
+				while ElevatingStatus.Value == "Up" do
+					local HeartbeatTime = RunService.Heartbeat:Wait()
+					local Compensation = HeartbeatTime/0.016666
+					if Type == 0 or Type == 1 or Type == 2 or Type == 3 or Type == 4 or Type == 5 then
+						if Pitch.Value < MaxPitch then
+							Pitch.Value = Pitch.Value + (Number * Compensation)
+							ElevatedParts:SetPrimaryPartCFrame(Rotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value),0,0))
+							if Type == 5 then
+								local ChassisBipodRotation = Cannon:FindFirstChild("ChassisBipodRotation", true)
+								ElevatedParts.Bipod:SetPrimaryPartCFrame(ChassisBipodRotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value - 45) * 2,0,0))
+							end
+						end
+					end
+				end
+			end))
+		elseif Movement == "Down" and ElevatingStatus.Value ~= "Down" then
+			ElevatingStatus.Value = "Down"
+			coroutine.resume(coroutine.create(function()
+				while ElevatingStatus.Value == "Down" do
+					local HeartbeatTime = RunService.Heartbeat:Wait()
+					local Compensation = HeartbeatTime/0.016666
+					if Type == 0 or Type == 1 or Type == 2 or Type == 3 or Type == 4 or Type == 5 then
+						if Pitch.Value > MinPitch then
+							Pitch.Value = Pitch.Value - (Number * Compensation)
+							ElevatedParts:SetPrimaryPartCFrame(Rotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value),0,0))
+							if Type == 5 then
+								local ChassisBipodRotation = Cannon:FindFirstChild("ChassisBipodRotation", true)
+								ElevatedParts.Bipod:SetPrimaryPartCFrame(ChassisBipodRotation.CFrame * CFrame.Angles(-math.rad(Pitch.Value - 45) * 2,0,0))
+							end
+						end
+					end
+				end
+			end))
+		end
+	elseif Movement == "None" or Movement == "Set" then
+		ElevatingStatus.Value = "None"
+		RunService:UnbindFromRenderStep("Elevate")
+		RunService:UnbindFromRenderStep("Depress")
+	end
+end
+
+
+local function ElevationBarrelRealistic(Cannon, Movement, Type)
+	local MaxPitch = Cannon.Settings.Configurations.MaxPitch
+	local MinPitch = Cannon.Settings.Configurations.MinPitch
+	local Pitch = Cannon.Values.Pitch
+	local ElevatedParts = Cannon.ElevatedParts
+	local ChassisRotation = Cannon.Chassis.ChassisRotation
+	local Rotation = Cannon.ElevatedParts.Rotation
+
+	local Screw = Cannon.Chassis.Screw
+	local PlateRotation = Screw.Plate.PlateCenter.PlateRotationWeld
+	local ConnectPart = Screw.Rod.RodPlateConnect
+	local RodConnection = ConnectPart.RodConnectionWeld
+
+	local Tick = tick()
+	local elevationSpeed = Cannon.Settings.MovementSpeeds.Gunner.ElevateSpeed.Value
+	
+	if Movement == "Up Realistic" then
+		RunService:BindToRenderStep("Elevate", 201, function()
+			local ForwardTick = tick()
+			local Compensation = (ForwardTick - Tick)/0.016666
+			Tick = tick()
+			Pitch.Value = Pitch.Value + (elevationSpeed/60 * Compensation)
+
+			if Pitch.Value >= MaxPitch.Value then
+				Pitch.Value = MaxPitch.Value
+			else
+				PlateRotation.C1 = PlateRotation.C1 * CFrame.Angles(0,math.rad(-1),0)
+				Rotation.RotationWeld.C0 = Rotation.RotationWeld.C0 * CFrame.Angles(math.rad(elevationSpeed/60 * Compensation),0,0)
+			end
+
+			local BarrelLength = Rotation.CFrame:PointToObjectSpace(Vector3.new(ConnectPart.Position.X, Rotation.Position.Y, ConnectPart.Position.Z))
+			local Displacement = Vector3.new(0, (BarrelLength.Magnitude * math.sin(math.rad(-Pitch.Value))), 0)
+			RodConnection.C1 = CFrame.new(Displacement)
+		end)
+	elseif Movement == "Down Realistic" then
+		RunService:BindToRenderStep("Depress", 201, function()
+			local ForwardTick = tick()
+			local Compensation = (ForwardTick - Tick)/0.016666
+			Tick = tick()
+			Pitch.Value = Pitch.Value - (elevationSpeed/60 * Compensation)
+			if Pitch.Value <= MinPitch.Value then
+				Pitch.Value = MinPitch.Value
+			else
+				PlateRotation.C1 = PlateRotation.C1 * CFrame.Angles(0,math.rad(1),0)
+				Rotation.RotationWeld.C0 = Rotation.RotationWeld.C0 * CFrame.Angles(math.rad(-elevationSpeed/60 * Compensation),0,0)
+			end
+
+			local BarrelLength = Rotation.CFrame:PointToObjectSpace(Vector3.new(ConnectPart.Position.X, Rotation.Position.Y, ConnectPart.Position.Z))
+			local Displacement = Vector3.new(0, (BarrelLength.Magnitude * math.sin(math.rad(-Pitch.Value))), 0)
+			RodConnection.C1 = CFrame.new(Displacement)
+		end)
+	else
+		RunService:UnbindFromRenderStep("Depress")
+		RunService:UnbindFromRenderStep("Elevate")
+	end
+	
+end
+
+local function ReplicateAim(character, format, stuff, angle, weld)
+	-- Ensure 'character' is valid
+	if not character then
+		return
+	end
+
+	local function safeFind(partName)
+		return character:FindFirstChild(partName) or nil
+	end
+
+	local isCharacterValid = character:IsA("Model")
+	local Head = safeFind("Head")
+	local Torso = safeFind("Torso")
+	local HumRP = safeFind("HumanoidRootPart")
+	local LShoulder = Torso and Torso:FindFirstChild("Left Shoulder")
+	local RShoulder = Torso and Torso:FindFirstChild("Right Shoulder")
+	local Neck = Torso and Torso:FindFirstChild("Neck")
+
+	-- Ensure that required parts are found before proceeding
+	if not Head or not Torso or not HumRP or not LShoulder or not RShoulder or not Neck then
+		-- Handle the case where required parts are missing
+		return
+	end
+
+	-- Proceed with the rest of the function as before
+	local subVarAdjust = string.unpack(format, stuff)
+	local RootJoint = HumRP:FindFirstChild("RootJoint")
+	local HeadPosition = Head.Position
+	local subVarAdjust2 = (0.5 + subVarAdjust) ^ 0.5 * 0.707
+	local subVarAdjust3 = (0.5 - subVarAdjust) ^ 0.5 * 0.707
+
+	if subVarAdjust == 0 then -- stopaim
+		TweenService:Create(LShoulder, TweenInfo.new(0.5), {C0 = base1}):Play()
+		TweenService:Create(RShoulder, TweenInfo.new(0.5), {C0 = base2}):Play()
+		TweenService:Create(Neck, TweenInfo.new(0.5), {C0 = base3}):Play()
+		local BodyAttach6D = Torso:FindFirstChild("BodyAttach6D")
+		if BodyAttach6D then
+			TweenService:Create(BodyAttach6D, TweenInfo.new(0.5), {C0 = CFrame.new()}):Play()
+		end
+		local FakeTorso = character:FindFirstChild("FakeTorso")
+		if FakeTorso then
+			--FakeTorso:Destroy()
+		end
+		RootJoint.C0 = CFrame.new() * CFrame.Angles(math.rad(90), math.rad(180), 0)
+	else
+		local DifferenceCFrame
+		local HeadTor
+		local MainTor
+		if weld or angle then -- is cavalry
+			local FakeTorso = character:FindFirstChild("FakeTorso")
+			if not FakeTorso then
+				FakeTorso = Instance.new("Part")
+				FakeTorso.Size = HumRP.Size
+				FakeTorso.CFrame = HumRP.CFrame
+				FakeTorso.CanCollide = false
+				FakeTorso.CanTouch = false
+				FakeTorso.CanQuery = false -- only for cavalry crap
+				FakeTorso.Name = "FakeTorso"
+				FakeTorso.Transparency = 1
+				if weld then
+					local Weld = Instance.new("Weld")
+					Weld.Part0 = FakeTorso
+					Weld.Part1 = Torso
+					Weld.C0 = weld
+					Weld.Parent = FakeTorso
+				end
+				FakeTorso.Parent = character
+			end
+			DifferenceCFrame = FakeTorso.CFrame:ToObjectSpace(Torso.CFrame).Position
+			local RootC0 = CFrame.new(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0)
+			local RootC1 = CFrame.new(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0)
+			HeadTor = Torso.CFrame:Inverse() * FakeTorso.CFrame * (CFrame.new(0,1,0) + DifferenceCFrame) * CFrame.new(0, 0, 0, subVarAdjust3 - subVarAdjust2, 0, 0, subVarAdjust3 + subVarAdjust2) * (CFrame.new(0,1,0) + DifferenceCFrame):Inverse() * RootC0 * RootJoint.Transform * RootC1:Inverse()
+			MainTor = Torso.CFrame:Inverse() * FakeTorso.CFrame * (CFrame.new(0,1.5,0) + DifferenceCFrame) * CFrame.new(0, 0, 0, subVarAdjust3 - subVarAdjust2, 0, 0, subVarAdjust3 + subVarAdjust2) * (CFrame.new(0,1.5,0) + DifferenceCFrame):Inverse() * RootC0 * RootJoint.Transform * RootC1:Inverse()
+		else
+			DifferenceCFrame = HumRP.CFrame:ToObjectSpace(Torso.CFrame).Position
+			HeadTor = Torso.CFrame:Inverse() * HumRP.CFrame * (CFrame.new(0,1,0) + DifferenceCFrame) * CFrame.new(0, 0, 0, subVarAdjust3 - subVarAdjust2, 0, 0, subVarAdjust3 + subVarAdjust2) * (CFrame.new(0,1,0) + DifferenceCFrame):Inverse() * RootJoint.C0 * RootJoint.Transform * RootJoint.C1:Inverse()
+			MainTor = Torso.CFrame:Inverse() * HumRP.CFrame * (CFrame.new(0,1.5,0) + DifferenceCFrame) * CFrame.new(0, 0, 0, subVarAdjust3 - subVarAdjust2, 0, 0, subVarAdjust3 + subVarAdjust2) * (CFrame.new(0,1.5,0) + DifferenceCFrame):Inverse() * RootJoint.C0 * RootJoint.Transform * RootJoint.C1:Inverse()
+		end
+		TweenService:Create(LShoulder, TweenInfo.new(0.3), {C0 = MainTor * base1}):Play()
+		TweenService:Create(RShoulder, TweenInfo.new(0.3), {C0 = MainTor * base2}):Play()
+		TweenService:Create(Neck, TweenInfo.new(0.3), {C0 = HeadTor * base3}):Play()
+		if angle then
+			TweenService:Create(HumRP.RootJoint, TweenInfo.new(0.3), {C0 = CFrame.new() * CFrame.Angles(math.rad(90), math.rad(180), angle)}):Play()
+		end
+		local BodyAttach6D = Torso:FindFirstChild("BodyAttach6D")
+		if BodyAttach6D then
+			TweenService:Create(BodyAttach6D, TweenInfo.new(0.3), {C0 = MainTor}):Play()
+		end
+	end
+end
+
+
+local function MouseButtonDown() --gotta really clean this up holy crap
+	Character = LocalPlayer.Character
+	Humanoid = Character:FindFirstChild("Humanoid")
+	local Target = Mouse.Target
+	if not Target or not Target:IsDescendantOf(workspace) or Character:FindFirstChildWhichIsA("Tool") or not Humanoid or Humanoid.Health == 0 or returnMagnitude(Target.Position) > 6 then return end
+	local Cannon = Target.Parent.Parent
+	if table.find(ClickTable, Cannon.Name) then 
+		local Settings = Cannon:FindFirstChild("Settings")
+		local Values = Cannon:FindFirstChild("Values")
+		if not TowingSomething then
+			--grabbing the rope
+			if Target.Name == "MountPart" and not TowingSomething then
+				--Mounting a cannon or anything
+				Cannon.Events.ChangeLoadedStatus:InvokeServer(7)
+			elseif Target.Name == "MagazineClickPart" and not TowingSomething and Values and Values.MoveEnabled.Value and (Values.LoadedStatus.Value == "Magazine Ready" or Values.LoadedStatus.Value == "Magazine Empty") then 
+				--specifically mounting a gatling gun
+				Cannon.Events.ChangeLoadedStatus:InvokeServer(9, Cannon.Values.AmmunitionLeft.Value)
+			elseif (Target.Name == "Hook" and Settings and Settings.Features.EnableTow.Value) or (Target.Name == "LimberFrontRope" and Settings and Settings.Features.EnableLimber.Value) then
+				--Towing stuff
+				local Invoke = nil
+				if Target.Name == "Hook" then
+					Invoke = Cannon.Events.ChangeLoadedStatus:InvokeServer(5)
+					TowingSomething = Cannon
+				elseif Target.Name == "LimberFrontRope" then
+					Invoke = Cannon.Events.ChangeLoadedStatus:InvokeServer(5.5, Target)
+					TowingSomething = Target -- this returns false because you are destroying the frontal limber rope when it is attached to something
+				end
+				if Invoke then
+					Humanoid:UnequipTools()
+					Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+					StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+					local TowWalkSpeed = Cannon.Settings.Features.TowWalkSpeed
+					Humanoid.WalkSpeed = TowWalkSpeed.Value
+				else
+					TowingSomething = nil
+				end
+			elseif Target.Name == "LimberRearRope" and Cannon.Values.RopedBehind.Value then
+				local Invoke = nil
+				Invoke = Cannon.Events.ChangeLoadedStatus:InvokeServer(5.5, Target)
+				if Invoke then
+					TowingSomething = Invoke
+					Humanoid:UnequipTools()
+					Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+					StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+					local TowWalkSpeed = Cannon.Settings.Features.TowWalkSpeed
+					Humanoid.WalkSpeed = TowWalkSpeed.Value
+				else
+					TowingSomething = nil
+				end
+			end
+		elseif TowingSomething then
+			--grabbing the rope but you are already attached to something
+			if Target.Name == "LimberRearRope" and Settings and Settings.Features.EnableLimber.Value then
+				--Attaching a cannon rope to the limber
+				local Invoke = Cannon.Events.ChangeLoadedStatus:InvokeServer(6, TowingSomething)
+				if Invoke then
+					TowingSomething = nil
+					Humanoid.WalkSpeed = 16
+					Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+					StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+				end
+			elseif Target.Name == "LimberRopeAttach" and Settings.Configurations.EnableLimber.Value then
+				--Attaching the limber's rope to the horse
+				Cannon = TowingSomething.Parent.Parent
+				local Invoke = Cannon.Events.ChangeLoadedStatus:InvokeServer(6, Target)
+				if Invoke then
+					TowingSomething = nil
+					Humanoid.WalkSpeed = 16
+					Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+					StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+				end
+			else
+				--putting back whatever you towed
+				local Invoke = Cannon.Events.ChangeLoadedStatus:InvokeServer(6, TowingSomething)
+				if Invoke then
+					TowingSomething = nil
+					Humanoid.WalkSpeed = 16
+					Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+					StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+				end
+			end
+		end
+	else
+		return
+	end
+end
+
+local function HandleSettings()
+	for i=1, 10 do
+		if tostring(UserGameSettings.SavedQualityLevel) == "Enum.SavedQualitySetting.QualityLevel" .. tostring(i) then
+			QualityLevel = i
+		end
+	end
+end
+
+local function ReceiveChargeInvoke(PossibleCharge)
+	if not PossibleCharge then
+		return Stamina
+	else
+		Stamina = PossibleCharge
+	end
+end
+
+Humanoid.Died:Connect(function()
+	if TowingSomething then
+		TowingSomething.Events.ChangeLoadedStatus:InvokeServer(6)
+		TowingSomething = nil
+		Humanoid.WalkSpeed = 16
+		Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+	end
+	--this, is a bucket.
+	
+	local Bucket = Character:FindFirstChild("Bucket")
+	local Torso = Character:FindFirstChild("Torso")
+	if Bucket and Torso and Bucket.Values.ChargeAmount.Value > 0 then
+		local Pos = Torso.Position
+		local newFormat = "fff"
+		local XPos = Pos.X
+		local YPos = Pos.Y
+		local ZPos = Pos.Z
+		local newStuff = string.pack(newFormat, XPos, YPos, ZPos)
+		ReceiveProjectileHit(newFormat, newStuff, 7)
+		ProjectileHit:FireServer(newFormat, newStuff, 7)
+	end
+	
+end)
+
+MoveArcade.OnClientEvent:Connect(CannonRotationArcade)
+ElevateArcade.OnClientEvent:Connect(ElevationBarrelArcade)
+MoveRealistic.OnClientEvent:Connect(CannonRotationRealistic)
+ElevateRealistic.OnClientEvent:Connect(ElevationBarrelRealistic)
+ProjectileStart.OnClientEvent:Connect(ReceiveProjectileStart)
+LocalStart.Event:Connect(ReceiveProjectileStart)
+ProjectileHit.OnClientEvent:Connect(ReceiveProjectileHit)
+Mouse.Button1Down:Connect(MouseButtonDown)
+ReplicateAimEvent.OnClientEvent:Connect(ReplicateAim)
+DoBlood.OnClientEvent:Connect(ReceiveBlood)
+DoSpark.OnClientEvent:Connect(ReceiveSpark)
+FireCannon.OnClientEvent:Connect(CannonFireRealistic)
+
+
+UserGameSettings:GetPropertyChangedSignal("SavedQualityLevel"):Connect(HandleSettings)
+ReplicateChargeEvent.OnInvoke = ReceiveChargeInvoke
+
+StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+UserInputService.MouseIconEnabled = true
+UserInputService.MouseDeltaSensitivity = 1
+Camera.FieldOfView = 70
+HandleSettings()
