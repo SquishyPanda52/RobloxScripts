@@ -1,34 +1,29 @@
---// Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
 
---// Player
 local localPlayer = Players.LocalPlayer or Players:GetPlayers()[1]
 
---// ScreenGui
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ESP_Toggle_GUI"
 screenGui.Parent = CoreGui
 
---// Main Frame
+-- Main GUI Frame (modern dark transparent)
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 240, 0, 60)
+frame.Size = UDim2.new(0, 240, 0, 60) -- updated width
 frame.Position = UDim2.new(0, 10, 0, 10)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BackgroundTransparency = 0.15
-frame.ClipsDescendants = true
-frame.ZIndex = 10
 frame.Parent = screenGui
-
+frame.ZIndex = 10
+frame.ClipsDescendants = true
 local uicornerFrame = Instance.new("UICorner")
 uicornerFrame.CornerRadius = UDim.new(0, 12)
 uicornerFrame.Parent = frame
-
 local shadow = Instance.new("ImageLabel")
 shadow.BackgroundTransparency = 1
-shadow.Image = "rbxassetid://1316045217"
+shadow.Image = "rbxassetid://1316045217" -- subtle shadow image
 shadow.ImageColor3 = Color3.new(0, 0, 0)
 shadow.ImageTransparency = 0.7
 shadow.Size = UDim2.new(1, 14, 1, 14)
@@ -36,12 +31,12 @@ shadow.Position = UDim2.new(0, -7, 0, -7)
 shadow.ZIndex = 9
 shadow.Parent = frame
 
---// Frame Rainbow Stroke
+-- Add rainbow outline (UIStroke) to frame
 local frameStroke = Instance.new("UIStroke")
 frameStroke.Thickness = 3
 frameStroke.Parent = frame
 
---// ESP Button
+-- ESP Toggle Button (larger, gradient, rounded)
 local espButton = Instance.new("TextButton")
 espButton.Size = UDim2.new(0, 130, 0, 50)
 espButton.Position = UDim2.new(0, 10, 0, 5)
@@ -49,13 +44,11 @@ espButton.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
 espButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 espButton.TextScaled = true
 espButton.Text = "ESP ON"
-espButton.ZIndex = 11
 espButton.Parent = frame
-
+espButton.ZIndex = 11
 local uicornerEsp = Instance.new("UICorner")
 uicornerEsp.CornerRadius = UDim.new(0, 10)
 uicornerEsp.Parent = espButton
-
 local gradient = Instance.new("UIGradient")
 gradient.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 150, 200)),
@@ -63,21 +56,19 @@ gradient.Color = ColorSequence.new{
 }
 gradient.Parent = espButton
 
---// Minimize Button
+-- Minimize Button (smaller, repositioned)
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Size = UDim2.new(0, 30, 0, 30)
-minimizeButton.Position = UDim2.new(0, 160, 0, 15)
+minimizeButton.Position = UDim2.new(0, 160, 0, 15) -- updated position
 minimizeButton.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
 minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 minimizeButton.TextScaled = true
 minimizeButton.Text = "-"
-minimizeButton.ZIndex = 11
 minimizeButton.Parent = frame
-
+minimizeButton.ZIndex = 11
 local uicornerMin = Instance.new("UICorner")
 uicornerMin.CornerRadius = UDim.new(0, 10)
 uicornerMin.Parent = minimizeButton
-
 local gradientMin = Instance.new("UIGradient")
 gradientMin.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 150, 200)),
@@ -85,21 +76,19 @@ gradientMin.Color = ColorSequence.new{
 }
 gradientMin.Parent = minimizeButton
 
---// Close Button
+-- Close Button (X)
 local closeButton = Instance.new("TextButton")
 closeButton.Size = UDim2.new(0, 30, 0, 30)
-closeButton.Position = UDim2.new(0, 200, 0, 15)
+closeButton.Position = UDim2.new(0, 200, 0, 15) -- updated position
 closeButton.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
 closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeButton.TextScaled = true
 closeButton.Text = "X"
-closeButton.ZIndex = 11
 closeButton.Parent = frame
-
+closeButton.ZIndex = 11
 local uicornerClose = Instance.new("UICorner")
 uicornerClose.CornerRadius = UDim.new(0, 10)
 uicornerClose.Parent = closeButton
-
 local gradientClose = Instance.new("UIGradient")
 gradientClose.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 150, 200)),
@@ -107,7 +96,7 @@ gradientClose.Color = ColorSequence.new{
 }
 gradientClose.Parent = closeButton
 
---// Minimized Circle Button
+-- Minimized Circle Button with Panda Image (cleaner style)
 local ballButton = Instance.new("ImageButton")
 ballButton.Size = UDim2.new(0, 50, 0, 50)
 ballButton.Position = UDim2.new(0, 10, 0, 10)
@@ -115,19 +104,17 @@ ballButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 ballButton.BackgroundTransparency = 0.15
 ballButton.Image = "rbxassetid://4949506455"
 ballButton.Visible = false
+ballButton.Parent = screenGui
 ballButton.AutoButtonColor = true
 ballButton.ZIndex = 20
-ballButton.Parent = screenGui
-
 local uicornerBall = Instance.new("UICorner")
 uicornerBall.CornerRadius = UDim.new(1, 0)
 uicornerBall.Parent = ballButton
-
 local ballStroke = Instance.new("UIStroke")
 ballStroke.Thickness = 3
 ballStroke.Parent = ballButton
 
---// ESP Logic
+-- ESP Logic --
 local espEnabled = true
 local highlights = {}
 
@@ -160,7 +147,7 @@ end
 local Players_GetPlayers = Players.GetPlayers
 local RunService_Heartbeat = RunService.Heartbeat
 
---// Highlight Update
+-- Limit update frequency (e.g., 4 times per second)
 local updateInterval = 0.25
 local elapsedTime = 0
 
@@ -177,7 +164,6 @@ local function updateHighlights()
     end
 end
 
---// Button Connections
 espButton.MouseButton1Click:Connect(function()
     espEnabled = not espEnabled
     espButton.Text = espEnabled and "ESP ON" or "ESP OFF"
@@ -208,7 +194,8 @@ RunService_Heartbeat:Connect(function(dt)
     end
 end)
 
---// Dragging Logic
+-- Dragging Logic (unchanged) --
+
 local dragging, dragInput, dragStart, startPos
 
 local function updatePosition(guiObject, input)
@@ -220,8 +207,7 @@ end
 
 local function makeDraggable(guiObject)
     guiObject.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = guiObject.Position
@@ -234,6 +220,51 @@ local function makeDraggable(guiObject)
     end)
 
     guiObject.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
-           
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input == dragInput then
+            updatePosition(guiObject, input)
+        end
+    end)
+end
+
+makeDraggable(frame)
+makeDraggable(ballButton)
+
+-- Minimize and restore buttons (unchanged) --
+
+minimizeButton.MouseButton1Click:Connect(function()
+    frame.Visible = false
+    ballButton.Visible = true
+end)
+
+ballButton.MouseButton1Click:Connect(function()
+    ballButton.Visible = false
+    frame.Visible = true
+end)
+
+-- Close button functionality --
+closeButton.MouseButton1Click:Connect(function()
+    -- Remove all highlights
+    for plr, highlight in pairs(highlights) do
+        pcall(function() highlight:Destroy() end)
+    end
+    highlights = {}
+
+    -- Destroy the GUI to remove script visuals
+    screenGui:Destroy()
+end)
+
+-- Rainbow UIStroke cycling (unchanged) --
+
+local hue = 0
+RunService_Heartbeat:Connect(function(dt)
+    hue = (hue + dt * 0.5) % 1
+    local color = Color3.fromHSV(hue, 1, 1)
+    frameStroke.Color = color
+    ballStroke.Color = color
+end)
