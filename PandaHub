@@ -1,0 +1,63 @@
+-- LocalScript (place in StarterPlayerScripts)
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local uis = game:GetService("UserInputService")
+local runService = game:GetService("RunService")
+
+-- UI Setup
+local screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+screenGui.Name = "FlyToggleUI"
+
+local toggleButton = Instance.new("TextButton", screenGui)
+toggleButton.Size = UDim2.new(0, 120, 0, 50)
+toggleButton.Position = UDim2.new(0.5, -60, 0.9, -25)
+toggleButton.Text = "Toggle Fly"
+toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 20
+toggleButton.AutoButtonColor = true
+
+-- Fly Logic
+local flying = false
+local speed = 50
+local bodyGyro, bodyVelocity
+
+local function startFlying()
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.P = 9e4
+    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bodyGyro.CFrame = humanoidRootPart.CFrame
+    bodyGyro.Parent = humanoidRootPart
+
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.zero
+    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocity.Parent = humanoidRootPart
+
+    runService.RenderStepped:Connect(function()
+        if flying then
+            bodyGyro.CFrame = workspace.CurrentCamera.CFrame
+            bodyVelocity.Velocity = workspace.CurrentCamera.CFrame.LookVector * speed
+        end
+    end)
+end
+
+local function stopFlying()
+    if bodyGyro then bodyGyro:Destroy() end
+    if bodyVelocity then bodyVelocity:Destroy() end
+end
+
+toggleButton.MouseButton1Click:Connect(function()
+    flying = not flying
+    if flying then
+        startFlying()
+        toggleButton.Text = "Stop Flying"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
+    else
+        stopFlying()
+        toggleButton.Text = "Toggle Fly"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    end
+end)
