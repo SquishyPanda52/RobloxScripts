@@ -198,4 +198,168 @@ player.CharacterAdded:Connect(function(c)
 end)
 
 -- Launch
+task.defer(showChoice)local function stroke(p,t) local s=Instance.new("UIStroke"); s.Thickness=t or 1; s.Color=C_BLACK; s.Parent=p end
+local function gradient(p,top,bottom,rot) local g=Instance.new("UIGradient"); g.Color=ColorSequence.new(top or CHART_TOP,bottom or CHART_BOTTOM); g.Rotation=rot or 90; g.Parent=p end
+local function makeDraggable(frame,handles)
+	local dragging=false; local dragStart; local startPos
+	local function begin(input) if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=true; dragStart=input.Position; startPos=frame.Position end end
+	local function move(input) if not dragging then return end if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then local d=input.Position-dragStart; frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y) end end
+	local function ended(input) if input.UserInputState==Enum.UserInputState.End then dragging=false end end
+	for _,h in ipairs(handles) do h.InputBegan:Connect(begin); h.InputChanged:Connect(move); h.InputEnded:Connect(ended) end
+end
+local function makeDraggableButton(btn) makeDraggable(btn,{btn}) end
+
+-- State
+local mode="none" -- "pc" or "phone"
+local flying=false
+local speed=70
+local flyConn
+local rootAttachment,alignOrientation,linearVelocity,liftForce
+local kbConns={}
+local keyState={W=false,A=false,S=false,D=false}
+local controls
+local function getControls()
+	if controls then return controls end
+	local ps=player:FindFirstChild("PlayerScripts"); local pm=ps and ps:FindFirstChild("PlayerModule")
+	if pm then pcall(function() controls=require(pm):GetControls() end) end
+	return controls
+end
+
+-- Flight
+local function cleanFly()
+	if flyConn then flyConn:Disconnect() flyConn=nil end
+	if alignOrientation then alignOrientation:Destroy() alignOrientation=nil end
+	if linearVelocity then linearVelocity:Destroy() linearVelocity=nil end
+	if liftForce then liftForce:Destroy() liftForce=nil end
+	if rootAttachment then rootAttachment:Destroy() rootAttachment=nil end
+	humanoid.AutoRotate=true
+end
+local function desiredDir(camCF)
+	if mode=="pc" then
+		local z=(keyState.S and 1 or 0)-(keyState.W and 1 or 0)
+		local x=(keyState.D and 1 or 0)-(keyState.A and 1 or 0)
+		local v=camCF.RightVector*x + camCF.LookVector*(-z)
+		return (v.Magnitude>1e-3) and v.Unit or Vector3.zero
+	else
+		local c=getControls(); local m=c and c:GetMoveVector() or Vector3.zero
+		local forward=math.max(0,-m.Z); local strafe=m.X
+		local v=camCF.RightVector*strafe + camCF.LookVector*forward
+		return (v.Magnitude>1e-3) and v.Unit or Vector3.zero
+	end
+end
+local function startFlying()
+	if flying then return end
+	flying=true
+	rootAttachment=Instance.new("Attachment",hrp)
+	alignOrientation=Instance.new("AlignOrientation",hrp); alignOrientation.Attachment0=rootAttachment; alignOrientation.Mode=Enum.OrientationAlignmentMode.OneAttachment; alignOrientation.Responsiveness=60; alignOrientation.MaxTorque=math.huge
+	linearVelocity=Instance.new("LinearVelocity",hrp); linearVelocity.Attachment0=rootAttachment; linearVelocity.MaxForce=math.huge; linearVelocity.RelativeTo=Enum.ActuatorRelativeTo.World
+	liftForce=Instance.new("VectorForce",hrp); liftForce.Attachment0=rootAttachment; liftForce.RelativeTo=Enum.ActuatorRelativeTo.World
+	humanoid.AutoRotate=false
+	flyConn=RunService.RenderStepped:Connect(function()
+		if not flying then return end
+		local cam=workspace.CurrentCamera; local camCF=cam and cam.CFrame or hrp.CFrame
+		local dir=desiredDir(camCF)
+		linearVelocity.VectorVelocity=dir*speed
+		local face=(dir.Magnitude>1e-3) and dir or camCF.LookVector
+		alignOrientation.CFrame=CFrame.lookAt(hrp.Position,hrp.Position+face)
+		liftForce.Force=Vector3.new(0,hrp.AssemblyMass*workspace.Gravity,0)
+		if humanoid:GetState()~=Enum.HumanoidStateType.Freefall then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
+	end)
+end
+local function stopFlying() if not flying then return end flying=false; cleanFly() end
+
+-- Panel factory (with panda on bar)
+local function buildPanel(titleText,name)
+	local panel=Instance.new("Frame"); panel.Name=name or "Panel"; panel.AnchorPoint=Vector2.new(0.5,0.5); panel.Position=UDim2.new(0.5,0,0.5,0)
+	panel.Size=UDim2.fromOffset(320,190); panel.BackgroundColor3=CHART_TOP; panel.BorderSizePixel=0; panel.Parent=gui
+	corner(panel,12); stroke(panel,1); gradient(panel,CHART_TOP,CHART_BOTTOM,90)
+	local bar=Instance.new("Frame"); bar.Name="Bar"; bar.BackgroundTransparency=1; bar.Size=UDim2.new(1,0,0,36); bar.Parent=panel
+	local barBG=Instance.new("Frame"); barBG.Size=UDim2.new(1,-16,1,0); barBG.Position=UDim2.new(0,8,0,0); barBG.BackgroundColor3=CHART_TOP; barBG.BorderSizePixel=0; barBG.Parent=bar; corner(barBG,10); stroke(barBG,1); gradient(barBG,Color3.fromRGB(60,90,30),Color3.fromRGB(30,50,20),90)
+	local panda=Instance.new("ImageLabel"); panda.BackgroundTransparency=1; panda.Image=PANDA_ID; panda.Size=UDim2.fromOffset(22,22); panda.Position=UDim2.new(0,14,0.5,-11); panda.Parent=barBG
+	local title=Instance.new("TextLabel"); title.BackgroundTransparency=1; title.TextXAlignment=Enum.TextXAlignment.Left; title.Font=Enum.Font.GothamMedium; title.TextColor3=C_TEXT; title.TextSize=14; title.Text=titleText; title.Size=UDim2.new(1,-120,1,0); title.Position=UDim2.new(0,44,0,0); title.Parent=barBG
+	return panel,barBG
+end
+
+-- Collapsible wrapper
+local function attachCollapsible(panel)
+	local collapsedBtn=Instance.new("ImageButton"); collapsedBtn.Size=UDim2.fromOffset(56,56); collapsedBtn.AnchorPoint=Vector2.new(0.5,1); collapsedBtn.Position=UDim2.new(0.5,0,1,-84)
+	collapsedBtn.BackgroundColor3=CHART_TOP; collapsedBtn.Image=PANDA_ID; collapsedBtn.ImageColor3=Color3.new(1,1,1); collapsedBtn.Visible=false; collapsedBtn.Parent=gui
+	corner(collapsedBtn,14); stroke(collapsedBtn,1); gradient(collapsedBtn,CHART_TOP,CHART_BOTTOM,90); makeDraggableButton(collapsedBtn)
+	local bar=panel:FindFirstChild("Bar",true)
+	local collapseBtn=Instance.new("TextButton"); collapseBtn.Size=UDim2.fromOffset(28,28); collapseBtn.Position=UDim2.new(1,-36,0.5,-14); collapseBtn.Text="-"; collapseBtn.BackgroundColor3=Color3.fromRGB(40,40,40); collapseBtn.TextColor3=C_TEXT; collapseBtn.Font=Enum.Font.GothamBold; collapseBtn.TextSize=16; collapseBtn.Parent=bar
+	corner(collapseBtn,6); stroke(collapseBtn,1)
+	local function setOpen(open) panel.Visible=open; collapsedBtn.Visible=not open end
+	collapseBtn.MouseButton1Click:Connect(function() setOpen(false) end)
+	collapsedBtn.MouseButton1Click:Connect(function() setOpen(true) end)
+	makeDraggable(panel,{bar})
+	return collapsedBtn
+end
+
+-- Choice UI
+local function showChoice()
+	local panel,_bar=buildPanel("Choose Input","ChoicePanel")
+	local pcImg=Instance.new("ImageLabel"); pcImg.BackgroundTransparency=1; pcImg.Image=PC_IMG; pcImg.Size=UDim2.fromOffset(40,40); pcImg.Position=UDim2.new(0,26,0,70); pcImg.ScaleType=Enum.ScaleType.Fit; pcImg.Parent=panel
+	local phImg=Instance.new("ImageLabel"); phImg.BackgroundTransparency=1; phImg.Image=PH_IMG; phImg.Size=UDim2.fromOffset(40,40); phImg.Position=UDim2.new(0.5,26,0,70); phImg.ScaleType=Enum.ScaleType.Fit; phImg.Parent=panel
+	local pcBtn=Instance.new("TextButton"); pcBtn.Size=UDim2.new(0.5,-28,0,48); pcBtn.Position=UDim2.new(0,14,0,124); pcBtn.Text="PC / Emulator"; pcBtn.TextColor3=C_TEXT; pcBtn.Font=Enum.Font.GothamBold; pcBtn.TextSize=16; pcBtn.AutoButtonColor=true; pcBtn.Parent=panel
+	corner(pcBtn,10); stroke(pcBtn,1); gradient(pcBtn,BTN_TOP,BTN_BOTTOM,90)
+	local phBtn=Instance.new("TextButton"); phBtn.Size=UDim2.new(0.5,-28,0,48); phBtn.Position=UDim2.new(0.5,14,0,124); phBtn.Text="Phone"; phBtn.TextColor3=C_TEXT; phBtn.Font=Enum.Font.GothamBold; phBtn.TextSize=16; phBtn.AutoButtonColor=true; phBtn.Parent=panel
+	corner(phBtn,10); stroke(phBtn,1); gradient(phBtn,BTN_TOP,BTN_BOTTOM,90)
+	local collapsedBtn=attachCollapsible(panel) -- has panda
+	local function destroyChoice() collapsedBtn:Destroy(); panel:Destroy() end
+	pcBtn.MouseButton1Click:Connect(function()
+		mode="pc"; print("[FlySuite] Mode=PC/Emulator")
+		destroyChoice()
+		for _,c in ipairs(kbConns) do c:Disconnect() end; table.clear(kbConns)
+		local function onKey(b,down)
+			if b==Enum.KeyCode.W then keyState.W=down elseif b==Enum.KeyCode.A then keyState.A=down elseif b==Enum.KeyCode.S then keyState.S=down elseif b==Enum.KeyCode.D then keyState.D=down end
+		end
+		table.insert(kbConns, UIS.InputBegan:Connect(function(i,gp) if gp then return end if i.UserInputType==Enum.UserInputType.Keyboard then
+			if i.KeyCode==Enum.KeyCode.E then if flying then stopFlying() else startFlying() end end
+			onKey(i.KeyCode,true)
+		end end))
+		table.insert(kbConns, UIS.InputEnded:Connect(function(i,gp) if gp then return end if i.UserInputType==Enum.UserInputType.Keyboard then onKey(i.KeyCode,false) end end))
+		buildFlyUI("Fly (PC)","FlyPCPanel")
+	end)
+	phBtn.MouseButton1Click:Connect(function()
+		mode="phone"; print("[FlySuite] Mode=Phone")
+		destroyChoice()
+		buildFlyUI("Fly (Phone)","FlyPhonePanel")
+	end)
+end
+
+-- Fly UI
+function buildFlyUI(titleText,name)
+	local panel,_bar=buildPanel(titleText,name)
+	local toggle=Instance.new("TextButton"); toggle.Size=UDim2.new(1,-20,0,58); toggle.Position=UDim2.new(0,10,0,64); toggle.TextColor3=C_TEXT; toggle.Font=Enum.Font.GothamBold; toggle.TextSize=18; toggle.Text="Enable Fly"; toggle.Parent=panel
+	corner(toggle,10); stroke(toggle,1); gradient(toggle,BTN_TOP,BTN_BOTTOM,90)
+	local collapsedBtn=attachCollapsible(panel)
+	local function updateBtn() toggle.Text=flying and "Disable Fly" or "Enable Fly" end
+	updateBtn()
+	toggle.MouseButton1Click:Connect(function() if flying then stopFlying() else startFlying() end updateBtn() end)
+	-- Close button (X) on the bar right side using an ImageButton with panda for consistency
+	local bar=panel:FindFirstChild("Bar",true)
+	local close=Instance.new("ImageButton"); close.Size=UDim2.fromOffset(28,28); close.Position=UDim2.new(1,-68,0.5,-14); close.BackgroundColor3=CHART_TOP; close.Image=PANDA_ID; close.Parent=bar
+	corner(close,6); stroke(close,1); gradient(close,CHART_TOP,CHART_BOTTOM,90)
+	close.MouseButton1Click:Connect(function()
+		stopFlying()
+		for _,c in ipairs(kbConns) do c:Disconnect() end; table.clear(kbConns)
+		gui:Destroy()
+		_G.FlySuite=nil
+		task.defer(function() if script and script.Destroy then pcall(function() script:Destroy() end) end end)
+	end)
+	_G.FlySuite=_G.FlySuite or {}
+	_G.FlySuite.Toggle=function() if flying then stopFlying() else startFlying() end updateBtn() end
+	_G.FlySuite.Start=function() if not flying then startFlying() updateBtn() end end
+	_G.FlySuite.Stop=function() if flying then stopFlying() updateBtn() end end
+	_G.FlySuite.SetSpeed=function(v) speed=math.clamp(tonumber(v) or speed,10,300) end
+	return panel
+end
+
+-- Character refresh
+player.CharacterAdded:Connect(function(c)
+	character=c; hrp=c:WaitForChild("HumanoidRootPart"); humanoid=c:WaitForChild("Humanoid")
+	if flying then stopFlying() task.wait(0.15) startFlying() end
+end)
+
+-- Launch
 task.defer(showChoice)
