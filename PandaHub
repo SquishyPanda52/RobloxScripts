@@ -1,15 +1,14 @@
 --!strict
--- Panda Fly UI (Client-Only, Full Runtime-Generated)
+-- Panda Fly UI (Client-Only, Runtime-Generated) — v2
 -- Author: Copilot for Hilton
--- Features:
--- - Device selection screen is destroyed after choosing (Phone or PC)
--- - Expand button only visible when UI is collapsed (hidden when expanded)
--- - All UI + images run locally (runtime-instantiated, client-side Image assets)
--- - Close button (X) uses vector-drawn icon (no external asset) to guarantee visibility
--- - Uses provided image asset IDs (NOT decals)
--- - PC: E toggles fly; ShiftLock disabled
--- - Mobile: On-screen joystick + Up/Down buttons; Tap "Fly" toggle
--- - Clean teardown and re-entry safe
+-- Changes:
+-- - Close (X) now fully stops fly, disconnects inputs, destroys UI (no leftovers)
+-- - Speed is editable via numeric TextBox (PC + Mobile)
+-- - Mobile UI trimmed to 2 controls: Fly toggle + Speed input (no Boost, no Up/Down buttons)
+-- - Mobile joystick: forward/ascend engage "direction lock" for straight flight; camera can pan freely
+-- - Sideways strafing supported on mobile (joystick X axis)
+-- - Device selection deletes after choosing; expand button hidden when expanded
+-- - All assets are Image assets (client-only): Panda logo + device icons
 
 -- =====================================================================================
 -- Services
@@ -17,11 +16,10 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 local StarterGui = game:GetService("StarterGui")
 
 local LP = Players.LocalPlayer
-local PlayerGui = LP:FindFirstChildOfClass("PlayerGui")
+local PlayerGui = LP:FindFirstChildOfClass("PlayerGui") or LP:WaitForChild("PlayerGui")
 
 -- =====================================================================================
 -- Config / Assets
@@ -34,12 +32,11 @@ local ASSETS = {
 }
 
 -- Movement tuning
-local DEFAULT_SPEED = 64 -- studs/sec
-local SPEED_ACCEL = 96    -- speed while holding Shift (PC) or toggled boost on Mobile (optional)
-local TURN_DAMP = 12
-local INPUT_SMOOTH = 18
+local DEFAULT_SPEED = 64    -- studs/sec
+local TURN_SMOOTH = 18      -- input smoothing rate
+local SPEED_MIN, SPEED_MAX = 8, 300
 
--- UI sizing
+-- UI theme
 local THEME = {
 	BG = Color3.fromRGB(16, 16, 18),
 	Panel = Color3.fromRGB(24, 24, 28),
@@ -50,25 +47,24 @@ local THEME = {
 	Success = Color3.fromRGB(0, 220, 140),
 	Danger = Color3.fromRGB(255, 80, 95),
 }
-local UI_SIZE = UDim2.fromOffset(340, 220)
+local UI_SIZE = UDim2.fromOffset(340, 210)
 local UI_MINI_SIZE = UDim2.fromOffset(64, 64)
 
 -- =====================================================================================
 -- Cleanup any previous instance
 -- =====================================================================================
 pcall(function()
-	local old = PlayerGui and PlayerGui:FindFirstChild(GUI_NAME)
+	local old = PlayerGui:FindFirstChild(GUI_NAME)
 	if old then old:Destroy() end
 end)
 
--- Disable ShiftLock (as requested)
+-- Disable ShiftLock per request
 pcall(function()
 	LP.DevEnableMouseLock = false
-	StarterGui:SetCore("ResetButtonCallback", true) -- ensure reset works normally
 end)
 
 -- =====================================================================================
--- Utility: Instance creation sugar
+-- Helpers
 -- =====================================================================================
 local function create(className, props, children)
 	local inst = Instance.new(className)
@@ -76,40 +72,39 @@ local function create(className, props, children)
 		(inst :: any)[k] = v
 	end
 	for _, c in ipairs(children or {}) do
-		c.Parent = inst
+		(c :: any).Parent = inst
 	end
 	return inst
 end
 
-local function stroke(parent, color: Color3?, thickness: number?, transparency: number?)
+local function stroke(_, color: Color3?, thickness: number?, transparency: number?)
 	return create("UIStroke", {
 		Color = color or Color3.new(1,1,1),
 		Thickness = thickness or 1.6,
 		Transparency = transparency or 0,
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-	}, {}) :: UIStroke
+	}, {})
 end
 
-local function corner(parent, radius: number?)
-	return create("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, {}) :: UICorner
+local function corner(_, radius: number?)
+	return create("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, {})
 end
 
-local function padding(parent, p: number)
+local function padding(_, p: number)
 	return create("UIPadding", {
 		PaddingTop = UDim.new(0, p),
 		PaddingBottom = UDim.new(0, p),
 		PaddingLeft = UDim.new(0, p),
 		PaddingRight = UDim.new(0, p),
-	}, {}) :: UIPadding
+	}, {})
 end
 
--- Draggable helper (Frame-based, supports mouse + touch)
 local function makeDraggable(frame: Frame)
 	local dragging = false
 	local dragStart = Vector2.zero
 	local startPos = frame.Position
-
-	local inputConn, moveConn, endConn
+	local moveConn: RBXScriptConnection? = nil
+	local endConn: RBXScriptConnection? = nil
 
 	frame.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -131,15 +126,14 @@ local function makeDraggable(frame: Frame)
 			endConn = input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
-					if moveConn then moveConn:Disconnect() end
-					if endConn then endConn:Disconnect() end
+					if moveConn then moveConn:Disconnect() moveConn = nil end
+					if endConn then endConn:Disconnect() endConn = nil end
 				end
 			end)
 		end
 	end)
 end
 
--- Vector "X" icon constructed from two bars (guaranteed visible without external asset)
 local function buildVectorX(parent: Instance, color: Color3)
 	local holder = create("Frame", {
 		Name = "VectorX",
@@ -153,9 +147,7 @@ local function buildVectorX(parent: Instance, color: Color3)
 			Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.fromOffset(2, 16),
 			Rotation = 45,
-		}, {
-			corner(nil, 2)
-		}),
+		}, { corner(nil, 2) }),
 		create("Frame", {
 			BackgroundColor3 = color,
 			BorderSizePixel = 0,
@@ -163,15 +155,12 @@ local function buildVectorX(parent: Instance, color: Color3)
 			Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.fromOffset(2, 16),
 			Rotation = -45,
-		}, {
-			corner(nil, 2)
-		}),
+		}, { corner(nil, 2) }),
 	})
 	holder.Parent = parent
 	return holder
 end
 
--- Plus icon for expand button (two bars)
 local function buildVectorPlus(parent: Instance, color: Color3)
 	local holder = create("Frame", {
 		Name = "VectorPlus",
@@ -184,18 +173,14 @@ local function buildVectorPlus(parent: Instance, color: Color3)
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.fromOffset(2, 14),
-		}, {
-			corner(nil, 2)
-		}),
+		}, { corner(nil, 2) }),
 		create("Frame", {
 			BackgroundColor3 = color,
 			BorderSizePixel = 0,
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.fromOffset(14, 2),
-		}, {
-			corner(nil, 2)
-		}),
+		}, { corner(nil, 2) }),
 	})
 	holder.Parent = parent
 	return holder
@@ -224,30 +209,24 @@ local function buildDeviceSelect(): Frame
 		Position = UDim2.fromScale(0.5, 0.5),
 		BackgroundColor3 = THEME.Panel,
 		BorderSizePixel = 0,
-	}, {
-		corner(nil, 12),
-		stroke(nil, THEME.Accent, 1.4, 0.2),
-		padding(nil, 12),
-	})
+	}, { corner(nil, 12), stroke(nil, THEME.Accent, 1.4, 0.2), padding(nil, 12) })
 
-	local vlist = create("UIListLayout", {
+	create("UIListLayout", {
 		Padding = UDim.new(0, 10),
 		FillDirection = Enum.FillDirection.Vertical,
 		HorizontalAlignment = Enum.HorizontalAlignment.Center,
 		VerticalAlignment = Enum.VerticalAlignment.Center,
 		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, {})
-	vlist.Parent = root
+	}, {}).Parent = root
 
-	local logo = create("ImageLabel", {
+	create("ImageLabel", {
 		Name = "PandaLogo",
 		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(72, 72),
 		Image = ASSETS.PandaLogo,
-	}, {})
-	logo.Parent = root
+	}, {}).Parent = root
 
-	local title = create("TextLabel", {
+	create("TextLabel", {
 		Name = "Title",
 		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(340, 28),
@@ -255,8 +234,7 @@ local function buildDeviceSelect(): Frame
 		Font = Enum.Font.GothamBold,
 		TextSize = 22,
 		TextColor3 = THEME.Text,
-	}, {})
-	title.Parent = root
+	}, {}).Parent = root
 
 	local buttonsRow = create("Frame", {
 		Name = "ButtonsRow",
@@ -269,7 +247,7 @@ local function buildDeviceSelect(): Frame
 			HorizontalAlignment = Enum.HorizontalAlignment.Center,
 			VerticalAlignment = Enum.VerticalAlignment.Center,
 			SortOrder = Enum.SortOrder.LayoutOrder,
-		}, {}),
+		}, {})
 	})
 	buttonsRow.Parent = root
 
@@ -280,68 +258,59 @@ local function buildDeviceSelect(): Frame
 			BackgroundColor3 = THEME.BG,
 			Size = UDim2.fromOffset(160, 110),
 			Text = "",
-		}, {
-			corner(nil, 10),
-			stroke(nil, THEME.AccentSoft, 1.2, 0.35),
-			padding(nil, 10),
-		}) :: TextButton
+		}, { corner(nil, 10), stroke(nil, THEME.AccentSoft, 1.2, 0.35), padding(nil, 10) }) :: TextButton
 
-		local col = create("UIListLayout", {
+		create("UIListLayout", {
 			Padding = UDim.new(0, 8),
 			FillDirection = Enum.FillDirection.Vertical,
 			HorizontalAlignment = Enum.HorizontalAlignment.Center,
 			VerticalAlignment = Enum.VerticalAlignment.Center,
 			SortOrder = Enum.SortOrder.LayoutOrder,
-		}, {})
-		col.Parent = btn
+		}, {}).Parent = btn
 
-		local icon = create("ImageLabel", {
+		create("ImageLabel", {
 			BackgroundTransparency = 1,
 			Size = UDim2.fromOffset(48, 48),
 			Image = img,
-		}, {})
-		icon.Parent = btn
+		}, {}).Parent = btn
 
-		local txt = create("TextLabel", {
+		create("TextLabel", {
 			BackgroundTransparency = 1,
 			Size = UDim2.fromOffset(140, 26),
 			Text = label,
 			Font = Enum.Font.GothamBold,
 			TextSize = 18,
 			TextColor3 = THEME.Text,
-		}, {})
-		txt.Parent = btn
+		}, {}).Parent = btn
 
 		return btn
 	end
 
-	local phoneBtn = makeDeviceBtn("Phone", "Phone", ASSETS.PandaPhoneIcon)
-	local pcBtn = makeDeviceBtn("PC", "PC / Emulator", ASSETS.PandaPCIcon)
-	phoneBtn.Parent = buttonsRow
-	pcBtn.Parent = buttonsRow
+	makeDeviceBtn("Phone", "Phone", ASSETS.PandaPhoneIcon).Parent = buttonsRow
+	makeDeviceBtn("PC", "PC / Emulator", ASSETS.PandaPCIcon).Parent = buttonsRow
 
 	return root
 end
 
 -- =====================================================================================
--- Fly Controller (client-only, HRP Body movers)
+-- Fly Controller
 -- =====================================================================================
 type FlyController = {
 	Active: boolean,
 	Mode: "PC" | "Phone",
 	Speed: number,
-	Boost: boolean,
 	Connections: { RBXScriptConnection },
 	SteppedConn: RBXScriptConnection?,
 	BodyGyro: BodyGyro?,
 	BodyVel: BodyVelocity?,
-	TargetMove: Vector3,
-	CamYawLock: boolean,
+	TargetMove: Vector3, -- X (strafe), Y (ascend/descend), Z (forward/back)
+	-- Mobile direction lock (fly straight, free-look camera):
+	DirLockCF: CFrame?,
+	DirLockEngaged: boolean,
 }
 
 local function getCharacter(): Model?
-	local char = LP.Character or LP.CharacterAdded:Wait()
-	return char
+	return LP.Character or LP.CharacterAdded:Wait()
 end
 
 local function ensureBodyMovers(fc: FlyController)
@@ -351,7 +320,6 @@ local function ensureBodyMovers(fc: FlyController)
 	local hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
 	if not hrp or not hum then return end
 
-	-- Create or reuse
 	if not fc.BodyGyro then
 		local bg = Instance.new("BodyGyro")
 		bg.P = 9e4
@@ -375,6 +343,15 @@ local function cleanupBodyMovers(fc: FlyController)
 	if fc.BodyVel then fc.BodyVel:Destroy() fc.BodyVel = nil end
 end
 
+local function disconnectAll(fc: FlyController)
+	for _, c in ipairs(fc.Connections) do
+		if c.Connected then pcall(function() c:Disconnect() end) end
+	end
+	table.clear(fc.Connections)
+	if fc.SteppedConn then pcall(function() fc.SteppedConn:Disconnect() end) end
+	fc.SteppedConn = nil
+end
+
 local function startFly(fc: FlyController)
 	if fc.Active then return end
 	fc.Active = true
@@ -386,45 +363,45 @@ local function startFly(fc: FlyController)
 	local hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
 	if not hrp or not hum then return end
 
-	-- While flying, reduce physics interference
 	pcall(function()
 		hum.PlatformStand = false
 		hum:ChangeState(Enum.HumanoidStateType.Physics)
 	end)
 
 	local cam = workspace.CurrentCamera
-	local moveVec = Vector3.zero
+	local moveLerp = Vector3.zero
 	local currentVel = Vector3.zero
 
 	fc.SteppedConn = RunService.RenderStepped:Connect(function(dt)
 		if not fc.Active then return end
 		if not hrp or not hum then return end
-		local speed = fc.Boost and SPEED_ACCEL or fc.Speed
 
 		-- Smooth input
-		moveVec = moveVec:Lerp(fc.TargetMove, math.clamp(dt * INPUT_SMOOTH, 0, 1))
+		moveLerp = moveLerp:Lerp(fc.TargetMove, math.clamp(dt * TURN_SMOOTH, 0, 1))
 
-		-- Camera-relative movement
-		local look = cam.CFrame.LookVector
-		local right = cam.CFrame.RightVector
+		-- Direction basis
 		local up = Vector3.new(0, 1, 0)
+		local forward: Vector3
+		local right: Vector3
 
-		local wish = (look * moveVec.Z) + (right * moveVec.X) + (up * moveVec.Y)
-		if wish.Magnitude > 1 then
-			wish = wish.Unit
+		if fc.Mode == "Phone" and fc.DirLockEngaged and fc.DirLockCF then
+			forward = fc.DirLockCF.LookVector
+			right = fc.DirLockCF.RightVector
+		else
+			forward = cam.CFrame.LookVector
+			right = cam.CFrame.RightVector
 		end
 
-		local desiredVel = wish * speed
-		currentVel = currentVel:Lerp(desiredVel, math.clamp(dt * INPUT_SMOOTH, 0, 1))
+		-- Compose desired velocity
+		local wish = (right * moveLerp.X) + (up * moveLerp.Y) + (forward * moveLerp.Z)
+		if wish.Magnitude > 1 then wish = wish.Unit end
+		local desiredVel = wish * fc.Speed
+		currentVel = currentVel:Lerp(desiredVel, math.clamp(dt * TURN_SMOOTH, 0, 1))
 
-		if fc.BodyVel then
-			fc.BodyVel.Velocity = currentVel
-		end
-
+		if fc.BodyVel then fc.BodyVel.Velocity = currentVel end
 		if fc.BodyGyro then
-			-- Keep upright-ish but follow camera yaw/pitch
-			local cf = cam.CFrame
-			fc.BodyGyro.CFrame = cf
+			-- Align to camera for responsive feel (still allows straight path due to lock)
+			fc.BodyGyro.CFrame = workspace.CurrentCamera.CFrame
 		end
 	end)
 end
@@ -438,11 +415,7 @@ local function stopFly(fc: FlyController)
 	local char = getCharacter()
 	if char then
 		local hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
-		if hum then
-			pcall(function()
-				hum:ChangeState(Enum.HumanoidStateType.Freefall)
-			end)
-		end
+		if hum then pcall(function() hum:ChangeState(Enum.HumanoidStateType.Freefall) end) end
 	end
 end
 
@@ -451,21 +424,81 @@ local function newFlyController(mode: "PC" | "Phone"): FlyController
 		Active = false,
 		Mode = mode,
 		Speed = DEFAULT_SPEED,
-		Boost = false,
 		Connections = {},
 		SteppedConn = nil,
 		BodyGyro = nil,
 		BodyVel = nil,
 		TargetMove = Vector3.zero,
-		CamYawLock = false,
+		DirLockCF = nil,
+		DirLockEngaged = false,
 	}
 end
 
 -- =====================================================================================
--- Main UI (shared core) + PC/Mobile specific controls
+-- UI builders (Main)
 -- =====================================================================================
+local function addSpeedInput(parent: Instance, fc: FlyController): TextBox
+	-- Label + TextBox row
+	local row = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 28),
+	}, {
+		create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Left,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			Padding = UDim.new(0, 8),
+		}, {})
+	})
+	row.Parent = parent
+
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(70, 24),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Font = Enum.Font.Gotham,
+		TextSize = 16,
+		TextColor3 = THEME.Mutetext,
+		Text = "Speed",
+	}, {}).Parent = row
+
+	local tb = create("TextBox", {
+		BackgroundColor3 = THEME.BG,
+		Size = UDim2.fromOffset(80, 24),
+		Font = Enum.Font.GothamSemibold,
+		TextSize = 16,
+		TextColor3 = THEME.Text,
+		PlaceholderText = tostring(DEFAULT_SPEED),
+		Text = tostring(fc.Speed),
+		ClearTextOnFocus = false,
+	}, { corner(nil, 6), stroke(nil, THEME.AccentSoft, 1, 0.3), padding(nil, 4) }) :: TextBox
+	tb.Parent = row
+
+	local function setSpeedFromText()
+		local num = tonumber(tb.Text:gsub("[^%d%.%-]", ""))
+		if num then
+			num = math.clamp(math.floor(num + 0.5), SPEED_MIN, SPEED_MAX)
+			fc.Speed = num
+			tb.Text = tostring(num)
+		else
+			tb.Text = tostring(fc.Speed)
+		end
+	end
+	tb.FocusLost:Connect(function() setSpeedFromText() end)
+	tb:GetPropertyChangedSignal("Text"):Connect(function()
+		-- live sanitize: keep digits only
+		local sanitized = tb.Text:gsub("[^%d]", "")
+		if sanitized ~= tb.Text then
+			tb.Text = sanitized
+			tb.CursorPosition = #tb.Text + 1
+		end
+	end)
+
+	return tb
+end
+
 local function buildMainUI(mode: "PC" | "Phone")
-	-- Root container (expanded panel)
+	-- Root (expanded)
 	local main = create("Frame", {
 		Name = "MainPanel",
 		Parent = screenGui,
@@ -475,11 +508,7 @@ local function buildMainUI(mode: "PC" | "Phone")
 		BackgroundColor3 = THEME.Panel,
 		BorderSizePixel = 0,
 		Visible = true,
-	}, {
-		corner(nil, 12),
-		stroke(nil, THEME.Accent, 1.4, 0.2),
-	})
-
+	}, { corner(nil, 12), stroke(nil, THEME.Accent, 1.4, 0.2) })
 	makeDraggable(main)
 
 	-- Header
@@ -489,27 +518,23 @@ local function buildMainUI(mode: "PC" | "Phone")
 		Size = UDim2.new(1, 0, 0, 46),
 		BackgroundColor3 = THEME.BG,
 		BorderSizePixel = 0,
-	}, {
-		corner(nil, 12),
-		padding(nil, 10),
-	})
-	local hList = create("UIListLayout", {
+	}, { corner(nil, 12), padding(nil, 10) })
+
+	create("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		Padding = UDim.new(0, 8),
 		VerticalAlignment = Enum.VerticalAlignment.Center,
 		HorizontalAlignment = Enum.HorizontalAlignment.Left,
 		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, {})
-	hList.Parent = header
+	}, {}).Parent = header
 
-	local hLogo = create("ImageLabel", {
+	create("ImageLabel", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(26, 26),
 		Image = ASSETS.PandaLogo,
-	}, {})
-	hLogo.Parent = header
+	}, {}).Parent = header
 
-	local hTitle = create("TextLabel", {
+	create("TextLabel", {
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, -140, 1, 0),
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -517,10 +542,8 @@ local function buildMainUI(mode: "PC" | "Phone")
 		Font = Enum.Font.GothamBold,
 		TextSize = 18,
 		TextColor3 = THEME.Text,
-	}, {})
-	hTitle.Parent = header
+	}, {}).Parent = header
 
-	-- Right-side header controls container
 	local headerRight = create("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(120, 26),
@@ -530,33 +553,27 @@ local function buildMainUI(mode: "PC" | "Phone")
 			Padding = UDim.new(0, 8),
 			HorizontalAlignment = Enum.HorizontalAlignment.Right,
 			VerticalAlignment = Enum.VerticalAlignment.Center,
-		}, {}),
+		}, {})
 	})
 	headerRight.Parent = header
 
-	-- Collapse button
 	local collapseBtn = create("TextButton", {
 		Name = "Collapse",
 		AutoButtonColor = true,
 		Text = "",
 		BackgroundColor3 = THEME.Panel,
 		Size = UDim2.fromOffset(28, 28),
-	}, {
-		corner(nil, 8),
-	})
+	}, { corner(nil, 8) }) :: TextButton
 	collapseBtn.Parent = headerRight
-	buildVectorPlus(collapseBtn, THEME.Text) -- visually indicates collapsible
+	buildVectorPlus(collapseBtn, THEME.Text)
 
-	-- Close button (vector X)
 	local closeBtn = create("TextButton", {
 		Name = "Close",
 		AutoButtonColor = true,
 		Text = "",
 		BackgroundColor3 = THEME.Danger,
 		Size = UDim2.fromOffset(28, 28),
-	}, {
-		corner(nil, 8),
-	})
+	}, { corner(nil, 8) }) :: TextButton
 	closeBtn.Parent = headerRight
 	buildVectorX(closeBtn, Color3.fromRGB(255,255,255))
 
@@ -567,17 +584,15 @@ local function buildMainUI(mode: "PC" | "Phone")
 		Size = UDim2.new(1, -20, 1, -66),
 		Position = UDim2.fromOffset(10, 56),
 		BackgroundTransparency = 1,
-	}, {
-		padding(nil, 6),
-	})
-	local vBody = create("UIListLayout", {
+	}, { padding(nil, 6) })
+
+	create("UIListLayout", {
 		Padding = UDim.new(0, 10),
 		FillDirection = Enum.FillDirection.Vertical,
 		HorizontalAlignment = Enum.HorizontalAlignment.Left,
 		VerticalAlignment = Enum.VerticalAlignment.Top,
 		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, {})
-	vBody.Parent = body
+	}, {}).Parent = body
 
 	-- Status row
 	local statusRow = create("Frame", {
@@ -589,16 +604,15 @@ local function buildMainUI(mode: "PC" | "Phone")
 			HorizontalAlignment = Enum.HorizontalAlignment.Left,
 			VerticalAlignment = Enum.VerticalAlignment.Center,
 			Padding = UDim.new(0, 8),
-		}, {}),
+		}, {})
 	})
 	statusRow.Parent = body
 
-	local deviceIcon = create("ImageLabel", {
+	create("ImageLabel", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(20,20),
 		Image = (mode == "Phone") and ASSETS.PandaPhoneIcon or ASSETS.PandaPCIcon,
-	}, {})
-	deviceIcon.Parent = statusRow
+	}, {}).Parent = statusRow
 
 	local statusText = create("TextLabel", {
 		BackgroundTransparency = 1,
@@ -607,16 +621,9 @@ local function buildMainUI(mode: "PC" | "Phone")
 		Font = Enum.Font.Gotham,
 		TextSize = 16,
 		TextColor3 = THEME.Mutetext,
-		Text = (mode == "PC") and "Press E to toggle fly. Shift = boost." or "Tap Fly to toggle. Use joystick + Up/Down.",
-	}, {})
+		Text = (mode == "PC") and "Press E to toggle fly." or "Tap Fly to toggle. Joystick: Fwd/Up = straight flight",
+	}, {}) :: TextLabel
 	statusText.Parent = statusRow
-
-	-- Controls container (mode specific)
-	local controls = create("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 1, -34),
-	}, {})
-	controls.Parent = body
 
 	-- Expand (mini) button - hidden when expanded
 	local expandBtn = create("ImageButton", {
@@ -626,39 +633,22 @@ local function buildMainUI(mode: "PC" | "Phone")
 		BorderSizePixel = 0,
 		Size = UI_MINI_SIZE,
 		Position = UDim2.new(0, 20, 1, -UI_MINI_SIZE.Y.Offset - 20),
-		Visible = false, -- IMPORTANT: hidden while main panel is visible
-		Image = ASSETS.PandaLogo, -- face/logo
+		Visible = false,
+		Image = ASSETS.PandaLogo,
 		ScaleType = Enum.ScaleType.Fit,
-	}, {
-		corner(nil, 16),
-		stroke(nil, THEME.Accent, 1.2, 0.25),
-	})
+	}, { corner(nil, 16), stroke(nil, THEME.Accent, 1.2, 0.25) }) :: ImageButton
 	buildVectorPlus(expandBtn, THEME.Text)
 	makeDraggable(expandBtn)
 
-	-- Collapse/Expand behavior
 	local function setExpanded(isOpen: boolean)
 		main.Visible = isOpen
-		expandBtn.Visible = not isOpen -- expand should ONLY show when collapsed
+		expandBtn.Visible = not isOpen
 	end
-	collapseBtn.MouseButton1Click:Connect(function()
-		setExpanded(false)
-	end)
-	expandBtn.MouseButton1Click:Connect(function()
-		setExpanded(true)
-	end)
+	collapseBtn.MouseButton1Click:Connect(function() setExpanded(false) end)
+	expandBtn.MouseButton1Click:Connect(function() setExpanded(true) end)
 
-	-- Close behavior (full cleanup)
-	closeBtn.MouseButton1Click:Connect(function()
-		screenGui:Destroy()
-	end)
-
-	-- =================================================================================
-	-- Input wiring / Fly controller
-	-- =================================================================================
+	-- Fly controller + wiring
 	local fc = newFlyController(mode)
-
-	-- Recreate movers after respawn
 	table.insert(fc.Connections, LP.CharacterAdded:Connect(function()
 		if fc.Active then
 			task.wait(0.2)
@@ -666,22 +656,57 @@ local function buildMainUI(mode: "PC" | "Phone")
 		end
 	end))
 
-	-- Shared: keep TargetMove updated
+	-- Close: hard teardown (stop flight, disconnect, destroy UI)
+	local function hardClose()
+		stopFly(fc)
+		disconnectAll(fc)
+		if screenGui then screenGui:Destroy() end
+	end
+	closeBtn.MouseButton1Click:Connect(hardClose)
+
+	-- Controls (mode-specific)
 	if mode == "PC" then
+		-- PC: E to toggle; WASD + Space / Ctrl; Speed TextBox
+		local controls = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, -34) }, {})
+		controls.Parent = body
+
+		local rowTop = create("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, 28),
+		}, {
+			create("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				HorizontalAlignment = Enum.HorizontalAlignment.Left,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+				Padding = UDim.new(0, 8),
+			}, {})
+		})
+		rowTop.Parent = controls
+
+		local flyState = create("TextLabel", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(110, 24),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = "Fly: OFF",
+			Font = Enum.Font.GothamBold,
+			TextSize = 16,
+			TextColor3 = THEME.Mutetext,
+		}, {}) :: TextLabel
+		flyState.Parent = rowTop
+
+		-- Speed input
+		addSpeedInput(controls, fc)
+
+		-- Input mapping
 		local pressed: {[Enum.KeyCode]: boolean} = {}
 		local function updateMove()
 			local x, y, z = 0, 0, 0
-			if pressed[Enum.KeyCode.W] then z = z + 1 end
-			if pressed[Enum.KeyCode.S] then z = z - 1 end
-			if pressed[Enum.KeyCode.A] then x = x - 1 end
-			if pressed[Enum.KeyCode.D] then x = x + 1 end
-			if pressed[Enum.KeyCode.Space] then y = y + 1 end
-			if pressed[Enum.KeyCode.LeftControl] or pressed[Enum.KeyCode.LeftShift] and pressed[Enum.KeyCode.LeftControl] then
-				-- LeftControl for down, Shift handled separately for boost
-				y = y - 1
-			elseif pressed[Enum.KeyCode.LeftControl] then
-				y = y - 1
-			end
+			if pressed[Enum.KeyCode.W] then z += 1 end
+			if pressed[Enum.KeyCode.S] then z -= 1 end
+			if pressed[Enum.KeyCode.A] then x -= 1 end
+			if pressed[Enum.KeyCode.D] then x += 1 end
+			if pressed[Enum.KeyCode.Space] then y += 1 end
+			if pressed[Enum.KeyCode.LeftControl] or pressed[Enum.KeyCode.RightControl] then y -= 1 end
 			fc.TargetMove = Vector3.new(x, y, z)
 		end
 
@@ -699,83 +724,30 @@ local function buildMainUI(mode: "PC" | "Phone")
 						statusText.Text = "Fly: ON (Press E)"
 						statusText.TextColor3 = THEME.Success
 					end
-				elseif input.KeyCode == Enum.KeyCode.LeftShift then
-					fc.Boost = true
 				end
 				updateMove()
+			elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+				-- Optional: wheel adjusts speed
+				local delta = math.clamp(input.Position.Z, -1, 1)
+				fc.Speed = math.clamp(fc.Speed + delta * 4, SPEED_MIN, SPEED_MAX)
 			end
 		end))
-		table.insert(fc.Connections, UserInputService.InputEnded:Connect(function(input, gpe)
+		table.insert(fc.Connections, UserInputService.InputEnded:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.Keyboard then
 				pressed[input.KeyCode] = false
-				if input.KeyCode == Enum.KeyCode.LeftShift then
-					fc.Boost = false
-				end
 				updateMove()
 			end
 		end))
 
-		-- PC control panel (speed readout)
-		local pcRow = create("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 0, 28),
-		}, {
-			create("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				HorizontalAlignment = Enum.HorizontalAlignment.Left,
-				VerticalAlignment = Enum.VerticalAlignment.Center,
-				Padding = UDim.new(0, 8),
-			}, {}),
-		})
-		pcRow.Parent = controls
-
-		local flyState = create("TextLabel", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(120, 24),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = "Fly: OFF",
-			Font = Enum.Font.GothamBold,
-			TextSize = 16,
-			TextColor3 = THEME.Mutetext,
-		}, {})
-		flyState.Parent = pcRow
-
-		local speedLbl = create("TextLabel", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(120, 24),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = ("Speed: %d"):format(fc.Speed),
-			Font = Enum.Font.Gotham,
-			TextSize = 16,
-			TextColor3 = THEME.Mutetext,
-		}, {})
-		speedLbl.Parent = pcRow
-
-		-- MouseWheel to adjust speed
-		table.insert(fc.Connections, UserInputService.InputChanged:Connect(function(input, gpe)
-			if gpe then return end
-			if input.UserInputType == Enum.UserInputType.MouseWheel then
-				local delta = math.clamp(input.Position.Z, -1, 1)
-				fc.Speed = math.clamp(fc.Speed + delta * 4, 8, 300)
-				speedLbl.Text = ("Speed: %d"):format(math.floor(fc.Speed + 0.5))
-			end
-		end))
-
-		-- Reflect state text on toggle
 		table.insert(fc.Connections, RunService.Heartbeat:Connect(function()
 			flyState.Text = fc.Active and "Fly: ON" or "Fly: OFF"
 			flyState.TextColor3 = fc.Active and THEME.Success or THEME.Mutetext
 		end))
 
 	else
-		-- Mobile: Fly toggle button, joystick, up/down, boost
-		local mobileCol = create("UIListLayout", {
-			FillDirection = Enum.FillDirection.Vertical,
-			HorizontalAlignment = Enum.HorizontalAlignment.Left,
-			VerticalAlignment = Enum.VerticalAlignment.Top,
-			Padding = UDim.new(0, 12),
-		}, {})
-		mobileCol.Parent = controls
+		-- Mobile: Only Fly toggle + Speed input; Joystick with "direction lock"
+		local controls = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, -34) }, {})
+		controls.Parent = body
 
 		local topRow = create("Frame", {
 			BackgroundTransparency = 1,
@@ -786,53 +758,28 @@ local function buildMainUI(mode: "PC" | "Phone")
 				HorizontalAlignment = Enum.HorizontalAlignment.Left,
 				VerticalAlignment = Enum.VerticalAlignment.Center,
 				Padding = UDim.new(0, 8),
-			}, {}),
+			}, {})
 		})
 		topRow.Parent = controls
 
 		local flyToggle = create("TextButton", {
 			BackgroundColor3 = THEME.BG,
-			Size = UDim2.fromOffset(90, 32),
+			Size = UDim2.fromOffset(100, 32),
 			Font = Enum.Font.GothamBold,
 			TextSize = 16,
 			Text = "Fly: OFF",
 			TextColor3 = THEME.Text,
 			AutoButtonColor = true,
-		}, {
-			corner(nil, 8),
-			stroke(nil, THEME.AccentSoft, 1, 0.3),
-		}) :: TextButton
+		}, { corner(nil, 8), stroke(nil, THEME.AccentSoft, 1, 0.3) }) :: TextButton
 		flyToggle.Parent = topRow
 
-		local boostToggle = create("TextButton", {
-			BackgroundColor3 = THEME.BG,
-			Size = UDim2.fromOffset(90, 32),
-			Font = Enum.Font.GothamBold,
-			TextSize = 16,
-			Text = "Boost: OFF",
-			TextColor3 = THEME.Text,
-			AutoButtonColor = true,
-		}, {
-			corner(nil, 8),
-			stroke(nil, THEME.AccentSoft, 1, 0.3),
-		}) :: TextButton
-		boostToggle.Parent = topRow
+		-- Speed input
+		addSpeedInput(controls, fc)
 
-		local speedLbl = create("TextLabel", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(120, 28),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = ("Speed: %d"):format(DEFAULT_SPEED),
-			Font = Enum.Font.Gotham,
-			TextSize = 16,
-			TextColor3 = THEME.Mutetext,
-		}, {})
-		speedLbl.Parent = topRow
-
-		-- Joystick row
+		-- Joystick
 		local joyRow = create("Frame", {
 			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 1, -50),
+			Size = UDim2.new(1, 0, 1, -70),
 		}, {
 			create("UIListLayout", {
 				FillDirection = Enum.FillDirection.Horizontal,
@@ -845,67 +792,21 @@ local function buildMainUI(mode: "PC" | "Phone")
 
 		local joyBase = create("Frame", {
 			BackgroundColor3 = THEME.BG,
-			Size = UDim2.fromOffset(120, 120),
+			Size = UDim2.fromOffset(130, 130),
 			BorderSizePixel = 0,
-		}, {
-			corner(nil, 60),
-			stroke(nil, THEME.AccentSoft, 1, 0.3),
-		})
+		}, { corner(nil, 65), stroke(nil, THEME.AccentSoft, 1, 0.3) })
 		joyBase.Parent = joyRow
 
 		local joyKnob = create("Frame", {
 			BackgroundColor3 = THEME.Accent,
-			Size = UDim2.fromOffset(36, 36),
+			Size = UDim2.fromOffset(40, 40),
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromScale(0.5, 0.5),
 			BorderSizePixel = 0,
-		}, {
-			corner(nil, 18),
-		})
+		}, { corner(nil, 20) })
 		joyKnob.Parent = joyBase
 
-		local upDownCol = create("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(90, 120),
-		}, {
-			create("UIListLayout", {
-				FillDirection = Enum.FillDirection.Vertical,
-				HorizontalAlignment = Enum.HorizontalAlignment.Left,
-				VerticalAlignment = Enum.VerticalAlignment.Top,
-				Padding = UDim.new(0, 12),
-			}, {}),
-		})
-		upDownCol.Parent = joyRow
-
-		local upBtn = create("TextButton", {
-			BackgroundColor3 = THEME.Panel,
-			Size = UDim2.fromOffset(90, 48),
-			Text = "Up",
-			Font = Enum.Font.GothamBold,
-			TextSize = 18,
-			TextColor3 = THEME.Text,
-			AutoButtonColor = true,
-		}, {
-			corner(nil, 8),
-			stroke(nil, THEME.AccentSoft, 1, 0.3),
-		}) :: TextButton
-		upBtn.Parent = upDownCol
-
-		local downBtn = create("TextButton", {
-			BackgroundColor3 = THEME.Panel,
-			Size = UDim2.fromOffset(90, 48),
-			Text = "Down",
-			Font = Enum.Font.GothamBold,
-			TextSize = 18,
-			TextColor3 = THEME.Text,
-			AutoButtonColor = true,
-		}, {
-			corner(nil, 8),
-			stroke(nil, THEME.AccentSoft, 1, 0.3),
-		}) :: TextButton
-		downBtn.Parent = upDownCol
-
-		-- Wiring
+		-- Fly toggle behavior
 		flyToggle.MouseButton1Click:Connect(function()
 			if fc.Active then
 				stopFly(fc)
@@ -922,34 +823,20 @@ local function buildMainUI(mode: "PC" | "Phone")
 			end
 		end)
 
-		boostToggle.MouseButton1Click:Connect(function()
-			fc.Boost = not fc.Boost
-			boostToggle.Text = fc.Boost and "Boost: ON" or "Boost: OFF"
-			boostToggle.BackgroundColor3 = fc.Boost and THEME.Accent or THEME.BG
-		end)
-
-		-- Speed adjust by long-press on label (simple)
-		speedLbl.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.Touch then
-				-- quick bump
-				fc.Speed = math.clamp(fc.Speed + 8, 8, 300)
-				speedLbl.Text = ("Speed: %d"):format(math.floor(fc.Speed + 0.5))
-			end
-		end)
-
-		-- Joystick math
+		-- Joystick math with direction lock
 		local joyTouch: number? = nil
-		local baseSize = joyBase.AbsoluteSize
-		local radius = math.min(baseSize.X, baseSize.Y) * 0.5 - (joyKnob.AbsoluteSize.X * 0.5)
-
-		local function setKnob(pos: Vector2)
+		local function baseSize() return joyBase.AbsoluteSize end
+		local function knobSize() return joyKnob.AbsoluteSize end
+		local function radius() return math.min(baseSize().X, baseSize().Y) * 0.5 - (knobSize().X * 0.5) end
+		local function setKnobLocal(pos: Vector2)
 			joyKnob.Position = UDim2.fromOffset(pos.X, pos.Y)
 		end
-
 		local function centerKnob()
-			local center = joyBase.AbsolutePosition + baseSize/2
-			setKnob(Vector2.new(baseSize.X/2, baseSize.Y/2))
-			fc.TargetMove = Vector3.new(0, fc.TargetMove.Y, 0)
+			setKnobLocal(Vector2.new(baseSize().X/2, baseSize().Y/2))
+			fc.TargetMove = Vector3.new(0, 0, 0)
+			-- when fully centered, release direction lock after a short idle
+			fc.DirLockEngaged = false
+			fc.DirLockCF = nil
 		end
 		centerKnob()
 
@@ -958,7 +845,6 @@ local function buildMainUI(mode: "PC" | "Phone")
 				joyTouch = input.TouchId
 			end
 		end)
-
 		joyBase.InputEnded:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.Touch and joyTouch == input.TouchId then
 				joyTouch = nil
@@ -970,80 +856,79 @@ local function buildMainUI(mode: "PC" | "Phone")
 			if gpe then return end
 			if joyTouch ~= nil and touch.TouchId == joyTouch then
 				local basePos = joyBase.AbsolutePosition
+				local bs = baseSize()
 				local localPos = Vector2.new(
-					math.clamp(touch.Position.X - basePos.X, 0, baseSize.X),
-					math.clamp(touch.Position.Y - basePos.Y, 0, baseSize.Y)
+					math.clamp(touch.Position.X - basePos.X, 0, bs.X),
+					math.clamp(touch.Position.Y - basePos.Y, 0, bs.Y)
 				)
-				local offset = localPos - baseSize/2
+				local offset = localPos - bs/2
+				local rad = radius()
 				local clamped = offset
-				if offset.Magnitude > radius then
-					clamped = offset.Unit * radius
-				end
-				setKnob(baseSize/2 + clamped)
+				if offset.Magnitude > rad then clamped = offset.Unit * rad end
+				setKnobLocal(bs/2 + clamped)
 
-				-- Map to move: x = horizontal, z = vertical (forward), invert Y axis
-				local nx = clamped.X / radius
-				local nz = -(clamped.Y / radius)
-				fc.TargetMove = Vector3.new(nx, fc.TargetMove.Y, nz)
+				-- Map joystick to movement:
+				-- X: strafe left/right (negative = left, positive = right)
+				-- Y: vertical (up is negative screen Y) -> invert
+				-- Z: forward/back (up on stick = forward)
+				local nx = clamped.X / rad            -- [-1, 1]
+				local ny = -(clamped.Y / rad)         -- [-1, 1], up is positive
+				local nz = ny                         -- forward/back shares same axis as visual up/down on the stick
+				local yVert = 0
+
+				-- Split vertical vs forward:
+				-- Use half-planes to infer intent: if knob above center -> ascend, below -> descend, also feed forward from same push.
+				if math.abs(ny) > 0.05 then
+					yVert = ny
+				end
+
+				-- Direction lock: engage when forward magnitude or ascend magnitude is meaningful
+				local planarMag = math.abs(nz)
+				if (planarMag > 0.15 or math.abs(yVert) > 0.15) then
+					if not fc.DirLockEngaged or not fc.DirLockCF then
+						fc.DirLockEngaged = true
+						fc.DirLockCF = workspace.CurrentCamera.CFrame
+					end
+				else
+					-- if near center, release lock
+					fc.DirLockEngaged = false
+					fc.DirLockCF = nil
+				end
+
+				fc.TargetMove = Vector3.new(nx, yVert, nz)
 			end
 		end)
-
-		-- Up/Down hold
-		local upHeld, downHeld = false, false
-		local function updateY()
-			local y = (upHeld and 1 or 0) + (downHeld and -1 or 0)
-			fc.TargetMove = Vector3.new(fc.TargetMove.X, y, fc.TargetMove.Z)
-		end
-		upBtn.MouseButton1Down:Connect(function() upHeld = true updateY() end)
-		upBtn.MouseButton1Up:Connect(function() upHeld = false updateY() end)
-		downBtn.MouseButton1Down:Connect(function() downHeld = true updateY() end)
-		downBtn.MouseButton1Up:Connect(function() downHeld = false updateY() end)
 	end
 
-	-- Start collapsed state? We default to expanded for discoverability.
+	-- Start expanded for discoverability
 	setExpanded(true)
 
 	return {
 		Main = main,
 		ExpandBtn = expandBtn,
+		Status = statusText,
 	}
 end
 
 -- =====================================================================================
--- Boot: Build device selection, handle choice, then destroy selection
+-- Boot: Device selection → build chosen UI
 -- =====================================================================================
 local deviceSelect = buildDeviceSelect()
 
 local function onChoose(mode: "PC" | "Phone")
-	-- Destroy selection screen immediately (as requested)
-	if deviceSelect and deviceSelect.Parent then
-		deviceSelect:Destroy()
-	end
-	-- Build main UI for chosen mode
+	if deviceSelect and deviceSelect.Parent then deviceSelect:Destroy() end
 	buildMainUI(mode)
 end
 
--- Button wiring
 local phoneBtn = deviceSelect:FindFirstChild("ButtonsRow") and (deviceSelect.ButtonsRow:FindFirstChild("Phone") :: TextButton)
 local pcBtn = deviceSelect:FindFirstChild("ButtonsRow") and (deviceSelect.ButtonsRow:FindFirstChild("PC") :: TextButton)
 
-if phoneBtn then
-	phoneBtn.MouseButton1Click:Connect(function()
-		onChoose("Phone")
-	end)
-end
-if pcBtn then
-	pcBtn.MouseButton1Click:Connect(function()
-		onChoose("PC")
-	end)
-end
+if phoneBtn then phoneBtn.MouseButton1Click:Connect(function() onChoose("Phone") end) end
+if pcBtn then pcBtn.MouseButton1Click:Connect(function() onChoose("PC") end) end
 
--- Auto-pick a sensible default if only one modality is available
+-- Auto-pick phone if touch-only
 if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-	-- Likely pure mobile device
 	task.delay(0.3, function()
-		if deviceSelect and deviceSelect.Parent then
-			onChoose("Phone")
-		end
+		if deviceSelect and deviceSelect.Parent then onChoose("Phone") end
 	end)
 end
