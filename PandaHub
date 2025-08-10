@@ -1,4 +1,13 @@
--- Client-only, runtime UI. Needs LocalPlayer, RenderStepped, HumanoidRootPart.
+--[[ 
+FlySuite v2 — Client-only, runtime UI. Loader -> Choice -> Identical Fly UIs (PC vs Phone).
+- PC mode: WASD only (backward allowed).
+- Phone mode: forward/strafe only (no backward).
+- Death auto-stop + UI reset.
+- Collapse (-) to draggable (+), touch-friendly and mouse-friendly.
+- Fully code-generated. Prints parent locations. Exposes _G.FlySuite API.
+]]--
+
+-- Services / essentials
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UIS=game:GetService("UserInputService")
@@ -9,20 +18,24 @@ local humanoid=character:WaitForChild("Humanoid")
 
 print("[FlySuite] script parent:", script.Parent and script.Parent:GetFullName() or "nil (memory-only)")
 
+-- UI root
 local pg=player:WaitForChild("PlayerGui")
+local existing=pg:FindFirstChild("FlySuiteUI"); if existing then existing:Destroy() end
 local gui=Instance.new("ScreenGui"); gui.Name="FlySuiteUI"; gui.ResetOnSpawn=false; gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.DisplayOrder=9999; gui.Parent=pg
 print("[FlySuite] UI parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
 
+-- Theme
 local C_PRIMARY=Color3.fromRGB(0,170,255)
 local C_BG=Color3.fromRGB(20,22,26)
 local C_BAR=Color3.fromRGB(30,33,38)
 local C_TEXT=Color3.new(1,1,1)
 local C_STOP=Color3.fromRGB(220,110,110)
+local C_STROKE=Color3.fromRGB(60,65,70)
 local function corner(p,r) local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r or 8); c.Parent=p end
-local function stroke(p,t) local s=Instance.new("UIStroke"); s.Thickness=t or 1; s.Color=Color3.fromRGB(60,65,70); s.Transparency=0.2; s.Parent=p end
+local function stroke(p,t,c,tr) local s=Instance.new("UIStroke"); s.Thickness=t or 1; s.Color=c or C_STROKE; s.Transparency=tr or 0.2; s.Parent=p end
 
--- Globals/state
-local mode="none" -- "pc" or "phone"
+-- State
+local mode="none" -- "pc" | "phone"
 local flying=false
 local speed=70
 local flyConn,hDiedConn
@@ -30,14 +43,17 @@ local rootAttachment,alignOrientation,linearVelocity,liftForce
 local kbConns={}
 local keyState={W=false,A=false,S=false,D=false}
 
+-- Controls accessor (for mobile)
 local controls
 local function getControls()
 	if controls then return controls end
-	local ps=player:FindFirstChild("PlayerScripts"); local pm=ps and ps:FindFirstChild("PlayerModule")
+	local ps=player:FindFirstChild("PlayerScripts")
+	local pm=ps and ps:FindFirstChild("PlayerModule")
 	if pm then controls=require(pm):GetControls() end
 	return controls
 end
 
+-- Flight helpers
 local function cleanFly()
 	if flyConn then flyConn:Disconnect() flyConn=nil end
 	if alignOrientation then alignOrientation:Destroy() alignOrientation=nil end
@@ -55,7 +71,7 @@ local function desiredDir(camCF)
 		return (v.Magnitude>1e-3) and v.Unit or Vector3.zero
 	elseif mode=="phone" then
 		local m=getControls() and getControls():GetMoveVector() or Vector3.zero
-		local forward=math.max(0,-m.Z) -- forward only
+		local forward=math.max(0,-m.Z)
 		local strafe=m.X
 		local v=camCF.RightVector*strafe + camCF.LookVector*forward
 		return (v.Magnitude>1e-3) and v.Unit or Vector3.zero
@@ -82,12 +98,16 @@ local function startFlying()
 		if humanoid:GetState()~=Enum.HumanoidStateType.Freefall then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
 	end)
 end
-
 local function stopFlying() if not flying then return end flying=false; cleanFly() end
 
+-- Death hook (auto stop & UI-safe)
 local function hookHumanoid(h)
 	if hDiedConn then hDiedConn:Disconnect() hDiedConn=nil end
-	hDiedConn=h.Died:Connect(function() if flying then print("[FlySuite] Died: stopping fly") end; stopFlying() end)
+	hDiedConn=h.Died:Connect(function()
+		if flying then print("[FlySuite] Died: stopping fly") end
+		stopFlying()
+		if _G.FlySuite and _G.FlySuite._refresh then _G.FlySuite._refresh() end
+	end)
 end
 hookHumanoid(humanoid)
 player.CharacterAdded:Connect(function(c)
@@ -95,15 +115,13 @@ player.CharacterAdded:Connect(function(c)
 	if flying then stopFlying() task.wait(0.15) startFlying() end
 end)
 
--- Drag helper
+-- Drag helper (panels)
 local function makeDraggable(frame,handles)
 	local dragging=false; local dragStart; local startPos
 	local function begin(input)
 		if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
 			dragging=true; dragStart=input.Position; startPos=frame.Position
-			local con; con=input.Changed:Connect(function()
-				if input.UserInputState==Enum.UserInputState.End then dragging=false if con then con:Disconnect() end end
-			end)
+			local con; con=input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then dragging=false if con then con:Disconnect() end end end)
 		end
 	end
 	local function move(input)
@@ -119,20 +137,40 @@ local function makeDraggable(frame,handles)
 	end
 end
 
--- Panel builder (shared look)
+-- Drag helper (collapsed +)
+local function makePlusDraggable(btn)
+	local dragging=false; local dragStart; local startPos
+	btn.InputBegan:Connect(function(input)
+		if (input.UserInputType==Enum.UserInputType.MouseButton1 and UIS.MouseEnabled) or input.UserInputType==Enum.UserInputType.Touch then
+			dragging=true; dragStart=input.Position; startPos=btn.Position
+			local con; con=input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then dragging=false if con then con:Disconnect() end end end)
+		end
+	end)
+	btn.InputChanged:Connect(function(input)
+		if not dragging then return end
+		if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
+			local d=input.Position-dragStart
+			btn.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
+		end
+	end)
+end
+
+-- Panel builder (shared)
 local function buildPanel(titleText,name)
 	local panel=Instance.new("Frame"); panel.Name=name or "Panel"; panel.AnchorPoint=Vector2.new(0.5,0.5); panel.Position=UDim2.new(0.5,0,0.5,0)
 	panel.Size=UDim2.fromOffset(280,150); panel.BackgroundColor3=C_BG; panel.BorderSizePixel=0; panel.Parent=gui; corner(panel,10); stroke(panel,1)
 	local bar=Instance.new("Frame"); bar.Name="Bar"; bar.BackgroundColor3=C_BAR; bar.BorderSizePixel=0; bar.Size=UDim2.new(1,0,0,32); bar.Parent=panel
 	local title=Instance.new("TextLabel"); title.BackgroundTransparency=1; title.TextXAlignment=Enum.TextXAlignment.Left
-	title.Font=Enum.Font.GothamMedium; title.TextColor3=C_TEXT; title.TextSize=14; title.Text=titleText; title.Size=UDim2.new(1,-44,1,0); title.Position=UDim2.new(0,10,0,0); title.Parent=bar
+	title.Font=Enum.Font.GothamMedium; title.TextColor3=C_TEXT; title.TextSize=14; title.Text=titleText; title.Size=UDim2.new(1,-72,1,0); title.Position=UDim2.new(0,10,0,0); title.Parent=bar
+	local collapse=Instance.new("TextButton"); collapse.Size=UDim2.fromOffset(24,24); collapse.Position=UDim2.new(1,-56,0.5,-12); collapse.Text="-"
+	collapse.BackgroundColor3=Color3.fromRGB(50,54,60); collapse.TextColor3=C_TEXT; collapse.Font=Enum.Font.GothamBold; collapse.TextSize=16; collapse.Parent=bar; corner(collapse,6)
 	local close=Instance.new("TextButton"); close.Size=UDim2.fromOffset(24,24); close.Position=UDim2.new(1,-28,0.5,-12); close.Text="X"
 	close.BackgroundColor3=Color3.fromRGB(70,40,40); close.TextColor3=C_TEXT; close.Font=Enum.Font.GothamBold; close.TextSize=16; close.Parent=bar; corner(close,6)
 	makeDraggable(panel,{bar})
-	return panel,bar,close
+	return panel,bar,close,collapse
 end
 
--- Loader (bouncing dots)
+-- Loader (dots)
 local loader=Instance.new("Frame"); loader.Name="Loader"; loader.AnchorPoint=Vector2.new(0.5,0.5); loader.Position=UDim2.new(0.5,0,0.5,0)
 loader.Size=UDim2.fromOffset(140,44); loader.BackgroundTransparency=1; loader.Parent=gui
 local function mkDot(x) local d=Instance.new("Frame"); d.Size=UDim2.fromOffset(12,12); d.Position=UDim2.new(0,x,0.5,0); d.AnchorPoint=Vector2.new(0,0.5); d.BackgroundColor3=C_PRIMARY; d.BorderSizePixel=0; d.Parent=loader; corner(d,6); return d end
@@ -150,7 +188,7 @@ end)
 local function showChoice()
 	if loaderConn then loaderConn:Disconnect() loaderConn=nil end
 	if loader then loader:Destroy() end
-	local panel,bar,close=buildPanel("Choose Input","ChoicePanel")
+	local panel,bar,close,collapse=buildPanel("Choose Input","ChoicePanel")
 	local prompt=Instance.new("TextLabel"); prompt.BackgroundTransparency=1; prompt.TextColor3=C_TEXT; prompt.Font=Enum.Font.Gotham; prompt.TextSize=16
 	prompt.Text="Are you on PC/Emulator or Phone?"; prompt.Size=UDim2.new(1,-20,0,24); prompt.Position=UDim2.new(0,10,0,46); prompt.Parent=panel
 	local pcBtn=Instance.new("TextButton"); pcBtn.Size=UDim2.new(0.5,-15,0,44); pcBtn.Position=UDim2.new(0,10,0,86); pcBtn.Text="PC / Emulator"
@@ -158,61 +196,115 @@ local function showChoice()
 	local phBtn=Instance.new("TextButton"); phBtn.Size=UDim2.new(0.5,-15,0,44); phBtn.Position=UDim2.new(0.5,5,0,86); phBtn.Text="Phone"
 	phBtn.BackgroundColor3=C_PRIMARY; phBtn.TextColor3=C_TEXT; phBtn.Font=Enum.Font.GothamBold; phBtn.TextSize=16; phBtn.AutoButtonColor=true; phBtn.Parent=panel; corner(phBtn,8)
 
-	local function destroyAll() stopFlying(); gui:Destroy(); _G.FlySuite=nil; task.defer(function() if script and script.Destroy then script:Destroy() end end) end
+	local collapsedBtn=Instance.new("TextButton")
+	collapsedBtn.Size=UDim2.fromOffset(46,46)
+	collapsedBtn.AnchorPoint=Vector2.new(0.5,1)
+	collapsedBtn.Position=UDim2.new(0.5,0,1,-80)
+	collapsedBtn.BackgroundColor3=C_PRIMARY
+	collapsedBtn.Text="+"
+	collapsedBtn.TextColor3=C_TEXT
+	collapsedBtn.Font=Enum.Font.GothamBold
+	collapsedBtn.TextSize=22
+	collapsedBtn.Visible=false
+	collapsedBtn.Parent=gui
+	corner(collapsedBtn,12)
+	makePlusDraggable(collapsedBtn)
+
+	local function setPanelOpen(open)
+		panel.Visible=open
+		collapsedBtn.Visible=not open
+	end
+	collapse.MouseButton1Click:Connect(function() setPanelOpen(false) end)
+	collapsedBtn.MouseButton1Click:Connect(function() setPanelOpen(true) end)
+
+	local function destroyAll()
+		stopFlying()
+		for _,c in ipairs(kbConns) do c:Disconnect() end
+		table.clear(kbConns)
+		gui:Destroy()
+		_G.FlySuite=nil
+		task.defer(function() if script and script.Destroy then script:Destroy() end end)
+	end
 	close.MouseButton1Click:Connect(destroyAll)
 
 	pcBtn.MouseButton1Click:Connect(function()
 		mode="pc"; print("[FlySuite] Mode = PC/Emulator")
-		panel:Destroy()
-		task.defer(function() -- ensure clean transition
-			local function onKey(b,down)
-				if b==Enum.KeyCode.W then keyState.W=down elseif b==Enum.KeyCode.A then keyState.A=down
-				elseif b==Enum.KeyCode.S then keyState.S=down elseif b==Enum.KeyCode.D then keyState.D=down end
-			end
-			for _,c in ipairs(kbConns) do c:Disconnect() end; table.clear(kbConns)
-			table.insert(kbConns, UIS.InputBegan:Connect(function(i,gp) if gp then return end if i.UserInputType==Enum.UserInputType.Keyboard then onKey(i.KeyCode,true) end end))
-			table.insert(kbConns, UIS.InputEnded:Connect(function(i,gp) if gp then return end if i.UserInputType==Enum.UserInputType.Keyboard then onKey(i.KeyCode,false) end end))
-			local p=buildFlyUI("Fly (PC)","FlyPCPanel")
-			-- no extra actions
-		end)
+		panel:Destroy(); collapsedBtn:Destroy()
+		for _,c in ipairs(kbConns) do c:Disconnect() end; table.clear(kbConns)
+		local function onKey(b,down)
+			if b==Enum.KeyCode.W then keyState.W=down elseif b==Enum.KeyCode.A then keyState.A=down
+			elseif b==Enum.KeyCode.S then keyState.S=down elseif b==Enum.KeyCode.D then keyState.D=down end
+		end
+		table.insert(kbConns, UIS.InputBegan:Connect(function(i,gp) if gp then return end if i.UserInputType==Enum.UserInputType.Keyboard then onKey(i.KeyCode,true) end end))
+		table.insert(kbConns, UIS.InputEnded:Connect(function(i,gp) if gp then return end if i.UserInputType==Enum.UserInputType.Keyboard then onKey(i.KeyCode,false) end end))
+		buildFlyUI("Fly (PC)","FlyPCPanel")
 	end)
 
 	phBtn.MouseButton1Click:Connect(function()
 		mode="phone"; print("[FlySuite] Mode = Phone")
-		panel:Destroy()
-		task.defer(function()
-			for _,c in ipairs(kbConns) do c:Disconnect() end; table.clear(kbConns)
-			local p=buildFlyUI("Fly (Phone)","FlyPhonePanel")
-			-- no extra actions
-		end)
+		panel:Destroy(); collapsedBtn:Destroy()
+		for _,c in ipairs(kbConns) do c:Disconnect() end; table.clear(kbConns)
+		buildFlyUI("Fly (Phone)","FlyPhonePanel")
 	end)
 end
 
--- Shared Fly UI (same look, different name/title)
+-- Shared Fly UI
 function buildFlyUI(titleText,name)
-	local panel,bar,close=buildPanel(titleText,name)
+	local panel,bar,close,collapse=buildPanel(titleText,name)
+
 	local toggle=Instance.new("TextButton"); toggle.Name="Toggle"; toggle.Size=UDim2.new(1,-20,0,50); toggle.Position=UDim2.new(0,10,0,56)
 	toggle.BackgroundColor3=C_PRIMARY; toggle.TextColor3=C_TEXT; toggle.Font=Enum.Font.GothamBold; toggle.TextSize=18; toggle.Text="Enable Fly"; toggle.Parent=panel; corner(toggle,8)
 
-	local function updateBtn() toggle.Text = flying and "Disable Fly" or "Enable Fly"; toggle.BackgroundColor3 = flying and C_STOP or C_PRIMARY end
+	local collapsedBtn=Instance.new("TextButton")
+	collapsedBtn.Size=UDim2.fromOffset(46,46)
+	collapsedBtn.AnchorPoint=Vector2.new(0.5,1)
+	collapsedBtn.Position=UDim2.new(0.5,0,1,-80)
+	collapsedBtn.BackgroundColor3=C_PRIMARY
+	collapsedBtn.Text="+"
+	collapsedBtn.TextColor3=C_TEXT
+	collapsedBtn.Font=Enum.Font.GothamBold
+	collapsedBtn.TextSize=22
+	collapsedBtn.Visible=false
+	collapsedBtn.Parent=gui
+	corner(collapsedBtn,12)
+	makePlusDraggable(collapsedBtn)
+
+	local function setPanelOpen(open)
+		panel.Visible=open
+		collapsedBtn.Visible=not open
+	end
+	collapse.MouseButton1Click:Connect(function() setPanelOpen(false) end)
+	collapsedBtn.MouseButton1Click:Connect(function() setPanelOpen(true) end)
+
+	local function updateBtn()
+		toggle.Text=flying and "Disable Fly" or "Enable Fly"
+		toggle.BackgroundColor3=flying and C_STOP or C_PRIMARY
+	end
 	updateBtn()
 
-	toggle.MouseButton1Click:Connect(function() if flying then stopFlying() else startFlying() end updateBtn() end)
-	close.MouseButton1Click:Connect(function()
-		stopFlying()
-		for _,c in ipairs(kbConns) do c:Disconnect() end; table.clear(kbConns)
-		gui:Destroy(); _G.FlySuite=nil; task.defer(function() if script and script.Destroy then script:Destroy() end end)
+	toggle.MouseButton1Click:Connect(function()
+		if flying then stopFlying() else startFlying() end
+		updateBtn()
 	end)
 
-	-- Expose simple controls
+	close.MouseButton1Click:Connect(function()
+		stopFlying()
+		for _,c in ipairs(kbConns) do c:Disconnect() end
+		table.clear(kbConns)
+		gui:Destroy()
+		_G.FlySuite=nil
+		task.defer(function() if script and script.Destroy then script:Destroy() end end)
+	end)
+
 	_G.FlySuite=_G.FlySuite or {}
 	_G.FlySuite.Toggle=function() if flying then stopFlying() else startFlying() end updateBtn() end
 	_G.FlySuite.Start=function() if not flying then startFlying() updateBtn() end end
 	_G.FlySuite.Stop=function() if flying then stopFlying() updateBtn() end end
 	_G.FlySuite.SetSpeed=function(v) speed=math.clamp(tonumber(v) or speed,10,300) end
+	_G.FlySuite._refresh=function() updateBtn() end
 
 	return panel
 end
 
--- Kick things off
-task.delay(1.2,showChoice)
+-- Begin: loader -> choice
+task.delay(1.0,showChoice)
