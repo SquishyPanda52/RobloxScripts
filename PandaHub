@@ -1,209 +1,305 @@
--- LocalScript (place in StarterPlayerScripts)
-local player = game.Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-local uis = game:GetService("UserInputService")
-local runService = game:GetService("RunService")
+--[[
+When you’re creating a mechanic from scratch with code, what really matters is that the code runs on the client, not where it lives in the Explorer. Whether the local script shows up under workspace, PlayerGui, or nowhere at all, as long as it has access to:
 
--- UI Setup
-local screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
-screenGui.Name = "FlyToggleUI"
+game.Players.LocalPlayer
 
---[[ 
-    100% local, fully runtime-generated UI + flight.
-    Mobile-focused: big buttons, touch-friendly, draggable panel only when open.
-    Collapse behavior: open panel shows "-" corner button; closed state shows a "+" button.
---]]
+RunService.RenderStepped (or Heartbeat)
 
--- ScreenGui config
-screenGui.IgnoreGuiInset = true
-screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+The player’s HumanoidRootPart
 
+Quick Tips
+To avoid any parent-dependent bugs, use absolute service calls:
+
+If we ever need the code to act like a true LocalScript (e.g., GUI in PlayerGui), you can forcibly reparent:
+script.Parent = player:WaitForChild("PlayerGui")
+
+For maximum stealth and reliability, combine with auto-reparent logic:
+
+-- detect where you are, then optionally move
+
+if not script:IsDescendantOf(game:GetService("StarterPlayer").StarterPlayerScripts) then
+    script.Parent = game:GetService("StarterPlayer").StarterPlayerScripts
+end
+
+Other Frequent  Spots
+Memory-Only (No Visible Parent) Some code execute purely in memory. You won’t see the script object anywhere in the Explorer.
+
+CoreGui UI-focused code often lands here
+
+ReplicatedFirst / ReplicatedStorage Less common, but occasionally used by coders that want their code to replicate to clients or persist beyond a single session.
+
+StarterPlayerScripts / PlayerScripts  can reparent here to run code as a true LocalScript
+
+Try to use Memory only the most, if necessary use the other mechanics
+
+but try to do StarterPlayerScripts / PlayersScripts the LEAST.
+]]
+
+-- =================================================================================================
+-- Local fly system (UI fully generated in code, mobile-first, draggable only when open)
+-- Memory-first execution: we do NOT reparent unless absolutely necessary.
+-- =================================================================================================
+
+-- Services (absolute calls to avoid parent-dependent bugs)
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local UserInputService   = game:GetService("UserInputService")
+local GuiService         = game:GetService("GuiService")
+local StarterPlayer      = game:GetService("StarterPlayer")
+
+-- LocalPlayer and character plumbing (robust across respawns)
+local player = Players.LocalPlayer
+while not player do task.wait() player = Players.LocalPlayer end
+
+local function getCharacter()
+    local char = player.Character or player.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local hum = char:WaitForChild("Humanoid")
+    return char, hum, hrp
+end
+
+local character, humanoid, root = getCharacter()
+
+player.CharacterAdded:Connect(function()
+    character, humanoid, root = getCharacter()
+    -- If we were flying at respawn, restore flight safely
+    if _G.__FlyState and _G.__FlyState.flying then
+        task.defer(function()
+            _G.__FlyState.restoreAfterRespawn = true
+        end)
+    end
+end)
+
+-- Optional stealth reparenting (disabled by default to prefer memory-only)
+--[[
+if not script:IsDescendantOf(StarterPlayer.StarterPlayerScripts) then
+    script.Parent = StarterPlayer.StarterPlayerScripts
+end
+]]
+
+-- =================================================================================================
 -- State
+-- =================================================================================================
+_G.__FlyState = _G.__FlyState or {}
 local flying = false
 local panelOpen = true
-local ascendHeld, descendHeld = false, false
-local speed = 70              -- planar speed (studs/sec)
-local verticalSpeed = 55      -- vertical speed (studs/sec)
-local turnResponsiveness = 40 -- AlignOrientation responsiveness
-local velSmoothing = 0.25     -- lower = snappier, higher = smoother
+local ascendHeld = false
+local descendHeld = false
+
+-- Tunables (mobile-friendly defaults)
+local horizontalSpeed = 72      -- studs/sec
+local verticalSpeed   = 48      -- studs/sec
+local turnResponsiveness = 55   -- AlignOrientation responsiveness
+local uiPadding = 12
+
+-- Connections for cleanup
 local renderConn: RBXScriptConnection? = nil
+local inputConns: {RBXScriptConnection} = {}
 
--- Attempt to use Roblox's PlayerModule controls for consistent mobile thumbstick/PC WASD
-local Controls do
-    local ok, pm = pcall(function()
-        return require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
-    end)
-    Controls = (ok and pm and pm:GetControls()) or nil
+-- Flight constraints
+local rootAttachment: Attachment? = nil
+local alignOrientation: AlignOrientation? = nil
+local linearVelocity: LinearVelocity? = nil
+
+-- =================================================================================================
+-- UI (all generated in code)
+-- =================================================================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "Fly_UI"
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 1000
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Helper: common UI parts
+local function addCorner(inst, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 8)
+    c.Parent = inst
+    return c
 end
 
--- Utilities
-local function getMoveVector(): Vector3
-    if Controls and Controls.GetMoveVector then
-        local v = Controls:GetMoveVector()
-        -- Controls returns X (right), Z (forward). Y is unused here.
-        return Vector3.new(v.X, 0, v.Z)
-    end
-    -- Fallback for rare cases without Controls
-    local v = Vector3.new(0, 0, 0)
-    if uis:IsKeyDown(Enum.KeyCode.A) then v += Vector3.new(-1, 0, 0) end
-    if uis:IsKeyDown(Enum.KeyCode.D) then v += Vector3.new(1, 0, 0) end
-    if uis:IsKeyDown(Enum.KeyCode.W) then v += Vector3.new(0, 0, -1) end
-    if uis:IsKeyDown(Enum.KeyCode.S) then v += Vector3.new(0, 0, 1) end
-    return v.Magnitude > 1 and v.Unit or v
+local function addStroke(inst, thickness, color, transparency)
+    local s = Instance.new("UIStroke")
+    s.Thickness = thickness or 1.5
+    s.Color = color or Color3.fromRGB(0,0,0)
+    s.Transparency = transparency or 0.2
+    s.Parent = inst
+    return s
 end
 
-local function clampToViewport(pos: UDim2)
-    local size = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-    local x = math.clamp(pos.X.Offset, 10, size.X - 10)
-    local y = math.clamp(pos.Y.Offset, 10, size.Y - 10)
-    return UDim2.fromOffset(x, y)
+local function styleButton(btn, bg, txt, bold, rounded)
+    btn.AutoButtonColor = true
+    btn.BackgroundColor3 = bg
+    btn.TextColor3 = txt or Color3.new(1,1,1)
+    btn.Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham
+    btn.TextScaled = true
+    btn.RichText = false
+    btn.Active = true
+    addCorner(btn, rounded and 10 or 6)
+    addStroke(btn, 1.5, Color3.fromRGB(0,0,0), 0.4)
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 8)
+    padding.PaddingRight = UDim.new(0, 8)
+    padding.Parent = btn
 end
 
--- Main UI panel
+-- Main panel (draggable only when open)
 local panel = Instance.new("Frame")
 panel.Name = "FlyPanel"
 panel.AnchorPoint = Vector2.new(0.5, 1)
-panel.Position = UDim2.new(0.5, 0, 1, -160)
-panel.Size = UDim2.new(0, 230, 0, 160)
+panel.Size = UDim2.fromOffset(260, 170)
+panel.Position = UDim2.new(0.5, 0, 1, -(150))
 panel.BackgroundColor3 = Color3.fromRGB(24, 26, 30)
-panel.BorderSizePixel = 0
 panel.Active = true
-panel.Selectable = false
+panel.Visible = true
+addCorner(panel, 12)
+addStroke(panel, 2, Color3.fromRGB(0,0,0), 0.25)
 panel.Parent = screenGui
 
-local panelCorner = Instance.new("UICorner", panel); panelCorner.CornerRadius = UDim.new(0, 10)
-local panelStroke = Instance.new("UIStroke", panel); panelStroke.Thickness = 1; panelStroke.Color = Color3.fromRGB(60, 65, 72)
+local layout = Instance.new("UIListLayout")
+layout.FillDirection = Enum.FillDirection.Vertical
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, uiPadding)
+layout.Parent = panel
+
+local panelPad = Instance.new("UIPadding")
+panelPad.PaddingTop = UDim.new(0, uiPadding)
+panelPad.PaddingBottom = UDim.new(0, uiPadding)
+panelPad.PaddingLeft = UDim.new(0, uiPadding)
+panelPad.PaddingRight = UDim.new(0, uiPadding)
+panelPad.Parent = panel
+
+-- Header row
+local header = Instance.new("Frame")
+header.BackgroundTransparency = 1
+header.Size = UDim2.new(1, 0, 0, 32)
+header.LayoutOrder = 1
+header.Parent = panel
+
+local headerLayout = Instance.new("UIListLayout")
+headerLayout.FillDirection = Enum.FillDirection.Horizontal
+headerLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+headerLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+headerLayout.Padding = UDim.new(0, 8)
+headerLayout.Parent = header
 
 local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.Parent = panel
-title.Size = UDim2.new(1, -40, 0, 26)
-title.Position = UDim2.new(0, 10, 0, 6)
 title.BackgroundTransparency = 1
-title.Font = Enum.Font.GothamSemibold
-title.Text = "Flight Controls"
-title.TextColor3 = Color3.fromRGB(220, 225, 232)
+title.Text = "Fly Controls"
+title.Font = Enum.Font.GothamBold
 title.TextScaled = true
-local titleSize = Instance.new("UITextSizeConstraint", title); titleSize.MaxTextSize = 20
+title.TextColor3 = Color3.fromRGB(230, 235, 240)
+title.Size = UDim2.new(1, -40, 1, 0)
+title.LayoutOrder = 1
+title.Parent = header
 
 local collapseBtn = Instance.new("TextButton")
 collapseBtn.Name = "Collapse"
-collapseBtn.Parent = panel
-collapseBtn.Size = UDim2.fromOffset(26, 26)
-collapseBtn.Position = UDim2.new(1, -32, 0, 6)
-collapseBtn.BackgroundColor3 = Color3.fromRGB(45, 50, 58)
+collapseBtn.Size = UDim2.fromOffset(32, 32)
+collapseBtn.LayoutOrder = 2
 collapseBtn.Text = "-"
-collapseBtn.TextColor3 = Color3.fromRGB(235, 240, 245)
-collapseBtn.Font = Enum.Font.GothamBold
-collapseBtn.TextSize = 18
-local cCorner = Instance.new("UICorner", collapseBtn); cCorner.CornerRadius = UDim.new(1, 0)
+styleButton(collapseBtn, Color3.fromRGB(50, 55, 60), Color3.new(1,1,1), true, true)
+collapseBtn.Parent = header
 
 -- Toggle fly button
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleFly"
-toggleBtn.Parent = panel
-toggleBtn.Size = UDim2.new(1, -20, 0, 46)
-toggleBtn.Position = UDim2.new(0, 10, 0, 42)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+toggleBtn.Size = UDim2.new(1, 0, 0, 52)
+toggleBtn.LayoutOrder = 2
 toggleBtn.Text = "Enable Fly"
-toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 20
-toggleBtn.AutoButtonColor = true
-local tCorner = Instance.new("UICorner", toggleBtn); tCorner.CornerRadius = UDim.new(0, 8)
+styleButton(toggleBtn, Color3.fromRGB(0, 170, 255), Color3.new(1,1,1), true, true)
+toggleBtn.Parent = panel
 
--- Up / Down buttons (touch-friendly)
-local row = Instance.new("Frame")
-row.Name = "Row"
-row.Parent = panel
-row.Size = UDim2.new(1, -20, 0, 46)
-row.Position = UDim2.new(0, 10, 0, 96)
-row.BackgroundTransparency = 1
+-- Up/Down row (press and hold for vertical motion)
+local vertRow = Instance.new("Frame")
+vertRow.BackgroundTransparency = 1
+vertRow.Size = UDim2.new(1, 0, 0, 52)
+vertRow.LayoutOrder = 3
+vertRow.Parent = panel
 
-local uiList = Instance.new("UIListLayout", row)
-uiList.FillDirection = Enum.FillDirection.Horizontal
-uiList.Padding = UDim.new(0, 10)
-uiList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-uiList.VerticalAlignment = Enum.VerticalAlignment.Center
+local vertLayout = Instance.new("UIListLayout")
+vertLayout.FillDirection = Enum.FillDirection.Horizontal
+vertLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+vertLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+vertLayout.Padding = UDim.new(0, uiPadding)
+vertLayout.Parent = vertRow
 
 local upBtn = Instance.new("TextButton")
 upBtn.Name = "Ascend"
-upBtn.Parent = row
-upBtn.Size = UDim2.new(0.5, -5, 1, 0)
-upBtn.BackgroundColor3 = Color3.fromRGB(90, 190, 120)
-upBtn.Text = "↑ Up"
-upBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-upBtn.Font = Enum.Font.GothamBold
-upBtn.TextScaled = true
-local upCorner = Instance.new("UICorner", upBtn); upCorner.CornerRadius = UDim.new(0, 8)
-local upSize = Instance.new("UITextSizeConstraint", upBtn); upSize.MaxTextSize = 22
+upBtn.Size = UDim2.new(0.5, -uiPadding/2, 1, 0)
+upBtn.Text = "↑ Up (hold)"
+styleButton(upBtn, Color3.fromRGB(90, 190, 120), Color3.new(1,1,1), true, true)
+upBtn.Parent = vertRow
 
 local downBtn = Instance.new("TextButton")
 downBtn.Name = "Descend"
-downBtn.Parent = row
-downBtn.Size = UDim2.new(0.5, -5, 1, 0)
-downBtn.BackgroundColor3 = Color3.fromRGB(220, 110, 110)
-downBtn.Text = "↓ Down"
-downBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-downBtn.Font = Enum.Font.GothamBold
-downBtn.TextScaled = true
-local downCorner = Instance.new("UICorner", downBtn); downCorner.CornerRadius = UDim.new(0, 8)
-local downSize = Instance.new("UITextSizeConstraint", downBtn); downSize.MaxTextSize = 22
+downBtn.Size = UDim2.new(0.5, -uiPadding/2, 1, 0)
+downBtn.Text = "↓ Down (hold)"
+styleButton(downBtn, Color3.fromRGB(220, 110, 110), Color3.new(1,1,1), true, true)
+downBtn.Parent = vertRow
 
--- Collapsed "+" button (not draggable)
+-- Collapsed "+" button (NOT draggable; only opens the panel)
 local collapsedBtn = Instance.new("TextButton")
-collapsedBtn.Name = "CollapsedOpen"
-collapsedBtn.Parent = screenGui
-collapsedBtn.AnchorPoint = Vector2.new(0.5, 1)
+collapsedBtn.Name = "OpenFlyPanel"
+collapsedBtn.AnchorPoint = panel.AnchorPoint
 collapsedBtn.Position = panel.Position
-collapsedBtn.Size = UDim2.fromOffset(46, 46)
-collapsedBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+collapsedBtn.Size = UDim2.fromOffset(44, 44)
 collapsedBtn.Text = "+"
-collapsedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-collapsedBtn.Font = Enum.Font.GothamBlack
-collapsedBtn.TextSize = 22
+styleButton(collapsedBtn, Color3.fromRGB(0, 170, 255), Color3.new(1,1,1), true, true)
 collapsedBtn.Visible = false
-local collapsedCorner = Instance.new("UICorner", collapsedBtn); collapsedCorner.CornerRadius = UDim.new(1, 0)
-local collapsedStroke = Instance.new("UIStroke", collapsedBtn); collapsedStroke.Thickness = 1; collapsedStroke.Color = Color3.fromRGB(60, 65, 72)
+collapsedBtn.Parent = screenGui
 
--- Open/Close helpers
+-- Keep collapsed button 'tethered' to panel's last position
+local function syncCollapsedPosition()
+    collapsedBtn.Position = panel.Position
+    collapsedBtn.AnchorPoint = panel.AnchorPoint
+end
+
+-- Open/close handlers
 local function setPanelOpen(open: boolean)
     panelOpen = open
     panel.Visible = open
     collapsedBtn.Visible = not open
-    -- Keep the collapsed button where the panel currently is, but clamp to screen
-    if not open then
-        collapsedBtn.Position = clampToViewport(panel.Position)
-    else
-        panel.Position = clampToViewport(collapsedBtn.Position)
-    end
+    collapseBtn.Text = open and "-" or "+"
+    syncCollapsedPosition()
 end
 
 collapseBtn.MouseButton1Click:Connect(function()
     setPanelOpen(false)
 end)
+
 collapsedBtn.MouseButton1Click:Connect(function()
     setPanelOpen(true)
 end)
 
+-- =================================================================================================
 -- Draggable (only when open)
+-- =================================================================================================
 local dragging = false
-local dragStartPos: Vector2? = nil
-local panelStart: UDim2? = nil
+local dragStart
+local startPos
+
+local function clampToViewport(pos: UDim2)
+    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+    local frameSize = panel.AbsoluteSize
+    local x = math.clamp(pos.X.Offset, 0, vp.X - frameSize.X)
+    local y = math.clamp(pos.Y.Offset, 0, vp.Y - frameSize.Y)
+    return UDim2.new(0, x, 0, y)
+end
 
 panel.InputBegan:Connect(function(input)
     if not panelOpen then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        -- If clicking the collapse or inside buttons, don't start dragging
-        local target = input.Target
         dragging = true
-        dragStartPos = input.Position
-        panelStart = panel.Position
-        input.Changed:Connect(function()
+        dragStart = input.Position
+        startPos = panel.Position
+        -- end drag when input ends
+        local endedConn
+        endedConn = input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then
                 dragging = false
+                if endedConn then endedConn:Disconnect() end
             end
         end)
     end
@@ -212,157 +308,163 @@ end)
 panel.InputChanged:Connect(function(input)
     if not panelOpen then return end
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStartPos
-        local newPos = UDim2.new(panelStart.X.Scale, panelStart.X.Offset + delta.X, panelStart.Y.Scale, panelStart.Y.Offset + delta.Y)
+        local delta = input.Position - dragStart
+        local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         panel.Position = clampToViewport(newPos)
+        syncCollapsedPosition()
     end
 end)
 
--- Physics objects for flight
-local humanoid = character:WaitForChild("Humanoid")
-local rootAttachment: Attachment? = nil
-local alignOrientation: AlignOrientation? = nil
-local linearVelocity: LinearVelocity? = nil
-local lastVel: Vector3 = Vector3.zero
+-- =================================================================================================
+-- Controls: movement vector (supports mobile thumbstick), plus ascend/descend via UI or keys
+-- =================================================================================================
+local controls
+do
+    -- Use PlayerModule controls if available for universal GetMoveVector (mobile & desktop)
+    local ok, mod = pcall(function()
+        return require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
+    end)
+    if ok and mod and mod:GetControls then
+        controls = mod:GetControls()
+    end
+end
 
+local function getPlanarMove()
+    if controls and controls.GetMoveVector then
+        return controls:GetMoveVector() -- X,Z plane in camera-relative terms
+    end
+    -- Fallback: WASD on desktop
+    local move = Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0,0,1) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - Vector3.new(0,0,1) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1,0,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - Vector3.new(1,0,0) end
+    return Vector3.new(move.X, 0, move.Z)
+end
+
+-- Keyboard helpers for ascend/descend (desktop; mobile uses buttons)
+table.insert(inputConns, UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.E then ascendHeld = true end
+    if input.KeyCode == Enum.KeyCode.Q then descendHeld = true end
+end))
+table.insert(inputConns, UserInputService.InputEnded:Connect(function(input, gpe)
+    if input.KeyCode == Enum.KeyCode.E then ascendHeld = false end
+    if input.KeyCode == Enum.KeyCode.Q then descendHeld = false end
+    -- Safety: release on any touch end
+    if input.UserInputType == Enum.UserInputType.Touch then
+        ascendHeld = false
+        descendHeld = false
+    end
+end))
+
+-- Mobile-friendly press-and-hold
+local function bindHold(button: TextButton, setFlag: (boolean) -> ())
+    button.MouseButton1Down:Connect(function() setFlag(true) end)
+    button.MouseButton1Up:Connect(function() setFlag(false) end)
+    -- Touch drag off safety
+    button.TouchEnded:Connect(function() setFlag(false) end)
+end
+bindHold(upBtn, function(v) ascendHeld = v end)
+bindHold(downBtn, function(v) descendHeld = v end)
+
+-- =================================================================================================
+-- Flight core
+-- =================================================================================================
 local function cleanupFlight()
     if renderConn then renderConn:Disconnect() renderConn = nil end
     if alignOrientation then alignOrientation:Destroy() alignOrientation = nil end
     if linearVelocity then linearVelocity:Destroy() linearVelocity = nil end
     if rootAttachment then rootAttachment:Destroy() rootAttachment = nil end
-    humanoid.AutoRotate = true
+    if humanoid then
+        humanoid.AutoRotate = true
+        humanoid.PlatformStand = false
+    end
 end
 
 local function startFlying()
     if flying then return end
     flying = true
+    _G.__FlyState.flying = true
     toggleBtn.Text = "Disable Fly"
 
-    humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-    humanoid.AutoRotate = false
-    humanoid.Sit = false
-    humanoid.PlatformStand = false
-
+    -- Prepare constraints
     rootAttachment = Instance.new("Attachment")
     rootAttachment.Name = "FlyRootAttachment"
-    rootAttachment.Parent = humanoidRootPart
+    rootAttachment.Parent = root
 
     alignOrientation = Instance.new("AlignOrientation")
-    alignOrientation.Name = "FlyAlignOrientation"
     alignOrientation.Attachment0 = rootAttachment
     alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
     alignOrientation.Responsiveness = turnResponsiveness
     alignOrientation.RigidityEnabled = false
-    alignOrientation.Parent = humanoidRootPart
+    alignOrientation.Parent = root
 
     linearVelocity = Instance.new("LinearVelocity")
-    linearVelocity.Name = "FlyLinearVelocity"
     linearVelocity.Attachment0 = rootAttachment
     linearVelocity.MaxForce = math.huge
     linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
-    linearVelocity.Parent = humanoidRootPart
+    linearVelocity.VectorVelocity = Vector3.zero
+    linearVelocity.Parent = root
 
-    lastVel = humanoidRootPart.AssemblyLinearVelocity
+    -- Stabilize humanoid to avoid animation/controller fighting
+    humanoid.AutoRotate = false
+    humanoid.PlatformStand = true
 
-    -- Single RenderStepped loop (cleanly disconnected on stop/respawn)
-    renderConn = runService.RenderStepped:Connect(function(dt)
-        if not flying then return end
+    -- Render loop
+    renderConn = RunService.RenderStepped:Connect(function()
+        if not flying or not character or not root then return end
 
         local cam = workspace.CurrentCamera
         if not cam then return end
-        local camCF = cam.CFrame
 
-        -- Planar basis (camera-relative, flattened on Y)
-        local look = camCF.LookVector
-        local right = camCF.RightVector
+        -- Camera-relative planar axes
+        local look = cam.CFrame.LookVector
+        local right = cam.CFrame.RightVector
         local flatLook = Vector3.new(look.X, 0, look.Z)
-        if flatLook.Magnitude > 0 then flatLook = flatLook.Unit end
         local flatRight = Vector3.new(right.X, 0, right.Z)
-        if flatRight.Magnitude > 0 then flatRight = flatRight.Unit end
+        if flatLook.Magnitude > 1e-3 then flatLook = flatLook.Unit end
+        if flatRight.Magnitude > 1e-3 then flatRight = flatRight.Unit end
 
-        -- Move vector (from thumbstick/WASD)
-        local mv = getMoveVector()
-        local planarDir = flatRight * mv.X + flatLook * mv.Z
-        if planarDir.Magnitude > 1 then planarDir = planarDir.Unit end
+        local mv = getPlanarMove()
+        local planar = (flatRight * mv.X + flatLook * mv.Z)
+        if planar.Magnitude > 1 then planar = planar.Unit end
 
-        -- Vertical from hold buttons (and allow Space/C for desktop)
-        local vy = 0
-        if ascendHeld or uis:IsKeyDown(Enum.KeyCode.Space) then vy = verticalSpeed end
-        if descendHeld or uis:IsKeyDown(Enum.KeyCode.LeftControl) or uis:IsKeyDown(Enum.KeyCode.C) then vy = -verticalSpeed end
+        local vy = (ascendHeld and verticalSpeed) or (descendHeld and -verticalSpeed) or 0
+        local desired = Vector3.new(0, vy, 0) + planar * horizontalSpeed
 
-        local desired = planarDir * speed + Vector3.new(0, vy, 0)
-        -- Smooth velocity to reduce jitter on mobile
-        local alpha = 1 - math.pow(1 - velSmoothing, math.clamp(dt * 60, 0, 3))
-        local smoothed = lastVel:Lerp(desired, alpha)
-        lastVel = smoothed
+        linearVelocity.VectorVelocity = desired
 
-        linearVelocity.VectorVelocity = smoothed
-
-        -- Face movement direction if moving, else face camera flat direction
-        local facing = (smoothed.Magnitude > 1 and Vector3.new(smoothed.X, 0, smoothed.Z).Unit or flatLook)
-        if facing.Magnitude < 1e-3 then
-            facing = flatLook.Magnitude > 1e-3 and flatLook or Vector3.new(0, 0, -1)
+        local faceDir = planar.Magnitude > 0.1 and planar or flatLook
+        if faceDir.Magnitude > 1e-3 then
+            local targetCF = CFrame.lookAt(root.Position, root.Position + faceDir)
+            alignOrientation.CFrame = targetCF
         end
-        local targetCF = CFrame.lookAt(humanoidRootPart.Position, humanoidRootPart.Position + facing)
-        alignOrientation.CFrame = targetCF
     end)
 end
 
 local function stopFlying()
     if not flying then return end
     flying = false
+    _G.__FlyState.flying = false
     toggleBtn.Text = "Enable Fly"
     cleanupFlight()
 end
 
--- Button interactions
 toggleBtn.MouseButton1Click:Connect(function()
     if flying then stopFlying() else startFlying() end
 end)
 
--- Touch/Mouse hold for ascent/descent (works on mobile)
-upBtn.MouseButton1Down:Connect(function() ascendHeld = true end)
-upBtn.MouseButton1Up:Connect(function() ascendHeld = false end)
-upBtn.TouchLongPress:Connect(function(_, state) if state == Enum.LongPressState.End then ascendHeld = false end end)
-upBtn.MouseLeave:Connect(function() ascendHeld = false end)
-upBtn.TouchEnded:Connect(function() ascendHeld = false end)
+-- Restore after respawn if we were flying
+if _G.__FlyState.restoreAfterRespawn then
+    _G.__FlyState.restoreAfterRespawn = nil
+    startFlying()
+end
 
-downBtn.MouseButton1Down:Connect(function() descendHeld = true end)
-downBtn.MouseButton1Up:Connect(function() descendHeld = false end)
-downBtn.TouchLongPress:Connect(function(_, state) if state == Enum.LongPressState.End then descendHeld = false end end)
-downBtn.MouseLeave:Connect(function() descendHeld = false end)
-downBtn.TouchEnded:Connect(function() descendHeld = false end)
-
--- Keep panel above other UI
-panel.ZIndex = 10
-collapseBtn.ZIndex = 11
-collapsedBtn.ZIndex = 10
-toggleBtn.ZIndex = 10
-upBtn.ZIndex = 10
-downBtn.ZIndex = 10
-title.ZIndex = 10
-
--- Character respawn handling (rebind root, keep UI + state)
-player.CharacterAdded:Connect(function(newChar)
-    character = newChar
-    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-    humanoid = character:WaitForChild("Humanoid")
-    -- If player was flying during respawn, restart cleanly
-    local wasFlying = flying
-    stopFlying()
-    if wasFlying then
-        -- slight delay to allow character to initialize
-        task.defer(startFlying)
+-- Safety cleanup on script disable/destroy
+script.AncestryChanged:Connect(function(_, parent)
+    if not parent then
+        stopFlying()
+        for _, c in ipairs(inputConns) do c:Disconnect() end
     end
 end)
-
--- Optional: keyboard shortcut (desktop convenience, ignored on mobile)
-uis.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == Enum.KeyCode.F then
-        if flying then stopFlying() else startFlying() end
-    end
-end)
-
--- Initialize panel open
-setPanelOpen(true)
