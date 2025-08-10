@@ -1,934 +1,132 @@
---!strict
--- Panda Fly UI (Client-Only, Runtime-Generated) — v2
--- Author: Copilot for Hilton
--- Changes:
--- - Close (X) now fully stops fly, disconnects inputs, destroys UI (no leftovers)
--- - Speed is editable via numeric TextBox (PC + Mobile)
--- - Mobile UI trimmed to 2 controls: Fly toggle + Speed input (no Boost, no Up/Down buttons)
--- - Mobile joystick: forward/ascend engage "direction lock" for straight flight; camera can pan freely
--- - Sideways strafing supported on mobile (joystick X axis)
--- - Device selection deletes after choosing; expand button hidden when expanded
--- - All assets are Image assets (client-only): Panda logo + device icons
+-- Panda Fly Final (Local Only)
+local Players=game:GetService("Players")
+local UIS=game:GetService("UserInputService")
+local RS=game:GetService("RunService")
+local LP=Players.LocalPlayer
+local PG=LP:FindFirstChildOfClass("PlayerGui") or LP:WaitForChild("PlayerGui")
+local ASSETS={Logo="rbxassetid://140281572489473",Phone="rbxassetid://75163729493008",PC="rbxassetid://75277585107743"}
+local SPEED_MIN,SPEED_MAX=8,300
+local speedVal=nil
+local flying=false
+local bg,bv
+local conns={}
 
--- =====================================================================================
--- Services
--- =====================================================================================
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local StarterGui = game:GetService("StarterGui")
-
-local LP = Players.LocalPlayer
-local PlayerGui = LP:FindFirstChildOfClass("PlayerGui") or LP:WaitForChild("PlayerGui")
-
--- =====================================================================================
--- Config / Assets
--- =====================================================================================
-local GUI_NAME = "PandaFlyUI"
-local ASSETS = {
-	PandaLogo = "rbxassetid://140281572489473",
-	PandaPhoneIcon = "rbxassetid://75163729493008",
-	PandaPCIcon = "rbxassetid://75277585107743",
-}
-
--- Movement tuning
-local DEFAULT_SPEED = 64    -- studs/sec
-local TURN_SMOOTH = 18      -- input smoothing rate
-local SPEED_MIN, SPEED_MAX = 8, 300
-
--- UI theme
-local THEME = {
-	BG = Color3.fromRGB(16, 16, 18),
-	Panel = Color3.fromRGB(24, 24, 28),
-	Accent = Color3.fromRGB(0, 170, 255),
-	AccentSoft = Color3.fromRGB(0, 120, 200),
-	Text = Color3.fromRGB(235, 239, 245),
-	Mutetext = Color3.fromRGB(180, 188, 198),
-	Success = Color3.fromRGB(0, 220, 140),
-	Danger = Color3.fromRGB(255, 80, 95),
-}
-local UI_SIZE = UDim2.fromOffset(340, 210)
-local UI_MINI_SIZE = UDim2.fromOffset(64, 64)
-
--- =====================================================================================
--- Cleanup any previous instance
--- =====================================================================================
-pcall(function()
-	local old = PlayerGui:FindFirstChild(GUI_NAME)
-	if old then old:Destroy() end
-end)
-
--- Disable ShiftLock per request
-pcall(function()
-	LP.DevEnableMouseLock = false
-end)
-
--- =====================================================================================
--- Helpers
--- =====================================================================================
-local function create(className, props, children)
-	local inst = Instance.new(className)
-	for k, v in pairs(props or {}) do
-		(inst :: any)[k] = v
-	end
-	for _, c in ipairs(children or {}) do
-		(c :: any).Parent = inst
-	end
-	return inst
+local function cleanupFly()
+	flying=false
+	if bg then bg:Destroy() bg=nil end
+	if bv then bv:Destroy() bv=nil end
 end
 
-local function stroke(_, color: Color3?, thickness: number?, transparency: number?)
-	return create("UIStroke", {
-		Color = color or Color3.new(1,1,1),
-		Thickness = thickness or 1.6,
-		Transparency = transparency or 0,
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-	}, {})
-end
-
-local function corner(_, radius: number?)
-	return create("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, {})
-end
-
-local function padding(_, p: number)
-	return create("UIPadding", {
-		PaddingTop = UDim.new(0, p),
-		PaddingBottom = UDim.new(0, p),
-		PaddingLeft = UDim.new(0, p),
-		PaddingRight = UDim.new(0, p),
-	}, {})
-end
-
-local function makeDraggable(frame: Frame)
-	local dragging = false
-	local dragStart = Vector2.zero
-	local startPos = frame.Position
-	local moveConn: RBXScriptConnection? = nil
-	local endConn: RBXScriptConnection? = nil
-
-	frame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			dragStart = input.Position
-			startPos = frame.Position
-			if moveConn then moveConn:Disconnect() end
-			if endConn then endConn:Disconnect() end
-
-			moveConn = UserInputService.InputChanged:Connect(function(i2)
-				if i2.UserInputType == Enum.UserInputType.MouseMovement or i2.UserInputType == Enum.UserInputType.Touch then
-					if dragging then
-						local delta = i2.Position - dragStart
-						frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-					end
-				end
-			end)
-
-			endConn = input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-					if moveConn then moveConn:Disconnect() moveConn = nil end
-					if endConn then endConn:Disconnect() endConn = nil end
-				end
-			end)
+local function startFly()
+	local char=LP.Character or LP.CharacterAdded:Wait()
+	local hrp=char:WaitForChild("HumanoidRootPart")
+	local hum=char:FindFirstChildOfClass("Humanoid")
+	bg=Instance.new("BodyGyro");bg.P=9e4;bg.MaxTorque=Vector3.new(9e9,9e9,9e9);bg.CFrame=hrp.CFrame;bg.Parent=hrp
+	bv=Instance.new("BodyVelocity");bv.MaxForce=Vector3.new(9e9,9e9,9e9);bv.Velocity=Vector3.zero;bv.Parent=hrp
+	if hum and speedVal then hum.WalkSpeed=speedVal end
+	conns[#conns+1]=RS.RenderStepped:Connect(function()
+		if flying and hrp then
+			bg.CFrame=workspace.CurrentCamera.CFrame
+			bv.Velocity=workspace.CurrentCamera.CFrame.LookVector*(speedVal or 0)
 		end
 	end)
 end
 
-local function buildVectorX(parent: Instance, color: Color3)
-	local holder = create("Frame", {
-		Name = "VectorX",
-		BackgroundTransparency = 1,
-		Size = UDim2.fromScale(1,1),
-	}, {
-		create("Frame", {
-			BackgroundColor3 = color,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(2, 16),
-			Rotation = 45,
-		}, { corner(nil, 2) }),
-		create("Frame", {
-			BackgroundColor3 = color,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(2, 16),
-			Rotation = -45,
-		}, { corner(nil, 2) }),
-	})
-	holder.Parent = parent
-	return holder
+local function stopFly()
+	for _,c in ipairs(conns) do if c.Connected then c:Disconnect() end end
+	table.clear(conns)
+	cleanupFly()
 end
 
-local function buildVectorPlus(parent: Instance, color: Color3)
-	local holder = create("Frame", {
-		Name = "VectorPlus",
-		BackgroundTransparency = 1,
-		Size = UDim2.fromScale(1,1),
-	}, {
-		create("Frame", {
-			BackgroundColor3 = color,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(2, 14),
-		}, { corner(nil, 2) }),
-		create("Frame", {
-			BackgroundColor3 = color,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(14, 2),
-		}, { corner(nil, 2) }),
-	})
-	holder.Parent = parent
-	return holder
+local function toggleFly()
+	flying=not flying
+	if flying then startFly() else stopFly() end
 end
 
--- =====================================================================================
--- ScreenGui root
--- =====================================================================================
-local screenGui = create("ScreenGui", {
-	Name = GUI_NAME,
-	ResetOnSpawn = false,
-	IgnoreGuiInset = true,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-}, {})
-screenGui.Parent = PlayerGui
-
--- =====================================================================================
--- Device selection UI
--- =====================================================================================
-local function buildDeviceSelect(): Frame
-	local root = create("Frame", {
-		Name = "DeviceSelect",
-		Parent = screenGui,
-		Size = UDim2.fromOffset(380, 260),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		BackgroundColor3 = THEME.Panel,
-		BorderSizePixel = 0,
-	}, { corner(nil, 12), stroke(nil, THEME.Accent, 1.4, 0.2), padding(nil, 12) })
-
-	create("UIListLayout", {
-		Padding = UDim.new(0, 10),
-		FillDirection = Enum.FillDirection.Vertical,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		VerticalAlignment = Enum.VerticalAlignment.Center,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, {}).Parent = root
-
-	create("ImageLabel", {
-		Name = "PandaLogo",
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(72, 72),
-		Image = ASSETS.PandaLogo,
-	}, {}).Parent = root
-
-	create("TextLabel", {
-		Name = "Title",
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(340, 28),
-		Text = "Choose your device",
-		Font = Enum.Font.GothamBold,
-		TextSize = 22,
-		TextColor3 = THEME.Text,
-	}, {}).Parent = root
-
-	local buttonsRow = create("Frame", {
-		Name = "ButtonsRow",
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(340, 120),
-	}, {
-		create("UIListLayout", {
-			Padding = UDim.new(0, 12),
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-		}, {})
-	})
-	buttonsRow.Parent = root
-
-	local function makeDeviceBtn(name: string, label: string, img: string): TextButton
-		local btn = create("TextButton", {
-			Name = name,
-			AutoButtonColor = true,
-			BackgroundColor3 = THEME.BG,
-			Size = UDim2.fromOffset(160, 110),
-			Text = "",
-		}, { corner(nil, 10), stroke(nil, THEME.AccentSoft, 1.2, 0.35), padding(nil, 10) }) :: TextButton
-
-		create("UIListLayout", {
-			Padding = UDim.new(0, 8),
-			FillDirection = Enum.FillDirection.Vertical,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-		}, {}).Parent = btn
-
-		create("ImageLabel", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(48, 48),
-			Image = img,
-		}, {}).Parent = btn
-
-		create("TextLabel", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(140, 26),
-			Text = label,
-			Font = Enum.Font.GothamBold,
-			TextSize = 18,
-			TextColor3 = THEME.Text,
-		}, {}).Parent = btn
-
-		return btn
-	end
-
-	makeDeviceBtn("Phone", "Phone", ASSETS.PandaPhoneIcon).Parent = buttonsRow
-	makeDeviceBtn("PC", "PC / Emulator", ASSETS.PandaPCIcon).Parent = buttonsRow
-
-	return root
+local function makeBtn(txt,size,pos,parent,color)
+	local b=Instance.new("TextButton")
+	b.Size=size;b.Position=pos;b.Text=txt
+	b.BackgroundColor3=color or Color3.fromRGB(24,24,28)
+	b.TextColor3=Color3.new(1,1,1)
+	b.Font=Enum.Font.GothamBold;b.TextSize=16;b.AutoButtonColor=true
+	b.Parent=parent
+	return b
 end
 
--- =====================================================================================
--- Fly Controller
--- =====================================================================================
-type FlyController = {
-	Active: boolean,
-	Mode: "PC" | "Phone",
-	Speed: number,
-	Connections: { RBXScriptConnection },
-	SteppedConn: RBXScriptConnection?,
-	BodyGyro: BodyGyro?,
-	BodyVel: BodyVelocity?,
-	TargetMove: Vector3, -- X (strafe), Y (ascend/descend), Z (forward/back)
-	-- Mobile direction lock (fly straight, free-look camera):
-	DirLockCF: CFrame?,
-	DirLockEngaged: boolean,
-}
-
-local function getCharacter(): Model?
-	return LP.Character or LP.CharacterAdded:Wait()
-end
-
-local function ensureBodyMovers(fc: FlyController)
-	local char = getCharacter()
-	if not char then return end
-	local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
-	if not hrp or not hum then return end
-
-	if not fc.BodyGyro then
-		local bg = Instance.new("BodyGyro")
-		bg.P = 9e4
-		bg.D = 1000
-		bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-		bg.CFrame = hrp.CFrame
-		bg.Parent = hrp
-		fc.BodyGyro = bg
-	end
-	if not fc.BodyVel then
-		local bv = Instance.new("BodyVelocity")
-		bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-		bv.Velocity = Vector3.zero
-		bv.Parent = hrp
-		fc.BodyVel = bv
-	end
-end
-
-local function cleanupBodyMovers(fc: FlyController)
-	if fc.BodyGyro then fc.BodyGyro:Destroy() fc.BodyGyro = nil end
-	if fc.BodyVel then fc.BodyVel:Destroy() fc.BodyVel = nil end
-end
-
-local function disconnectAll(fc: FlyController)
-	for _, c in ipairs(fc.Connections) do
-		if c.Connected then pcall(function() c:Disconnect() end) end
-	end
-	table.clear(fc.Connections)
-	if fc.SteppedConn then pcall(function() fc.SteppedConn:Disconnect() end) end
-	fc.SteppedConn = nil
-end
-
-local function startFly(fc: FlyController)
-	if fc.Active then return end
-	fc.Active = true
-	ensureBodyMovers(fc)
-
-	local char = getCharacter()
-	if not char then return end
-	local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
-	if not hrp or not hum then return end
-
-	pcall(function()
-		hum.PlatformStand = false
-		hum:ChangeState(Enum.HumanoidStateType.Physics)
-	end)
-
-	local cam = workspace.CurrentCamera
-	local moveLerp = Vector3.zero
-	local currentVel = Vector3.zero
-
-	fc.SteppedConn = RunService.RenderStepped:Connect(function(dt)
-		if not fc.Active then return end
-		if not hrp or not hum then return end
-
-		-- Smooth input
-		moveLerp = moveLerp:Lerp(fc.TargetMove, math.clamp(dt * TURN_SMOOTH, 0, 1))
-
-		-- Direction basis
-		local up = Vector3.new(0, 1, 0)
-		local forward: Vector3
-		local right: Vector3
-
-		if fc.Mode == "Phone" and fc.DirLockEngaged and fc.DirLockCF then
-			forward = fc.DirLockCF.LookVector
-			right = fc.DirLockCF.RightVector
-		else
-			forward = cam.CFrame.LookVector
-			right = cam.CFrame.RightVector
-		end
-
-		-- Compose desired velocity
-		local wish = (right * moveLerp.X) + (up * moveLerp.Y) + (forward * moveLerp.Z)
-		if wish.Magnitude > 1 then wish = wish.Unit end
-		local desiredVel = wish * fc.Speed
-		currentVel = currentVel:Lerp(desiredVel, math.clamp(dt * TURN_SMOOTH, 0, 1))
-
-		if fc.BodyVel then fc.BodyVel.Velocity = currentVel end
-		if fc.BodyGyro then
-			-- Align to camera for responsive feel (still allows straight path due to lock)
-			fc.BodyGyro.CFrame = workspace.CurrentCamera.CFrame
-		end
-	end)
-end
-
-local function stopFly(fc: FlyController)
-	if not fc.Active then return end
-	fc.Active = false
-	if fc.SteppedConn then fc.SteppedConn:Disconnect() fc.SteppedConn = nil end
-	cleanupBodyMovers(fc)
-
-	local char = getCharacter()
-	if char then
-		local hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
-		if hum then pcall(function() hum:ChangeState(Enum.HumanoidStateType.Freefall) end) end
-	end
-end
-
-local function newFlyController(mode: "PC" | "Phone"): FlyController
-	return {
-		Active = false,
-		Mode = mode,
-		Speed = DEFAULT_SPEED,
-		Connections = {},
-		SteppedConn = nil,
-		BodyGyro = nil,
-		BodyVel = nil,
-		TargetMove = Vector3.zero,
-		DirLockCF = nil,
-		DirLockEngaged = false,
-	}
-end
-
--- =====================================================================================
--- UI builders (Main)
--- =====================================================================================
-local function addSpeedInput(parent: Instance, fc: FlyController): TextBox
-	-- Label + TextBox row
-	local row = create("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 28),
-	}, {
-		create("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Left,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			Padding = UDim.new(0, 8),
-		}, {})
-	})
-	row.Parent = parent
-
-	create("TextLabel", {
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(70, 24),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = Enum.Font.Gotham,
-		TextSize = 16,
-		TextColor3 = THEME.Mutetext,
-		Text = "Speed",
-	}, {}).Parent = row
-
-	local tb = create("TextBox", {
-		BackgroundColor3 = THEME.BG,
-		Size = UDim2.fromOffset(80, 24),
-		Font = Enum.Font.GothamSemibold,
-		TextSize = 16,
-		TextColor3 = THEME.Text,
-		PlaceholderText = tostring(DEFAULT_SPEED),
-		Text = tostring(fc.Speed),
-		ClearTextOnFocus = false,
-	}, { corner(nil, 6), stroke(nil, THEME.AccentSoft, 1, 0.3), padding(nil, 4) }) :: TextBox
-	tb.Parent = row
-
-	local function setSpeedFromText()
-		local num = tonumber(tb.Text:gsub("[^%d%.%-]", ""))
+local function makeSpeedBox(parent)
+	local tb=Instance.new("TextBox")
+	tb.Size=UDim2.new(0,80,0,28)
+	tb.PlaceholderText="---"
+	tb.Text=(speedVal and tostring(speedVal) or "")
+	tb.BackgroundColor3=Color3.fromRGB(16,16,18)
+	tb.TextColor3=Color3.new(1,1,1)
+	tb.Font=Enum.Font.GothamSemibold;tb.TextSize=16
+	tb.ClearTextOnFocus=false
+	tb.Parent=parent
+	tb.FocusLost:Connect(function()
+		local num=tonumber(tb.Text)
 		if num then
-			num = math.clamp(math.floor(num + 0.5), SPEED_MIN, SPEED_MAX)
-			fc.Speed = num
-			tb.Text = tostring(num)
+			speedVal=math.clamp(math.floor(num+0.5),SPEED_MIN,SPEED_MAX)
+			tb.Text=tostring(speedVal)
 		else
-			tb.Text = tostring(fc.Speed)
-		end
-	end
-	tb.FocusLost:Connect(function() setSpeedFromText() end)
-	tb:GetPropertyChangedSignal("Text"):Connect(function()
-		-- live sanitize: keep digits only
-		local sanitized = tb.Text:gsub("[^%d]", "")
-		if sanitized ~= tb.Text then
-			tb.Text = sanitized
-			tb.CursorPosition = #tb.Text + 1
+			tb.Text=speedVal and tostring(speedVal) or ""
 		end
 	end)
-
 	return tb
 end
 
-local function buildMainUI(mode: "PC" | "Phone")
-	-- Root (expanded)
-	local main = create("Frame", {
-		Name = "MainPanel",
-		Parent = screenGui,
-		Size = UI_SIZE,
-		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, 20, 1, -20),
-		BackgroundColor3 = THEME.Panel,
-		BorderSizePixel = 0,
-		Visible = true,
-	}, { corner(nil, 12), stroke(nil, THEME.Accent, 1.4, 0.2) })
-	makeDraggable(main)
+local function deviceSelect()
+	local gui=Instance.new("ScreenGui",PG)
+	gui.Name="PandaFlyUI";gui.ResetOnSpawn=false
+	local frame=Instance.new("Frame",gui)
+	frame.AnchorPoint=Vector2.new(0.5,0.5);frame.Position=UDim2.new(0.5,0,0.5,0)
+	frame.Size=UDim2.new(0,300,0,200)
+	frame.BackgroundColor3=Color3.fromRGB(24,24,28)
 
-	-- Header
-	local header = create("Frame", {
-		Name = "Header",
-		Parent = main,
-		Size = UDim2.new(1, 0, 0, 46),
-		BackgroundColor3 = THEME.BG,
-		BorderSizePixel = 0,
-	}, { corner(nil, 12), padding(nil, 10) })
+	local logo=Instance.new("ImageLabel",frame)
+	logo.Image=ASSETS.Logo;logo.BackgroundTransparency=1
+	logo.Size=UDim2.new(0,72,0,72);logo.Position=UDim2.new(0.5,-36,0,10)
 
-	create("UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		Padding = UDim.new(0, 8),
-		VerticalAlignment = Enum.VerticalAlignment.Center,
-		HorizontalAlignment = Enum.HorizontalAlignment.Left,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, {}).Parent = header
+	local phoneB=makeBtn("Phone",UDim2.new(0,120,0,40),UDim2.new(0.25,-60,0.7,-20),frame)
+	local pcB=makeBtn("PC",UDim2.new(0,120,0,40),UDim2.new(0.75,-60,0.7,-20),frame)
 
-	create("ImageLabel", {
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(26, 26),
-		Image = ASSETS.PandaLogo,
-	}, {}).Parent = header
+	phoneB.MouseButton1Click:Connect(function() gui:Destroy();mainUI("Phone") end)
+	pcB.MouseButton1Click:Connect(function() gui:Destroy();mainUI("PC") end)
+end
 
-	create("TextLabel", {
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, -140, 1, 0),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = "Panda Fly",
-		Font = Enum.Font.GothamBold,
-		TextSize = 18,
-		TextColor3 = THEME.Text,
-	}, {}).Parent = header
+function mainUI(mode)
+	local gui=Instance.new("ScreenGui",PG)
+	gui.Name="PandaFlyMain";gui.ResetOnSpawn=false
+	local frame=Instance.new("Frame",gui)
+	frame.AnchorPoint=Vector2.new(0,1);frame.Position=UDim2.new(0,20,1,-20)
+	frame.Size=UDim2.new(0,260,0,100)
+	frame.BackgroundColor3=Color3.fromRGB(24,24,28)
 
-	local headerRight = create("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(120, 26),
-	}, {
-		create("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			Padding = UDim.new(0, 8),
-			HorizontalAlignment = Enum.HorizontalAlignment.Right,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-		}, {})
-	})
-	headerRight.Parent = header
+	local logo=Instance.new("ImageLabel",frame)
+	logo.Image=ASSETS.Logo;logo.BackgroundTransparency=1
+	logo.Size=UDim2.new(0,40,0,40);logo.Position=UDim2.new(0,10,0,10)
 
-	local collapseBtn = create("TextButton", {
-		Name = "Collapse",
-		AutoButtonColor = true,
-		Text = "",
-		BackgroundColor3 = THEME.Panel,
-		Size = UDim2.fromOffset(28, 28),
-	}, { corner(nil, 8) }) :: TextButton
-	collapseBtn.Parent = headerRight
-	buildVectorPlus(collapseBtn, THEME.Text)
+	local close=makeBtn("X",UDim2.new(0,30,0,30),UDim2.new(1,-40,0,10),frame,Color3.fromRGB(200,50,50))
+	close.MouseButton1Click:Connect(function() stopFly();gui:Destroy() end)
 
-	local closeBtn = create("TextButton", {
-		Name = "Close",
-		AutoButtonColor = true,
-		Text = "",
-		BackgroundColor3 = THEME.Danger,
-		Size = UDim2.fromOffset(28, 28),
-	}, { corner(nil, 8) }) :: TextButton
-	closeBtn.Parent = headerRight
-	buildVectorX(closeBtn, Color3.fromRGB(255,255,255))
-
-	-- Body
-	local body = create("Frame", {
-		Name = "Body",
-		Parent = main,
-		Size = UDim2.new(1, -20, 1, -66),
-		Position = UDim2.fromOffset(10, 56),
-		BackgroundTransparency = 1,
-	}, { padding(nil, 6) })
-
-	create("UIListLayout", {
-		Padding = UDim.new(0, 10),
-		FillDirection = Enum.FillDirection.Vertical,
-		HorizontalAlignment = Enum.HorizontalAlignment.Left,
-		VerticalAlignment = Enum.VerticalAlignment.Top,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, {}).Parent = body
-
-	-- Status row
-	local statusRow = create("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 24),
-	}, {
-		create("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Left,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			Padding = UDim.new(0, 8),
-		}, {})
-	})
-	statusRow.Parent = body
-
-	create("ImageLabel", {
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(20,20),
-		Image = (mode == "Phone") and ASSETS.PandaPhoneIcon or ASSETS.PandaPCIcon,
-	}, {}).Parent = statusRow
-
-	local statusText = create("TextLabel", {
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, -28, 1, 0),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = Enum.Font.Gotham,
-		TextSize = 16,
-		TextColor3 = THEME.Mutetext,
-		Text = (mode == "PC") and "Press E to toggle fly." or "Tap Fly to toggle. Joystick: Fwd/Up = straight flight",
-	}, {}) :: TextLabel
-	statusText.Parent = statusRow
-
-	-- Expand (mini) button - hidden when expanded
-	local expandBtn = create("ImageButton", {
-		Name = "ExpandBtn",
-		Parent = screenGui,
-		BackgroundColor3 = THEME.Panel,
-		BorderSizePixel = 0,
-		Size = UI_MINI_SIZE,
-		Position = UDim2.new(0, 20, 1, -UI_MINI_SIZE.Y.Offset - 20),
-		Visible = false,
-		Image = ASSETS.PandaLogo,
-		ScaleType = Enum.ScaleType.Fit,
-	}, { corner(nil, 16), stroke(nil, THEME.Accent, 1.2, 0.25) }) :: ImageButton
-	buildVectorPlus(expandBtn, THEME.Text)
-	makeDraggable(expandBtn)
-
-	local function setExpanded(isOpen: boolean)
-		main.Visible = isOpen
-		expandBtn.Visible = not isOpen
-	end
-	collapseBtn.MouseButton1Click:Connect(function() setExpanded(false) end)
-	expandBtn.MouseButton1Click:Connect(function() setExpanded(true) end)
-
-	-- Fly controller + wiring
-	local fc = newFlyController(mode)
-	table.insert(fc.Connections, LP.CharacterAdded:Connect(function()
-		if fc.Active then
-			task.wait(0.2)
-			ensureBodyMovers(fc)
-		end
-	end))
-
-	-- Close: hard teardown (stop flight, disconnect, destroy UI)
-	local function hardClose()
-		stopFly(fc)
-		disconnectAll(fc)
-		if screenGui then screenGui:Destroy() end
-	end
-	closeBtn.MouseButton1Click:Connect(hardClose)
-
-	-- Controls (mode-specific)
-	if mode == "PC" then
-		-- PC: E to toggle; WASD + Space / Ctrl; Speed TextBox
-		local controls = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, -34) }, {})
-		controls.Parent = body
-
-		local rowTop = create("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 0, 28),
-		}, {
-			create("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				HorizontalAlignment = Enum.HorizontalAlignment.Left,
-				VerticalAlignment = Enum.VerticalAlignment.Center,
-				Padding = UDim.new(0, 8),
-			}, {})
-		})
-		rowTop.Parent = controls
-
-		local flyState = create("TextLabel", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(110, 24),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = "Fly: OFF",
-			Font = Enum.Font.GothamBold,
-			TextSize = 16,
-			TextColor3 = THEME.Mutetext,
-		}, {}) :: TextLabel
-		flyState.Parent = rowTop
-
-		-- Speed input
-		addSpeedInput(controls, fc)
-
-		-- Input mapping
-		local pressed: {[Enum.KeyCode]: boolean} = {}
-		local function updateMove()
-			local x, y, z = 0, 0, 0
-			if pressed[Enum.KeyCode.W] then z += 1 end
-			if pressed[Enum.KeyCode.S] then z -= 1 end
-			if pressed[Enum.KeyCode.A] then x -= 1 end
-			if pressed[Enum.KeyCode.D] then x += 1 end
-			if pressed[Enum.KeyCode.Space] then y += 1 end
-			if pressed[Enum.KeyCode.LeftControl] or pressed[Enum.KeyCode.RightControl] then y -= 1 end
-			fc.TargetMove = Vector3.new(x, y, z)
-		end
-
-		table.insert(fc.Connections, UserInputService.InputBegan:Connect(function(input, gpe)
-			if gpe then return end
-			if input.UserInputType == Enum.UserInputType.Keyboard then
-				pressed[input.KeyCode] = true
-				if input.KeyCode == Enum.KeyCode.E then
-					if fc.Active then
-						stopFly(fc)
-						statusText.Text = "Fly: OFF (Press E)"
-						statusText.TextColor3 = THEME.Mutetext
-					else
-						startFly(fc)
-						statusText.Text = "Fly: ON (Press E)"
-						statusText.TextColor3 = THEME.Success
-					end
-				end
-				updateMove()
-			elseif input.UserInputType == Enum.UserInputType.MouseWheel then
-				-- Optional: wheel adjusts speed
-				local delta = math.clamp(input.Position.Z, -1, 1)
-				fc.Speed = math.clamp(fc.Speed + delta * 4, SPEED_MIN, SPEED_MAX)
-			end
-		end))
-		table.insert(fc.Connections, UserInputService.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.Keyboard then
-				pressed[input.KeyCode] = false
-				updateMove()
-			end
-		end))
-
-		table.insert(fc.Connections, RunService.Heartbeat:Connect(function()
-			flyState.Text = fc.Active and "Fly: ON" or "Fly: OFF"
-			flyState.TextColor3 = fc.Active and THEME.Success or THEME.Mutetext
-		end))
-
+	if mode=="PC" then
+		local toggleB=makeBtn("Fly: OFF (E can also toggle)",UDim2.new(0,200,0,30),UDim2.new(0,10,0,50),frame,Color3.fromRGB(0,170,255))
+		toggleB.MouseButton1Click:Connect(function()
+			toggleFly()
+			toggleB.Text=flying and "Fly: ON (E can also toggle)" or "Fly: OFF (E can also toggle)"
+			toggleB.BackgroundColor3=flying and Color3.fromRGB(0,200,100) or Color3.fromRGB(0,170,255)
+		end)
+		UIS.InputBegan:Connect(function(i,gpe) if not gpe and i.KeyCode==Enum.KeyCode.E then toggleB:Activate() end end)
+		makeSpeedBox(frame)
 	else
-		-- Mobile: Only Fly toggle + Speed input; Joystick with "direction lock"
-		local controls = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, -34) }, {})
-		controls.Parent = body
-
-		local topRow = create("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 0, 32),
-		}, {
-			create("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				HorizontalAlignment = Enum.HorizontalAlignment.Left,
-				VerticalAlignment = Enum.VerticalAlignment.Center,
-				Padding = UDim.new(0, 8),
-			}, {})
-		})
-		topRow.Parent = controls
-
-		local flyToggle = create("TextButton", {
-			BackgroundColor3 = THEME.BG,
-			Size = UDim2.fromOffset(100, 32),
-			Font = Enum.Font.GothamBold,
-			TextSize = 16,
-			Text = "Fly: OFF",
-			TextColor3 = THEME.Text,
-			AutoButtonColor = true,
-		}, { corner(nil, 8), stroke(nil, THEME.AccentSoft, 1, 0.3) }) :: TextButton
-		flyToggle.Parent = topRow
-
-		-- Speed input
-		addSpeedInput(controls, fc)
-
-		-- Joystick
-		local joyRow = create("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 1, -70),
-		}, {
-			create("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				HorizontalAlignment = Enum.HorizontalAlignment.Left,
-				VerticalAlignment = Enum.VerticalAlignment.Top,
-				Padding = UDim.new(0, 12),
-			}, {}),
-		})
-		joyRow.Parent = controls
-
-		local joyBase = create("Frame", {
-			BackgroundColor3 = THEME.BG,
-			Size = UDim2.fromOffset(130, 130),
-			BorderSizePixel = 0,
-		}, { corner(nil, 65), stroke(nil, THEME.AccentSoft, 1, 0.3) })
-		joyBase.Parent = joyRow
-
-		local joyKnob = create("Frame", {
-			BackgroundColor3 = THEME.Accent,
-			Size = UDim2.fromOffset(40, 40),
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromScale(0.5, 0.5),
-			BorderSizePixel = 0,
-		}, { corner(nil, 20) })
-		joyKnob.Parent = joyBase
-
-		-- Fly toggle behavior
-		flyToggle.MouseButton1Click:Connect(function()
-			if fc.Active then
-				stopFly(fc)
-				flyToggle.Text = "Fly: OFF"
-				flyToggle.BackgroundColor3 = THEME.BG
-				statusText.Text = "Fly: OFF (Tap Fly)"
-				statusText.TextColor3 = THEME.Mutetext
-			else
-				startFly(fc)
-				flyToggle.Text = "Fly: ON"
-				flyToggle.BackgroundColor3 = THEME.Success
-				statusText.Text = "Fly: ON"
-				statusText.TextColor3 = THEME.Success
-			end
+		local toggleB=makeBtn("Fly: OFF",UDim2.new(0,100,0,30),UDim2.new(0,10,0,50),frame,Color3.fromRGB(0,170,255))
+		toggleB.MouseButton1Click:Connect(function()
+			toggleFly()
+			toggleB.Text=flying and "Fly: ON" or "Fly: OFF"
+			toggleB.BackgroundColor3=flying and Color3.fromRGB(0,200,100) or Color3.fromRGB(0,170,255)
 		end)
-
-		-- Joystick math with direction lock
-		local joyTouch: number? = nil
-		local function baseSize() return joyBase.AbsoluteSize end
-		local function knobSize() return joyKnob.AbsoluteSize end
-		local function radius() return math.min(baseSize().X, baseSize().Y) * 0.5 - (knobSize().X * 0.5) end
-		local function setKnobLocal(pos: Vector2)
-			joyKnob.Position = UDim2.fromOffset(pos.X, pos.Y)
-		end
-		local function centerKnob()
-			setKnobLocal(Vector2.new(baseSize().X/2, baseSize().Y/2))
-			fc.TargetMove = Vector3.new(0, 0, 0)
-			-- when fully centered, release direction lock after a short idle
-			fc.DirLockEngaged = false
-			fc.DirLockCF = nil
-		end
-		centerKnob()
-
-		joyBase.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.Touch and joyTouch == nil then
-				joyTouch = input.TouchId
-			end
-		end)
-		joyBase.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.Touch and joyTouch == input.TouchId then
-				joyTouch = nil
-				centerKnob()
-			end
-		end)
-
-		UserInputService.TouchMoved:Connect(function(touch, gpe)
-			if gpe then return end
-			if joyTouch ~= nil and touch.TouchId == joyTouch then
-				local basePos = joyBase.AbsolutePosition
-				local bs = baseSize()
-				local localPos = Vector2.new(
-					math.clamp(touch.Position.X - basePos.X, 0, bs.X),
-					math.clamp(touch.Position.Y - basePos.Y, 0, bs.Y)
-				)
-				local offset = localPos - bs/2
-				local rad = radius()
-				local clamped = offset
-				if offset.Magnitude > rad then clamped = offset.Unit * rad end
-				setKnobLocal(bs/2 + clamped)
-
-				-- Map joystick to movement:
-				-- X: strafe left/right (negative = left, positive = right)
-				-- Y: vertical (up is negative screen Y) -> invert
-				-- Z: forward/back (up on stick = forward)
-				local nx = clamped.X / rad            -- [-1, 1]
-				local ny = -(clamped.Y / rad)         -- [-1, 1], up is positive
-				local nz = ny                         -- forward/back shares same axis as visual up/down on the stick
-				local yVert = 0
-
-				-- Split vertical vs forward:
-				-- Use half-planes to infer intent: if knob above center -> ascend, below -> descend, also feed forward from same push.
-				if math.abs(ny) > 0.05 then
-					yVert = ny
-				end
-
-				-- Direction lock: engage when forward magnitude or ascend magnitude is meaningful
-				local planarMag = math.abs(nz)
-				if (planarMag > 0.15 or math.abs(yVert) > 0.15) then
-					if not fc.DirLockEngaged or not fc.DirLockCF then
-						fc.DirLockEngaged = true
-						fc.DirLockCF = workspace.CurrentCamera.CFrame
-					end
-				else
-					-- if near center, release lock
-					fc.DirLockEngaged = false
-					fc.DirLockCF = nil
-				end
-
-				fc.TargetMove = Vector3.new(nx, yVert, nz)
-			end
-		end)
+		makeSpeedBox(frame)
 	end
-
-	-- Start expanded for discoverability
-	setExpanded(true)
-
-	return {
-		Main = main,
-		ExpandBtn = expandBtn,
-		Status = statusText,
-	}
 end
 
--- =====================================================================================
--- Boot: Device selection → build chosen UI
--- =====================================================================================
-local deviceSelect = buildDeviceSelect()
-
-local function onChoose(mode: "PC" | "Phone")
-	if deviceSelect and deviceSelect.Parent then deviceSelect:Destroy() end
-	buildMainUI(mode)
-end
-
-local phoneBtn = deviceSelect:FindFirstChild("ButtonsRow") and (deviceSelect.ButtonsRow:FindFirstChild("Phone") :: TextButton)
-local pcBtn = deviceSelect:FindFirstChild("ButtonsRow") and (deviceSelect.ButtonsRow:FindFirstChild("PC") :: TextButton)
-
-if phoneBtn then phoneBtn.MouseButton1Click:Connect(function() onChoose("Phone") end) end
-if pcBtn then pcBtn.MouseButton1Click:Connect(function() onChoose("PC") end) end
-
--- Auto-pick phone if touch-only
-if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-	task.delay(0.3, function()
-		if deviceSelect and deviceSelect.Parent then onChoose("Phone") end
-	end)
-end
+deviceSelect()
