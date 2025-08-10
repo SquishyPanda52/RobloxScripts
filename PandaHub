@@ -1,4 +1,4 @@
--- LocalScript (StarterPlayerScripts). Client-only, runtime UI.
+-- LocalScript (StarterPlayerScripts) – client-only, runtime UI, beveled, dock-on-minimize
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local CAS = game:GetService("ContextActionService")
@@ -11,6 +11,7 @@ local function getChar()
 	return c, c:WaitForChild("HumanoidRootPart"), c:WaitForChild("Humanoid")
 end
 
+-- Assets (image assets)
 local ASSETS = {
 	Logo   = "rbxassetid://140281572489473",
 	Phone  = "rbxassetid://75163729493008",
@@ -19,13 +20,11 @@ local ASSETS = {
 	JoyKnob= "rbxassetid://6600931806",
 }
 
-local function preload(ids)
+local function preload(tbl)
 	local ghosts = {}
-	for _,id in pairs(ids) do
+	for _,id in pairs(tbl) do
 		local il = Instance.new("ImageLabel")
-		il.Image = id
-		il.Visible = false
-		il.Parent = game:GetService("CoreGui")
+		il.Image = id; il.Visible = false; il.Parent = game:GetService("CoreGui")
 		table.insert(ghosts, il)
 	end
 	pcall(function() ContentProvider:PreloadAsync(ghosts) end)
@@ -70,6 +69,7 @@ local gyro,vel,stepConn
 local inputVec = Vector2.new() -- X=strafe, Y=forward
 local speed = 16
 local device = nil -- "PC" | "Phone"
+local oldMB, oldCamMode
 
 local function getCamCFrame() return (workspace.CurrentCamera and workspace.CurrentCamera.CFrame) or CFrame.new() end
 
@@ -77,20 +77,37 @@ local function startFly()
 	if flying then return end
 	local _, hrp, hum = getChar()
 	flying = true
+
+	-- Let camera pan freely and make body follow camera
+	oldMB = UIS.MouseBehavior
+	oldCamMode = lp.CameraMode
+	if device == "PC" then
+		UIS.MouseBehavior = Enum.MouseBehavior.LockCenter -- reliable mouselook
+	end
+	hum.AutoRotate = false
 	hum.PlatformStand = true
+
 	gyro = Instance.new("BodyGyro")
-	gyro.P = 9e4; gyro.MaxTorque = Vector3.new(9e9,9e9,9e9); gyro.CFrame = hrp.CFrame; gyro.Parent = hrp
+	gyro.P = 1e5
+	gyro.D = 500
+	gyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
+	gyro.CFrame = hrp.CFrame
+	gyro.Parent = hrp
+
 	vel = Instance.new("BodyVelocity")
-	vel.P = 1e5; vel.MaxForce = Vector3.new(9e9,9e9,9e9); vel.Velocity = Vector3.zero; vel.Parent = hrp
+	vel.P = 1e5
+	vel.MaxForce = Vector3.new(9e9,9e9,9e9)
+	vel.Velocity = Vector3.zero
+	vel.Parent = hrp
+
 	stepConn = RunService.RenderStepped:Connect(function()
 		if not flying then return end
 		local cam = getCamCFrame()
-		gyro.CFrame = cam
+		gyro.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.LookVector) -- follow camera yaw/pitch
 		local ix, iz = inputVec.X, inputVec.Y
 		if device=="Phone" and iz < 0 then iz = 0 end
 		local move = cam.LookVector * iz + cam.RightVector * ix
-		if move.Magnitude > 0 then move = move.Unit * speed else move = Vector3.new() end
-		vel.Velocity = move
+		vel.Velocity = (move.Magnitude > 0) and (move.Unit * speed) or Vector3.new()
 	end)
 end
 
@@ -101,24 +118,23 @@ local function stopFly()
 	if gyro then gyro:Destroy(); gyro=nil end
 	if vel then vel:Destroy(); vel=nil end
 	local _,_,hum = getChar()
-	if hum then hum.PlatformStand = false end
+	if hum then hum.PlatformStand = false; hum.AutoRotate = true end
+	if device=="PC" then
+		if oldMB then UIS.MouseBehavior = oldMB end
+	end
 end
 
 lp.CharacterAdded:Connect(function()
-	if flying then
-		stopFly()
-		task.wait(0.2)
-		startFly()
-	end
+	if flying then stopFly(); task.wait(0.2); startFly() end
 end)
 
--- Dock maker (minimized tile with panda logo)
+-- Dock tile (minimized)
 local docks = {}
 local function makeDock(initialAbsPos, onRestore)
 	local dock = Instance.new("ImageButton")
 	dock.Name = "PandaDock"
 	dock.Size = UDim2.fromOffset(52,52)
-	local pos = initialAbsPos or Vector2.new(24, workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.Y - 90 or 300)
+	local pos = initialAbsPos or Vector2.new(24, (workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.Y - 90) or 300)
 	dock.Position = UDim2.fromOffset(pos.X, pos.Y)
 	dock.BackgroundColor3 = Color3.fromRGB(32,32,36)
 	dock.Image = ASSETS.Logo
@@ -144,7 +160,7 @@ local function nuke()
 	pcall(function() script:Destroy() end)
 end
 
--- Device selection UI (logo centered, PC left / Phone right)
+-- Device selection
 local sel = Instance.new("Frame")
 sel.Name = "DeviceSelect"
 sel.Size = UDim2.fromOffset(320, 230)
@@ -219,7 +235,6 @@ end
 local pcBtn = deviceBtn("PC", ASSETS.PC)
 local phoneBtn = deviceBtn("Phone", ASSETS.Phone)
 makeDraggable(sel, selTop)
-
 btnClose.MouseButton1Click:Connect(nuke)
 btnMin.MouseButton1Click:Connect(function()
 	local abs = sel.AbsolutePosition
@@ -259,7 +274,7 @@ local function buildPC()
 	btnX.TextSize = 14
 	btnX.TextColor3 = Color3.new(1,1,1)
 	btnX.BackgroundColor3 = Color3.fromRGB(40,40,46)
-	cornered(btnX,8); stroked(btnX,1)
+cornered(btnX,8); stroked(btnX,1)
 
 	local btnM = Instance.new("TextButton", frame)
 	btnM.Size = UDim2.fromOffset(24,24)
@@ -269,7 +284,7 @@ local function buildPC()
 	btnM.TextSize = 14
 	btnM.TextColor3 = Color3.new(1,1,1)
 	btnM.BackgroundColor3 = Color3.fromRGB(40,40,46)
-	cornered(btnM,8); stroked(btnM,1)
+cornered(btnM,8); stroked(btnM,1)
 
 	local lbl = Instance.new("TextLabel", frame)
 	lbl.BackgroundTransparency = 1
@@ -316,7 +331,7 @@ local function buildPC()
 	hint.TextSize = 12
 	hint.TextColor3 = Color3.fromRGB(180,180,190)
 	hint.TextXAlignment = Enum.TextXAlignment.Left
-	hint.Text = "WASD camera-relative. No auto-forward."
+	hint.Text = "WASD camera-relative. Pannable camera. No auto-forward."
 
 	makeDraggable(frame, top)
 	btnX.MouseButton1Click:Connect(nuke)
@@ -326,7 +341,7 @@ local function buildPC()
 		makeDock(abs, function() frame.Visible = true end)
 	end)
 
-	-- Keyboard input
+	-- Keyboard input (only while flying)
 	local pressed = {}
 	local keyMap = {
 		[Enum.KeyCode.W] = Vector2.new(0,1),
@@ -336,14 +351,13 @@ local function buildPC()
 	}
 	local function recompute()
 		local v = Vector2.new()
-		for kc,on in pairs(pressed) do
-			if on then v += keyMap[kc] or Vector2.new() end
-		end
+		for kc,on in pairs(pressed) do if on then v += keyMap[kc] or Vector2.new() end end
 		if v.Magnitude > 1 then v = v.Unit end
 		inputVec = v
 	end
 	local function onKey(actionName, state, inputObj)
 		if device ~= "PC" then return Enum.ContextActionResult.Pass end
+		if not flying then return Enum.ContextActionResult.Pass end -- don't block walking when not flying
 		if keyMap[inputObj.KeyCode] then
 			if state == Enum.UserInputState.Begin then pressed[inputObj.KeyCode] = true
 			elseif state == Enum.UserInputState.End then pressed[inputObj.KeyCode] = false end
@@ -377,8 +391,8 @@ local function buildPhone()
 
 	local frame = Instance.new("Frame", gui)
 	frame.Name = "MobileFly"
-	frame.Size = UDim2.fromOffset(224, 124)
-	frame.Position = UDim2.new(1, -248, 1, -148)
+	frame.Size = UDim2.fromOffset(240, 140)
+	frame.Position = UDim2.new(1, -264, 1, -164)
 	frame.BackgroundColor3 = Color3.fromRGB(22,22,26)
 	frame.BackgroundTransparency = 0.05
 	frame.BorderSizePixel = 0
@@ -402,7 +416,7 @@ local function buildPhone()
 	btnX.TextSize = 14
 	btnX.TextColor3 = Color3.new(1,1,1)
 	btnX.BackgroundColor3 = Color3.fromRGB(40,40,46)
-	cornered(btnX,8); stroked(btnX,1)
+cornered(btnX,8); stroked(btnX,1)
 
 	local btnM = Instance.new("TextButton", frame)
 	btnM.Size = UDim2.fromOffset(24,24)
@@ -412,26 +426,28 @@ local function buildPhone()
 	btnM.TextSize = 14
 	btnM.TextColor3 = Color3.new(1,1,1)
 	btnM.BackgroundColor3 = Color3.fromRGB(40,40,46)
-	cornered(btnM,8); stroked(btnM,1)
-
-	local lbl = Instance.new("TextLabel", frame)
-	lbl.BackgroundTransparency = 1
-	lbl.Size = UDim2.new(1,-100,0,24)
-	lbl.Position = UDim2.new(0,36,0,4)
-	lbl.Font = Enum.Font.GothamSemibold
-	lbl.TextSize = 14
-	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.TextColor3 = Color3.fromRGB(235,235,245)
-	lbl.Text = "Mobile Fly"
+cornered(btnM,8); stroked(btnM,1)
 
 	local body = Instance.new("Frame", frame)
 	body.BackgroundTransparency = 1
 	body.Size = UDim2.new(1,-16,1,-40)
 	body.Position = UDim2.fromOffset(8,36)
 
+	local speedBox = Instance.new("TextBox", body)
+	speedBox.Size = UDim2.fromOffset(92,32)
+	speedBox.Position = UDim2.fromOffset(0,0)
+	speedBox.BackgroundColor3 = Color3.fromRGB(32,32,36)
+	speedBox.Font = Enum.Font.Gotham
+	speedBox.TextSize = 14
+	speedBox.TextColor3 = Color3.fromRGB(230,230,240)
+	speedBox.PlaceholderText = "Speed"
+	speedBox.Text = tostring(speed)
+	speedBox.ClearTextOnFocus = false
+	cornered(speedBox,10); stroked(speedBox,1)
+
 	local toggle = Instance.new("TextButton", body)
-	toggle.Size = UDim2.fromOffset(144,34)
-	toggle.Position = UDim2.fromOffset(0,0)
+	toggle.Size = UDim2.fromOffset(120,32)
+	toggle.Position = UDim2.fromOffset(100,0)
 	toggle.BackgroundColor3 = Color3.fromRGB(0,170,255)
 	toggle.TextColor3 = Color3.new(1,1,1)
 	toggle.Font = Enum.Font.GothamSemibold
@@ -441,8 +457,8 @@ local function buildPhone()
 
 	local hint = Instance.new("TextLabel", body)
 	hint.BackgroundTransparency = 1
-	hint.Size = UDim2.new(1,-4,0,20)
-	hint.Position = UDim2.fromOffset(0,40)
+	hint.Size = UDim2.new(1, -4, 0, 20)
+	hint.Position = UDim2.fromOffset(2, 40)
 	hint.Font = Enum.Font.Gotham
 	hint.TextSize = 12
 	hint.TextColor3 = Color3.fromRGB(180,180,190)
@@ -457,7 +473,7 @@ local function buildPhone()
 		makeDock(abs, function() frame.Visible = true end)
 	end)
 
-	-- Joystick
+	-- Mobile joystick
 	local joy = Instance.new("Frame", gui)
 	joy.Name = "PandaJoystick"
 	joy.BackgroundTransparency = 1
@@ -489,7 +505,7 @@ local function buildPhone()
 		local ny = -d.Y / r
 		local v = Vector2.new(nx, ny)
 		if v.Magnitude > 1 then v = v.Unit end
-		if v.Y < 0 then v = Vector2.new(v.X, 0) end
+		if v.Y < 0 then v = Vector2.new(v.X, 0) end -- no backward
 		inputVec = v
 	end
 
@@ -515,6 +531,10 @@ local function buildPhone()
 		if flying then stopFly() else startFly() end
 		refresh()
 	end)
+	speedBox.FocusLost:Connect(function()
+		local v = tonumber(speedBox.Text)
+		if v and v>0 then speed = math.clamp(v, 1, 500) else speedBox.Text = tostring(speed) end
+	end)
 	refresh()
 
 	-- Cleanup joystick on UI destroy
@@ -523,6 +543,6 @@ local function buildPhone()
 	end)
 end
 
--- Selection: choosing a device destroys selection UI
+-- Device selection: choosing destroys selection
 pcBtn.MouseButton1Click:Connect(buildPC)
 phoneBtn.MouseButton1Click:Connect(buildPhone)
