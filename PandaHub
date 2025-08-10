@@ -11,15 +11,14 @@ local function getChar()
 	return c, c:WaitForChild("HumanoidRootPart"), c:WaitForChild("Humanoid")
 end
 
--- Assets (image assets)
+-- Image assets
 local ASSETS = {
 	Logo   = "rbxassetid://140281572489473",
 	Phone  = "rbxassetid://75163729493008",
 	PC     = "rbxassetid://75277585107743",
-	JoyBG  = "rbxassetid://6600931806",
-	JoyKnob= "rbxassetid://6600931806",
 }
 
+-- Preload for reliability
 local function preload(tbl)
 	local ghosts = {}
 	for _,id in pairs(tbl) do
@@ -32,6 +31,7 @@ local function preload(tbl)
 end
 preload(ASSETS)
 
+-- Root GUI
 local parentGui = (lp and lp:FindFirstChild("PlayerGui")) or game:GetService("CoreGui")
 local gui = Instance.new("ScreenGui")
 gui.Name = "PandaFlyUI"
@@ -39,6 +39,7 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = parentGui
 
+-- UI helpers
 local function cornered(o,r) local c=Instance.new("UICorner",o); c.CornerRadius=UDim.new(0,r or 10); return c end
 local function stroked(o,a) local s=Instance.new("UIStroke",o); s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; s.Thickness=a or 1; s.Color=Color3.fromRGB(90,90,100); return s end
 local function makeDraggable(frame, dragHandle)
@@ -69,7 +70,6 @@ local gyro,vel,stepConn
 local inputVec = Vector2.new() -- X=strafe, Y=forward
 local speed = 16
 local device = nil -- "PC" | "Phone"
-local oldMB, oldCamMode
 
 local function getCamCFrame() return (workspace.CurrentCamera and workspace.CurrentCamera.CFrame) or CFrame.new() end
 
@@ -77,13 +77,6 @@ local function startFly()
 	if flying then return end
 	local _, hrp, hum = getChar()
 	flying = true
-
-	-- Let camera pan freely and make body follow camera
-	oldMB = UIS.MouseBehavior
-	oldCamMode = lp.CameraMode
-	if device == "PC" then
-		UIS.MouseBehavior = Enum.MouseBehavior.LockCenter -- reliable mouselook
-	end
 	hum.AutoRotate = false
 	hum.PlatformStand = true
 
@@ -103,9 +96,10 @@ local function startFly()
 	stepConn = RunService.RenderStepped:Connect(function()
 		if not flying then return end
 		local cam = getCamCFrame()
-		gyro.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.LookVector) -- follow camera yaw/pitch
+		-- Make body face where camera looks (yaw + pitch)
+		gyro.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.LookVector)
 		local ix, iz = inputVec.X, inputVec.Y
-		if device=="Phone" and iz < 0 then iz = 0 end
+		if device=="Phone" and iz < 0 then iz = 0 end -- no backward on mobile
 		local move = cam.LookVector * iz + cam.RightVector * ix
 		vel.Velocity = (move.Magnitude > 0) and (move.Unit * speed) or Vector3.new()
 	end)
@@ -119,9 +113,6 @@ local function stopFly()
 	if vel then vel:Destroy(); vel=nil end
 	local _,_,hum = getChar()
 	if hum then hum.PlatformStand = false; hum.AutoRotate = true end
-	if device=="PC" then
-		if oldMB then UIS.MouseBehavior = oldMB end
-	end
 end
 
 lp.CharacterAdded:Connect(function()
@@ -154,13 +145,19 @@ end
 -- Cleanup everything
 local function nuke()
 	stopFly()
-	pcall(function() CAS:UnbindAction("PandaFly_WASD") end)
+	pcall(function()
+		CAS:UnbindAction("PandaFly_WASD")
+		CAS:UnbindAction("PandaFly_ToggleE")
+		CAS:UnbindAction("PandaFly_M_W")
+		CAS:UnbindAction("PandaFly_M_A")
+		CAS:UnbindAction("PandaFly_M_D")
+	end)
 	for d,_ in pairs(docks) do pcall(function() d:Destroy() end) end
 	if gui then gui:Destroy() end
 	pcall(function() script:Destroy() end)
 end
 
--- Device selection
+-- Device selection (centered logo; PC left, Phone right)
 local sel = Instance.new("Frame")
 sel.Name = "DeviceSelect"
 sel.Size = UDim2.fromOffset(320, 230)
@@ -331,7 +328,7 @@ cornered(btnM,8); stroked(btnM,1)
 	hint.TextSize = 12
 	hint.TextColor3 = Color3.fromRGB(180,180,190)
 	hint.TextXAlignment = Enum.TextXAlignment.Left
-	hint.Text = "WASD camera-relative. Pannable camera. No auto-forward."
+	hint.Text = "WASD to move. E toggles fly. Camera pans; body follows camera."
 
 	makeDraggable(frame, top)
 	btnX.MouseButton1Click:Connect(nuke)
@@ -341,7 +338,7 @@ cornered(btnM,8); stroked(btnM,1)
 		makeDock(abs, function() frame.Visible = true end)
 	end)
 
-	-- Keyboard input (only while flying)
+	-- PC: WASD movement (only sinks while flying)
 	local pressed = {}
 	local keyMap = {
 		[Enum.KeyCode.W] = Vector2.new(0,1),
@@ -355,20 +352,32 @@ cornered(btnM,8); stroked(btnM,1)
 		if v.Magnitude > 1 then v = v.Unit end
 		inputVec = v
 	end
-	local function onKey(actionName, state, inputObj)
+	local function onMove(actionName, state, inputObj)
 		if device ~= "PC" then return Enum.ContextActionResult.Pass end
-		if not flying then return Enum.ContextActionResult.Pass end -- don't block walking when not flying
-		if keyMap[inputObj.KeyCode] then
-			if state == Enum.UserInputState.Begin then pressed[inputObj.KeyCode] = true
-			elseif state == Enum.UserInputState.End then pressed[inputObj.KeyCode] = false end
-			recompute()
+		if not keyMap[inputObj.KeyCode] then return Enum.ContextActionResult.Pass end
+		if state == Enum.UserInputState.Begin then pressed[inputObj.KeyCode] = true
+		elseif state == Enum.UserInputState.End then pressed[inputObj.KeyCode] = false end
+		recompute()
+		return flying and Enum.ContextActionResult.Sink or Enum.ContextActionResult.Pass
+	end
+	pcall(function() CAS:UnbindAction("PandaFly_WASD") end)
+	CAS:BindAction("PandaFly_WASD", onMove, false, Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D)
+
+	-- PC: E to toggle fly
+	local function onToggleE(actionName, state, inputObj)
+		if device ~= "PC" then return Enum.ContextActionResult.Pass end
+		if state == Enum.UserInputState.Begin then
+			if flying then stopFly() else startFly() end
+			toggle.Text = flying and "Stop Fly" or "Start Fly"
+			toggle.BackgroundColor3 = flying and Color3.fromRGB(255,85,85) or Color3.fromRGB(0,170,255)
 			return Enum.ContextActionResult.Sink
 		end
 		return Enum.ContextActionResult.Pass
 	end
-	pcall(function() CAS:UnbindAction("PandaFly_WASD") end)
-	CAS:BindAction("PandaFly_WASD", onKey, false, Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D)
+	pcall(function() CAS:UnbindAction("PandaFly_ToggleE") end)
+	CAS:BindAction("PandaFly_ToggleE", onToggleE, false, Enum.KeyCode.E)
 
+	-- Button toggle + speed
 	local function refreshBtn()
 		toggle.Text = flying and "Stop Fly" or "Start Fly"
 		toggle.BackgroundColor3 = flying and Color3.fromRGB(255,85,85) or Color3.fromRGB(0,170,255)
@@ -384,15 +393,15 @@ cornered(btnM,8); stroked(btnM,1)
 	end)
 end
 
--- Build Mobile UI
+-- Build Mobile UI (W/A/D touch buttons; no backward)
 local function buildPhone()
 	device = "Phone"
 	if sel then sel:Destroy(); sel = nil end
 
 	local frame = Instance.new("Frame", gui)
 	frame.Name = "MobileFly"
-	frame.Size = UDim2.fromOffset(240, 140)
-	frame.Position = UDim2.new(1, -264, 1, -164)
+	frame.Size = UDim2.fromOffset(260, 150)
+	frame.Position = UDim2.new(1, -284, 1, -174)
 	frame.BackgroundColor3 = Color3.fromRGB(22,22,26)
 	frame.BackgroundTransparency = 0.05
 	frame.BorderSizePixel = 0
@@ -463,7 +472,7 @@ cornered(btnM,8); stroked(btnM,1)
 	hint.TextSize = 12
 	hint.TextColor3 = Color3.fromRGB(180,180,190)
 	hint.TextXAlignment = Enum.TextXAlignment.Left
-	hint.Text = "Forward + strafe only (no reverse)."
+	hint.Text = "Touch buttons: W (forward), A/D (strafe). No backward."
 
 	makeDraggable(frame, top)
 	btnX.MouseButton1Click:Connect(nuke)
@@ -473,59 +482,56 @@ cornered(btnM,8); stroked(btnM,1)
 		makeDock(abs, function() frame.Visible = true end)
 	end)
 
-	-- Mobile joystick
-	local joy = Instance.new("Frame", gui)
-	joy.Name = "PandaJoystick"
-	joy.BackgroundTransparency = 1
-	joy.Size = UDim2.fromOffset(140,140)
-	joy.Position = UDim2.new(0, 18, 1, -158)
-	joy.Visible = true
-
-	local pad = Instance.new("ImageLabel", joy)
-	pad.BackgroundTransparency = 1
-	pad.Size = UDim2.fromScale(1,1)
-	pad.Image = ASSETS.JoyBG
-	pad.ImageTransparency = 0.2
-
-	local knob = Instance.new("ImageLabel", joy)
-	knob.BackgroundTransparency = 1
-	knob.Size = UDim2.fromOffset(56,56)
-	knob.AnchorPoint = Vector2.new(0.5,0.5)
-	knob.Position = UDim2.new(0.5,0,0.5,0)
-	knob.Image = ASSETS.JoyKnob
-
-	local activeTouch = nil
-	local function updateKnob(pos)
-		local c = pad.AbsolutePosition + pad.AbsoluteSize/2
-		local d = Vector2.new(pos.X - c.X, pos.Y - c.Y)
-		local r = math.min(pad.AbsoluteSize.X, pad.AbsoluteSize.Y)/2
-		if d.Magnitude > r then d = d.Unit * r end
-		knob.Position = UDim2.fromOffset(pad.AbsoluteSize.X/2 + d.X, pad.AbsoluteSize.Y/2 + d.Y)
-		local nx = d.X / r
-		local ny = -d.Y / r
-		local v = Vector2.new(nx, ny)
+	-- Mobile movement via CAS touch buttons (visible only while flying)
+	local pressed = { W=false, A=false, D=false }
+	local function recompute()
+		local v = Vector2.new((pressed.D and 1 or 0) + (pressed.A and -1 or 0), (pressed.W and 1 or 0))
 		if v.Magnitude > 1 then v = v.Unit end
-		if v.Y < 0 then v = Vector2.new(v.X, 0) end -- no backward
 		inputVec = v
 	end
 
-	pad.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.Touch and not activeTouch then activeTouch=i; updateKnob(i.Position) end
-	end)
-	pad.InputChanged:Connect(function(i)
-		if activeTouch and i == activeTouch then updateKnob(i.Position) end
-	end)
-	UIS.InputEnded:Connect(function(i)
-		if i == activeTouch then
-			activeTouch = nil
-			inputVec = Vector2.new()
-			knob.Position = UDim2.new(0.5,0,0.5,0)
-		end
-	end)
+	local function bindMobileButtons()
+		-- W forward
+		CAS:BindAction("PandaFly_M_W", function(_, state)
+			if device~="Phone" then return Enum.ContextActionResult.Pass end
+			if state == Enum.UserInputState.Begin then pressed.W = true
+			elseif state == Enum.UserInputState.End then pressed.W = false end
+			recompute(); return flying and Enum.ContextActionResult.Sink or Enum.ContextActionResult.Pass
+		end, true)
+		CAS:SetTitle("PandaFly_M_W","W")
+		CAS:SetPosition("PandaFly_M_W", UDim2.new(0, 24, 1, -168))
+
+		-- A left
+		CAS:BindAction("PandaFly_M_A", function(_, state)
+			if device~="Phone" then return Enum.ContextActionResult.Pass end
+			if state == Enum.UserInputState.Begin then pressed.A = true
+			elseif state == Enum.UserInputState.End then pressed.A = false end
+			recompute(); return flying and Enum.ContextActionResult.Sink or Enum.ContextActionResult.Pass
+		end, true)
+		CAS:SetTitle("PandaFly_M_A","A")
+		CAS:SetPosition("PandaFly_M_A", UDim2.new(0, 24, 1, -120))
+
+		-- D right
+		CAS:BindAction("PandaFly_M_D", function(_, state)
+			if device~="Phone" then return Enum.ContextActionResult.Pass end
+			if state == Enum.UserInputState.Begin then pressed.D = true
+			elseif state == Enum.UserInputState.End then pressed.D = false end
+			recompute(); return flying and Enum.ContextActionResult.Sink or Enum.ContextActionResult.Pass
+		end, true)
+		CAS:SetTitle("PandaFly_M_D","D")
+		CAS:SetPosition("PandaFly_M_D", UDim2.new(0, 72, 1, -120))
+	end
+	local function unbindMobileButtons()
+		pcall(function() CAS:UnbindAction("PandaFly_M_W") end)
+		pcall(function() CAS:UnbindAction("PandaFly_M_A") end)
+		pcall(function() CAS:UnbindAction("PandaFly_M_D") end)
+		pressed.W=false; pressed.A=false; pressed.D=false; recompute()
+	end
 
 	local function refresh()
 		toggle.Text = flying and "Stop Fly" or "Start Fly"
 		toggle.BackgroundColor3 = flying and Color3.fromRGB(255,85,85) or Color3.fromRGB(0,170,255)
+		if flying then bindMobileButtons() else unbindMobileButtons() end
 	end
 	toggle.MouseButton1Click:Connect(function()
 		if flying then stopFly() else startFly() end
@@ -536,13 +542,8 @@ cornered(btnM,8); stroked(btnM,1)
 		if v and v>0 then speed = math.clamp(v, 1, 500) else speedBox.Text = tostring(speed) end
 	end)
 	refresh()
-
-	-- Cleanup joystick on UI destroy
-	gui.AncestryChanged:Connect(function(_, parent)
-		if not parent and joy then pcall(function() joy:Destroy() end) end
-	end)
 end
 
--- Device selection: choosing destroys selection
+-- Selection: destroy selection UI once chosen
 pcBtn.MouseButton1Click:Connect(buildPC)
 phoneBtn.MouseButton1Click:Connect(buildPhone)
