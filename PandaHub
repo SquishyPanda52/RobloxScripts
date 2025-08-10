@@ -1,143 +1,106 @@
--------------------------------------------------------------------------------------------------------------------------------------------
--- When you’re creating a mechanic from scratch with code, what really matters is that the code runs on the client, not where it lives in the Explorer.
--- Needs: game.Players.LocalPlayer, RunService.RenderStepped, HumanoidRootPart. Use absolute service calls.
--- You can forcibly reparent if needed: script.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
--- Auto-reparent (least used): if not script:IsDescendantOf(game:GetService("StarterPlayer").StarterPlayerScripts) then script.Parent = game:GetService("StarterPlayer").StarterPlayerScripts end
--- Memory-only preferred; CoreGui/ReplicatedFirst also common. Print where it goes.
--------------------------------------------------------------------------------------------------------------------------------------------
-
--- Services / locals
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local hrp = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
+-- client-only, memory-first; prints where it lives
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local player=Players.LocalPlayer
+local character=player.Character or player.CharacterAdded:Wait()
+local hrp=character:WaitForChild("HumanoidRootPart")
+local humanoid=character:WaitForChild("Humanoid")
 
 print("[MobileFly] script parent:", script.Parent and script.Parent:GetFullName() or "nil (memory-only)")
 
 -- UI
-local guiName = "MobileFlyUI"
-local pg = player:WaitForChild("PlayerGui")
-local old = pg:FindFirstChild(guiName)
-if old then old:Destroy() end
-local gui = Instance.new("ScreenGui")
-gui.Name = guiName
-gui.ResetOnSpawn = false
-gui.DisplayOrder = 9999
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.Parent = pg
+local guiName="MobileFlyUI"
+local pg=player:WaitForChild("PlayerGui")
+local old=pg:FindFirstChild(guiName); if old then old:Destroy() end
+local gui=Instance.new("ScreenGui")
+gui.Name=guiName; gui.ResetOnSpawn=false; gui.DisplayOrder=9999; gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+gui.Parent=pg
 print("[MobileFly] UI parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
 
 -- Theme
-local COLOR_PRIMARY = Color3.fromRGB(0,170,255)
-local COLOR_BG = Color3.fromRGB(20,22,26)
-local COLOR_TEXT = Color3.new(1,1,1)
-local COLOR_BAR = Color3.fromRGB(30,33,38)
-local COLOR_STOP = Color3.fromRGB(220,110,110)
-local COLOR_STROKE = Color3.fromRGB(60,65,70)
+local C_PRIMARY=Color3.fromRGB(0,170,255)
+local C_BG=Color3.fromRGB(20,22,26)
+local C_TEXT=Color3.new(1,1,1)
+local C_BAR=Color3.fromRGB(30,33,38)
+local C_STOP=Color3.fromRGB(220,110,110)
+local C_STROKE=Color3.fromRGB(60,65,70)
+
+local function corner(p,r) local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,r or 8) c.Parent=p return c end
+local function stroke(p,t,c,tr) local s=Instance.new("UIStroke") s.Thickness=t or 1 s.Color=c or C_STROKE s.Transparency=tr or 0.2 s.Parent=p return s end
 
 -- State
-local flying = false
-local panelOpen = true
-local speed = 70
-local lastPanelPos = UDim2.new(0.5, -100, 1, -120)
+local flying=false
+local panelOpen=true
+local speed=70
+local lastPanelPos=UDim2.new(0.5,-100,1,-120)
 
-local function corner(p, r) local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,r or 8) c.Parent=p return c end
-local function stroke(p,t,c,tr) local s=Instance.new("UIStroke") s.Thickness=t or 1 s.Color=c or COLOR_STROKE s.Transparency=tr or 0.2 s.Parent=p return s end
-
--- Panel (draggable when open)
-local panel = Instance.new("Frame")
-panel.Name = "FlyPanel"
-panel.AnchorPoint = Vector2.new(0.5,1)
-panel.Position = lastPanelPos
-panel.Size = UDim2.fromOffset(220,120)
-panel.BackgroundColor3 = COLOR_BG
-panel.BorderSizePixel = 0
-panel.Parent = gui
+-- Panel
+local panel=Instance.new("Frame")
+panel.Name="FlyPanel"; panel.AnchorPoint=Vector2.new(0.5,1)
+panel.Position=lastPanelPos; panel.Size=UDim2.fromOffset(220,120)
+panel.BackgroundColor3=C_BG; panel.BorderSizePixel=0; panel.Parent=gui
 corner(panel,10) stroke(panel,1)
 
-local titleBar = Instance.new("Frame")
-titleBar.Name = "TitleBar"
-titleBar.BackgroundColor3 = COLOR_BAR
-titleBar.BackgroundTransparency = 0.2
-titleBar.BorderSizePixel = 0
-titleBar.Size = UDim2.new(1,0,0,30)
-titleBar.Parent = panel
+local titleBar=Instance.new("Frame")
+titleBar.Name="TitleBar"; titleBar.BackgroundColor3=C_BAR; titleBar.BackgroundTransparency=0.2
+titleBar.BorderSizePixel=0; titleBar.Size=UDim2.new(1,0,0,30); titleBar.Parent=panel
 
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Font = Enum.Font.GothamMedium
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.TextColor3 = COLOR_TEXT
-title.TextSize = 14
-title.Text = "Mobile Fly"
-title.Size = UDim2.new(1,-40,1,0)
-title.Position = UDim2.new(0,10,0,0)
-title.Parent = titleBar
+local title=Instance.new("TextLabel")
+title.BackgroundTransparency=1; title.Font=Enum.Font.GothamMedium
+title.TextXAlignment=Enum.TextXAlignment.Left; title.TextColor3=C_TEXT; title.TextSize=14
+title.Text="Mobile Fly"; title.Size=UDim2.new(1,-70,1,0); title.Position=UDim2.new(0,10,0,0); title.Parent=titleBar
 
-local collapseBtn = Instance.new("TextButton")
-collapseBtn.Size = UDim2.fromOffset(24,24)
-collapseBtn.Position = UDim2.new(1,-28,0.5,-12)
-collapseBtn.Text = "-"
-collapseBtn.AutoButtonColor = true
-collapseBtn.BackgroundColor3 = Color3.fromRGB(50,54,60)
-collapseBtn.TextColor3 = COLOR_TEXT
-collapseBtn.Font = Enum.Font.GothamBold
-collapseBtn.TextSize = 16
-collapseBtn.Parent = titleBar
+local collapseBtn=Instance.new("TextButton")
+collapseBtn.Size=UDim2.fromOffset(24,24); collapseBtn.Position=UDim2.new(1,-56,0.5,-12)
+collapseBtn.Text="-"; collapseBtn.AutoButtonColor=true
+collapseBtn.BackgroundColor3=Color3.fromRGB(50,54,60); collapseBtn.TextColor3=C_TEXT
+collapseBtn.Font=Enum.Font.GothamBold; collapseBtn.TextSize=16; collapseBtn.Parent=titleBar
 corner(collapseBtn,6)
 
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Name = "ToggleFly"
-toggleBtn.Size = UDim2.new(1,-16,0,46)
-toggleBtn.Position = UDim2.new(0,8,0,48)
-toggleBtn.BackgroundColor3 = COLOR_PRIMARY
-toggleBtn.TextColor3 = COLOR_TEXT
-toggleBtn.TextSize = 18
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.AutoButtonColor = true
-toggleBtn.Text = "Enable Fly"
-toggleBtn.Parent = panel
+local closeBtn=Instance.new("TextButton")
+closeBtn.Size=UDim2.fromOffset(24,24); closeBtn.Position=UDim2.new(1,-28,0.5,-12)
+closeBtn.Text="X"; closeBtn.AutoButtonColor=true
+closeBtn.BackgroundColor3=Color3.fromRGB(70,40,40); closeBtn.TextColor3=C_TEXT
+closeBtn.Font=Enum.Font.GothamBold; closeBtn.TextSize=16; closeBtn.Parent=titleBar
+corner(closeBtn,6)
+
+local toggleBtn=Instance.new("TextButton")
+toggleBtn.Name="ToggleFly"; toggleBtn.Size=UDim2.new(1,-16,0,46)
+toggleBtn.Position=UDim2.new(0,8,0,48)
+toggleBtn.BackgroundColor3=C_PRIMARY; toggleBtn.TextColor3=C_TEXT
+toggleBtn.TextSize=18; toggleBtn.Font=Enum.Font.GothamBold
+toggleBtn.AutoButtonColor=true; toggleBtn.Text="Enable Fly"; toggleBtn.Parent=panel
 corner(toggleBtn,8)
 
--- Collapsed "+"
-local collapsedBtn = Instance.new("TextButton")
-collapsedBtn.Name = "Collapsed"
-collapsedBtn.Size = UDim2.fromOffset(46,46)
-collapsedBtn.AnchorPoint = Vector2.new(0.5,1)
-collapsedBtn.Position = panel.Position
-collapsedBtn.BackgroundColor3 = COLOR_PRIMARY
-collapsedBtn.Text = "+"
-collapsedBtn.TextColor3 = COLOR_TEXT
-collapsedBtn.TextSize = 22
-collapsedBtn.Font = Enum.Font.GothamBold
-collapsedBtn.Visible = false
-collapsedBtn.Parent = gui
+local collapsedBtn=Instance.new("TextButton")
+collapsedBtn.Name="Collapsed"; collapsedBtn.Size=UDim2.fromOffset(46,46)
+collapsedBtn.AnchorPoint=Vector2.new(0.5,1); collapsedBtn.Position=panel.Position
+collapsedBtn.BackgroundColor3=C_PRIMARY; collapsedBtn.Text="+"; collapsedBtn.TextColor3=C_TEXT
+collapsedBtn.TextSize=22; collapsedBtn.Font=Enum.Font.GothamBold
+collapsedBtn.Visible=false; collapsedBtn.Parent=gui
 corner(collapsedBtn,12)
 
 -- Open/close
 local function setPanelOpen(open)
-    panelOpen = open
-    panel.Visible = open
-    collapsedBtn.Visible = not open
-    collapseBtn.Text = open and "-" or "+"
-    if open then panel.Position = collapsedBtn.Position else lastPanelPos = panel.Position collapsedBtn.Position = lastPanelPos end
+    panelOpen=open; panel.Visible=open; collapsedBtn.Visible=not open; collapseBtn.Text=open and "-" or "+"
+    if open then panel.Position=collapsedBtn.Position else lastPanelPos=panel.Position; collapsedBtn.Position=lastPanelPos end
 end
 collapseBtn.MouseButton1Click:Connect(function() setPanelOpen(false) end)
 collapsedBtn.MouseButton1Click:Connect(function()
-    if collapsedBtn:GetAttribute("SuppressNextClick") then collapsedBtn:SetAttribute("SuppressNextClick", false) return end
+    if collapsedBtn:GetAttribute("SuppressNextClick") then collapsedBtn:SetAttribute("SuppressNextClick",false) return end
     setPanelOpen(true)
 end)
 
--- Drag (open: panel via title/toggle)
-local dragging, dragStart, startPos
+-- Drag open
+local dragging,dragStart,startPos
 local function enableDrag(handle)
     handle.InputBegan:Connect(function(input)
         if not panelOpen then return end
         if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
             dragging=true; dragStart=input.Position; startPos=panel.Position
-            local con; con=input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then dragging=false if con then con:Disconnect() end end end)
+            local con; con=input.Changed:Connect(function()
+                if input.UserInputState==Enum.UserInputState.End then dragging=false if con then con:Disconnect() end end
+            end)
         end
     end)
     handle.InputChanged:Connect(function(input)
@@ -149,11 +112,10 @@ local function enableDrag(handle)
         end
     end)
 end
-enableDrag(titleBar)
-enableDrag(toggleBtn)
+enableDrag(titleBar); enableDrag(toggleBtn)
 
--- Drag (closed: hold-and-drag the +)
-collapsedBtn:SetAttribute("SuppressNextClick", false)
+-- Drag closed
+collapsedBtn:SetAttribute("SuppressNextClick",false)
 local cDragging,cDragStart,cStartPos,cMoved,cPressT
 collapsedBtn.InputBegan:Connect(function(input)
     if panelOpen then return end
@@ -166,111 +128,103 @@ collapsedBtn.InputChanged:Connect(function(input)
     if not cDragging or panelOpen then return end
     if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
         local d=input.Position-cDragStart
-        if not cMoved and (d.Magnitude>6 or (os.clock()-cPressT)>0.12) then cMoved=true collapsedBtn:SetAttribute("SuppressNextClick", true) end
+        if not cMoved and (d.Magnitude>6 or (os.clock()-cPressT)>0.12) then cMoved=true collapsedBtn:SetAttribute("SuppressNextClick",true) end
         if cMoved then collapsedBtn.Position=UDim2.new(cStartPos.X.Scale,cStartPos.X.Offset+d.X,cStartPos.Y.Scale,cStartPos.Y.Offset+d.Y) end
     end
 end)
 
--- Flight
-local rootAttachment, alignOrientation, linearVelocity, liftForce
-local flyConn
-
--- Mobile thumbstick (PlayerModule)
+-- Controls
 local controls
 local function getMoveVector()
     if controls then return controls:GetMoveVector() end
-    local ps = player:FindFirstChild("PlayerScripts")
-    local pm = ps and ps:FindFirstChild("PlayerModule")
-    if pm then controls = require(pm):GetControls() return controls:GetMoveVector() end
+    local ps=player:FindFirstChild("PlayerScripts")
+    local pm=ps and ps:FindFirstChild("PlayerModule")
+    if pm then controls=require(pm):GetControls() return controls:GetMoveVector() end
     return Vector3.zero
 end
 
+-- Flight
+local rootAttachment,alignOrientation,linearVelocity,liftForce
+local flyConn,hDiedConn
 local function cleanFly()
     if flyConn then flyConn:Disconnect() flyConn=nil end
     if alignOrientation then alignOrientation:Destroy() alignOrientation=nil end
     if linearVelocity then linearVelocity:Destroy() linearVelocity=nil end
     if liftForce then liftForce:Destroy() liftForce=nil end
     if rootAttachment then rootAttachment:Destroy() rootAttachment=nil end
-    humanoid.AutoRotate = true
+    if humanoid then humanoid.AutoRotate=true end
 end
-
 local function startFlying()
     if flying then return end
-    flying = true
-    toggleBtn.Text = "Disable Fly"
-    toggleBtn.BackgroundColor3 = COLOR_STOP
-
-    rootAttachment = Instance.new("Attachment"); rootAttachment.Name="FlyAttachment"; rootAttachment.Parent = hrp
-
-    alignOrientation = Instance.new("AlignOrientation")
-    alignOrientation.Attachment0 = rootAttachment
-    alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-    alignOrientation.Responsiveness = 60
-    alignOrientation.MaxTorque = math.huge
-    alignOrientation.Parent = hrp
-
-    linearVelocity = Instance.new("LinearVelocity")
-    linearVelocity.Attachment0 = rootAttachment
-    linearVelocity.MaxForce = math.huge
-    linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
-    linearVelocity.VectorVelocity = Vector3.zero
-    linearVelocity.Parent = hrp
-
-    liftForce = Instance.new("VectorForce")
-    liftForce.Attachment0 = rootAttachment
-    liftForce.RelativeTo = Enum.ActuatorRelativeTo.World
-    liftForce.Force = Vector3.zero
-    liftForce.Parent = hrp
-
-    humanoid.AutoRotate = false
-
-    flyConn = RunService.RenderStepped:Connect(function()
+    flying=true; toggleBtn.Text="Disable Fly"; toggleBtn.BackgroundColor3=C_STOP
+    rootAttachment=Instance.new("Attachment"); rootAttachment.Name="FlyAttachment"; rootAttachment.Parent=hrp
+    alignOrientation=Instance.new("AlignOrientation")
+    alignOrientation.Attachment0=rootAttachment; alignOrientation.Mode=Enum.OrientationAlignmentMode.OneAttachment
+    alignOrientation.Responsiveness=60; alignOrientation.MaxTorque=math.huge; alignOrientation.Parent=hrp
+    linearVelocity=Instance.new("LinearVelocity")
+    linearVelocity.Attachment0=rootAttachment; linearVelocity.MaxForce=math.huge
+    linearVelocity.RelativeTo=Enum.ActuatorRelativeTo.World; linearVelocity.VectorVelocity=Vector3.zero; linearVelocity.Parent=hrp
+    liftForce=Instance.new("VectorForce"); liftForce.Attachment0=rootAttachment
+    liftForce.RelativeTo=Enum.ActuatorRelativeTo.World; liftForce.Force=Vector3.zero; liftForce.Parent=hrp
+    humanoid.AutoRotate=false
+    flyConn=RunService.RenderStepped:Connect(function()
         if not flying then return end
-        local cam = workspace.CurrentCamera
-        local camCF = (cam and cam.CFrame) or hrp.CFrame
-
-        local mv = getMoveVector()
-        local forward = math.max(0, -mv.Z)      -- forward-only
-        local strafe = mv.X                      -- left/right allowed
-        local desiredDir = camCF.RightVector*strafe + camCF.LookVector*forward
-        if desiredDir.Magnitude > 1e-3 then desiredDir = desiredDir.Unit else desiredDir = Vector3.zero end
-
-        linearVelocity.VectorVelocity = desiredDir * speed
-
-        local face = (desiredDir.Magnitude > 1e-3) and desiredDir or camCF.LookVector
-        alignOrientation.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + face)
-
-        local mass = hrp.AssemblyMass
-        liftForce.Force = Vector3.new(0, mass * workspace.Gravity, 0)
-
-        if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
+        local cam=workspace.CurrentCamera; local camCF=(cam and cam.CFrame) or hrp.CFrame
+        local mv=getMoveVector()
+        local forward=math.max(0,-mv.Z) -- no backward
+        local strafe=mv.X
+        local dir=camCF.RightVector*strafe + camCF.LookVector*forward
+        if dir.Magnitude>1e-3 then dir=dir.Unit else dir=Vector3.zero end
+        linearVelocity.VectorVelocity=dir*speed
+        local face=(dir.Magnitude>1e-3) and dir or camCF.LookVector
+        alignOrientation.CFrame=CFrame.lookAt(hrp.Position,hrp.Position+face)
+        local mass=hrp.AssemblyMass
+        liftForce.Force=Vector3.new(0,mass*workspace.Gravity,0)
+        if humanoid:GetState()~=Enum.HumanoidStateType.Freefall then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
     end)
 end
-
 local function stopFlying()
     if not flying then return end
-    flying = false
-    toggleBtn.Text = "Enable Fly"
-    toggleBtn.BackgroundColor3 = COLOR_PRIMARY
+    flying=false; toggleBtn.Text="Enable Fly"; toggleBtn.BackgroundColor3=C_PRIMARY
     cleanFly()
 end
 
+-- Death auto-stop
+local function hookHumanoid(h)
+    if hDiedConn then hDiedConn:Disconnect() hDiedConn=nil end
+    hDiedConn=h.Died:Connect(function()
+        if flying then print("[MobileFly] Player died: stopping fly") end
+        stopFlying()
+    end)
+end
+hookHumanoid(humanoid)
+
+-- Buttons
 toggleBtn.MouseButton1Click:Connect(function() if flying then stopFlying() else startFlying() end end)
 
+-- X: nuke UI + script
+closeBtn.MouseButton1Click:Connect(function()
+    if flying then stopFlying() end
+    if gui then gui:Destroy() end
+    _G.MobileFly=nil
+    print("[MobileFly] Closed: destroying script")
+    task.defer(function() if script and script.Destroy then script:Destroy() end end)
+end)
+
+-- Respawn
 player.CharacterAdded:Connect(function(c)
-    character = c
-    hrp = c:WaitForChild("HumanoidRootPart")
-    humanoid = c:WaitForChild("Humanoid")
+    character=c; hrp=c:WaitForChild("HumanoidRootPart"); humanoid=c:WaitForChild("Humanoid")
+    hookHumanoid(humanoid)
     if flying then cleanFly() task.wait(0.15) startFlying() end
 end)
 
-_G = rawget(getfenv() or _G, "_G") or _G
-_G.MobileFly = {
+-- Global
+local env=rawget(getfenv() or _G,"_G") or _G
+env.MobileFly={
     Toggle=function() if flying then stopFlying() else startFlying() end end,
     Start=startFlying, Stop=stopFlying, IsFlying=function() return flying end,
     SetSpeed=function(v) speed=math.clamp(tonumber(v) or speed,10,300) end,
     OpenUI=function() setPanelOpen(true) end, CloseUI=function() setPanelOpen(false) end,
 }
 
--- Start defaults
 setPanelOpen(true)
