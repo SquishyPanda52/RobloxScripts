@@ -66,7 +66,7 @@ collapsedBtn.BackgroundColor3=C_PRIMARY; collapsedBtn.Text="+"; collapsedBtn.Tex
 collapsedBtn.Visible=false; collapsedBtn.Parent=gui; corner(collapsedBtn,12)
 
 local function setPanelOpen(open)
-	panelOpen=open; panel.Visible=open; collapsedBtn.Visible=not open; collapseBtn.Text=open and "-" or "+"; if open then panel.Position=collapsedBtn.Position else lastPanelPos=panel.Position; collapsedBtn.Position=lastPanelPos end
+    panelOpen=open; panel.Visible=open; collapsedBtn.Visible=not open; collapseBtn.Text=open and "-" or "+"; if open then panel.Position=collapsedBtn.Position else lastPanelPos=panel.Position; collapsedBtn.Position=lastPanelPos end
 end
 collapseBtn.MouseButton1Click:Connect(function() setPanelOpen(false) end)
 collapsedBtn.MouseButton1Click:Connect(function() if collapsedBtn:GetAttribute("SuppressNextClick") then collapsedBtn:SetAttribute("SuppressNextClick",false) return end setPanelOpen(true) end)
@@ -74,19 +74,19 @@ collapsedBtn.MouseButton1Click:Connect(function() if collapsedBtn:GetAttribute("
 -- Drag (open)
 local dragging,dragStart,startPos
 local function enableDrag(handle)
-	handle.InputBegan:Connect(function(input)
-		if not panelOpen then return end
-		if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-			dragging=true; dragStart=input.Position; startPos=panel.Position
-			local con; con=input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then dragging=false if con then con:Disconnect() end end end)
-		end
-	end)
-	handle.InputChanged:Connect(function(input)
-		if not dragging then return end
-		if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
-			local d=input.Position-dragStart; panel.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y); lastPanelPos=panel.Position
-		end
-	end)
+    handle.InputBegan:Connect(function(input)
+        if not panelOpen then return end
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            dragging=true; dragStart=input.Position; startPos=panel.Position
+            local con; con=input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then dragging=false if con then con:Disconnect() end end end)
+        end
+    end)
+    handle.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
+            local d=input.Position-dragStart; panel.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y); lastPanelPos=panel.Position
+        end
+    end)
 end
 enableDrag(titleBar); enableDrag(toggleBtn)
 
@@ -94,28 +94,28 @@ enableDrag(titleBar); enableDrag(toggleBtn)
 collapsedBtn:SetAttribute("SuppressNextClick",false)
 local cDragging,cDragStart,cStartPos,cMoved,cPressT
 collapsedBtn.InputBegan:Connect(function(input)
-	if panelOpen then return end
-	if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-		cDragging=true; cMoved=false; cPressT=os.clock(); cDragStart=input.Position; cStartPos=collapsedBtn.Position
-		local con; con=input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then cDragging=false if con then con:Disconnect() end end end)
-	end
+    if panelOpen then return end
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+        cDragging=true; cMoved=false; cPressT=os.clock(); cDragStart=input.Position; cStartPos=collapsedBtn.Position
+        local con; con=input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then cDragging=false if con then con:Disconnect() end end end)
+    end
 end)
 collapsedBtn.InputChanged:Connect(function(input)
-	if not cDragging or panelOpen then return end
-	if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
-		local d=input.Position-cDragStart
-		if not cMoved and (d.Magnitude>6 or (os.clock()-cPressT)>0.12) then cMoved=true; collapsedBtn:SetAttribute("SuppressNextClick",true) end
-		if cMoved then collapsedBtn.Position=UDim2.new(cStartPos.X.Scale,cStartPos.X.Offset+d.X,cStartPos.Y.Scale,cStartPos.Y.Offset+d.Y) end
-	end
+    if not cDragging or panelOpen then return end
+    if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
+        local d=input.Position-cDragStart
+        if not cMoved and (d.Magnitude>6 or (os.clock()-cPressT)>0.12) then cMoved=true; collapsedBtn:SetAttribute("SuppressNextClick",true) end
+        if cMoved then collapsedBtn.Position=UDim2.new(cStartPos.X.Scale,cStartPos.X.Offset+d.X,cStartPos.Y.Scale,cStartPos.Y.Offset+d.Y) end
+    end
 end)
 
 -- Controls
 local controls
 local function getMoveVector()
-	if controls then return controls:GetMoveVector() end
-	local ps=player:FindFirstChild("PlayerScripts"); local pm=ps and ps:FindFirstChild("PlayerModule")
-	if pm then controls=require(pm):GetControls(); return controls:GetMoveVector() end
-	return Vector3.zero
+    if controls then return controls:GetMoveVector() end
+    local ps=player:FindFirstChild("PlayerScripts"); local pm=ps and ps:FindFirstChild("PlayerModule")
+    if pm then controls=require(pm):GetControls(); return controls:GetMoveVector() end
+    return Vector3.zero
 end
 
 -- Flight
@@ -123,35 +123,35 @@ local rootAttachment,alignOrientation,linearVelocity,liftForce
 local flyConn,hDiedConn,loaderConn
 local function cleanFly() if flyConn then flyConn:Disconnect() flyConn=nil end; if alignOrientation then alignOrientation:Destroy() alignOrientation=nil end; if linearVelocity then linearVelocity:Destroy() linearVelocity=nil end; if liftForce then liftForce:Destroy() liftForce=nil end; if rootAttachment then rootAttachment:Destroy() rootAttachment=nil end; if humanoid then humanoid.AutoRotate=true end end
 local function desiredDirFromInput(camCF)
-	local mv=getMoveVector()
-	if controlMode=="keyboard" then
-		local forward=-mv.Z; local strafe=mv.X
-		local d=camCF.RightVector*strafe + camCF.LookVector*forward
-		return (d.Magnitude>1e-3) and d.Unit or Vector3.zero
-	else
-		local forward=math.max(0,-mv.Z); local strafe=mv.X
-		local d=camCF.RightVector*strafe + camCF.LookVector*forward
-		return (d.Magnitude>1e-3) and d.Unit or Vector3.zero
-	end
+    local mv=getMoveVector()
+    if controlMode=="keyboard" then
+        local forward=-mv.Z; local strafe=mv.X
+        local d=camCF.RightVector*strafe + camCF.LookVector*forward
+        return (d.Magnitude>1e-3) and d.Unit or Vector3.zero
+    else
+        local forward=math.max(0,-mv.Z); local strafe=mv.X
+        local d=camCF.RightVector*strafe + camCF.LookVector*forward
+        return (d.Magnitude>1e-3) and d.Unit or Vector3.zero
+    end
 end
 local function startFlying()
-	if flying then return end
-	flying=true; toggleBtn.Text="Disable Fly"; toggleBtn.BackgroundColor3=C_STOP
-	rootAttachment=Instance.new("Attachment"); rootAttachment.Name="FlyAttachment"; rootAttachment.Parent=hrp
-	alignOrientation=Instance.new("AlignOrientation"); alignOrientation.Attachment0=rootAttachment; alignOrientation.Mode=Enum.OrientationAlignmentMode.OneAttachment; alignOrientation.Responsiveness=60; alignOrientation.MaxTorque=math.huge; alignOrientation.Parent=hrp
-	linearVelocity=Instance.new("LinearVelocity"); linearVelocity.Attachment0=rootAttachment; linearVelocity.MaxForce=math.huge; linearVelocity.RelativeTo=Enum.ActuatorRelativeTo.World; linearVelocity.VectorVelocity=Vector3.zero; linearVelocity.Parent=hrp
-	liftForce=Instance.new("VectorForce"); liftForce.Attachment0=rootAttachment; liftForce.RelativeTo=Enum.ActuatorRelativeTo.World; liftForce.Force=Vector3.zero; liftForce.Parent=hrp
-	humanoid.AutoRotate=false
-	flyConn=RunService.RenderStepped:Connect(function()
-		if not flying then return end
-		local cam=workspace.CurrentCamera; local camCF=(cam and cam.CFrame) or hrp.CFrame
-		local dir=desiredDirFromInput(camCF)
-		linearVelocity.VectorVelocity=dir*speed
-		local face=(dir.Magnitude>1e-3) and dir or camCF.LookVector
-		alignOrientation.CFrame=CFrame.lookAt(hrp.Position,hrp.Position+face)
-		liftForce.Force=Vector3.new(0,hrp.AssemblyMass*workspace.Gravity,0)
-		if humanoid:GetState()~=Enum.HumanoidStateType.Freefall then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
-	end)
+    if flying then return end
+    flying=true; toggleBtn.Text="Disable Fly"; toggleBtn.BackgroundColor3=C_STOP
+    rootAttachment=Instance.new("Attachment"); rootAttachment.Name="FlyAttachment"; rootAttachment.Parent=hrp
+    alignOrientation=Instance.new("AlignOrientation"); alignOrientation.Attachment0=rootAttachment; alignOrientation.Mode=Enum.OrientationAlignmentMode.OneAttachment; alignOrientation.Responsiveness=60; alignOrientation.MaxTorque=math.huge; alignOrientation.Parent=hrp
+    linearVelocity=Instance.new("LinearVelocity"); linearVelocity.Attachment0=rootAttachment; linearVelocity.MaxForce=math.huge; linearVelocity.RelativeTo=Enum.ActuatorRelativeTo.World; linearVelocity.VectorVelocity=Vector3.zero; linearVelocity.Parent=hrp
+    liftForce=Instance.new("VectorForce"); liftForce.Attachment0=rootAttachment; liftForce.RelativeTo=Enum.ActuatorRelativeTo.World; liftForce.Force=Vector3.zero; liftForce.Parent=hrp
+    humanoid.AutoRotate=false
+    flyConn=RunService.RenderStepped:Connect(function()
+        if not flying then return end
+        local cam=workspace.CurrentCamera; local camCF=(cam and cam.CFrame) or hrp.CFrame
+        local dir=desiredDirFromInput(camCF)
+        linearVelocity.VectorVelocity=dir*speed
+        local face=(dir.Magnitude>1e-3) and dir or camCF.LookVector
+        alignOrientation.CFrame=CFrame.lookAt(hrp.Position,hrp.Position+face)
+        liftForce.Force=Vector3.new(0,hrp.AssemblyMass*workspace.Gravity,0)
+        if humanoid:GetState()~=Enum.HumanoidStateType.Freefall then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
+    end)
 end
 local function stopFlying() if not flying then return end flying=false; toggleBtn.Text="Enable Fly"; toggleBtn.BackgroundColor3=C_PRIMARY; cleanFly() end
 
@@ -162,18 +162,18 @@ hookHumanoid(humanoid)
 -- Buttons
 toggleBtn.MouseButton1Click:Connect(function() if flying then stopFlying() else startFlying() end end)
 closeBtn.MouseButton1Click:Connect(function()
-	if flying then stopFlying() end
-	if loaderConn then loaderConn:Disconnect() loaderConn=nil end
-	if gui then gui:Destroy() end
-	_G.MobileFly=nil
-	print("[MobileFly] Closed: destroying script")
-	task.defer(function() if script and script.Destroy then script:Destroy() end end)
+    if flying then stopFlying() end
+    if loaderConn then loaderConn:Disconnect() loaderConn=nil end
+    if gui then gui:Destroy() end
+    _G.MobileFly=nil
+    print("[MobileFly] Closed: destroying script")
+    task.defer(function() if script and script.Destroy then script:Destroy() end end)
 end)
 
 -- Respawn
 player.CharacterAdded:Connect(function(c)
-	character=c; hrp=c:WaitForChild("HumanoidRootPart"); humanoid=c:WaitForChild("Humanoid"); hookHumanoid(humanoid)
-	if flying then cleanFly() task.wait(0.15) startFlying() end
+    character=c; hrp=c:WaitForChild("HumanoidRootPart"); humanoid=c:WaitForChild("Humanoid"); hookHumanoid(humanoid)
+    if flying then cleanFly() task.wait(0.15) startFlying() end
 end)
 
 -- Loader (3 dots + input detect)
@@ -183,52 +183,52 @@ local function mkDot(x) local d=Instance.new("Frame"); d.Size=UDim2.fromOffset(1
 local d1=mkDot(24); local d2=mkDot(54); local d3=mkDot(84)
 local startT=os.clock()
 loaderConn=RunService.RenderStepped:Connect(function()
-	local t=os.clock()-startT
-	local function y(ph) return math.sin((t*6)+ph)*6 end
-	d1.Position=UDim2.new(0,24,0.5,y(0))
-	d2.Position=UDim2.new(0,54,0.5,y(0.5))
-	d3.Position=UDim2.new(0,84,0.5,y(1))
+    local t=os.clock()-startT
+    local function y(ph) return math.sin((t*6)+ph)*6 end
+    d1.Position=UDim2.new(0,24,0.5,y(0))
+    d2.Position=UDim2.new(0,54,0.5,y(0.5))
+    d3.Position=UDim2.new(0,84,0.5,y(1))
 end)
 
 -- Decide input mode
 local decided=false
 local keyConn,touchConn,inputConn
 local function decide(mode,why)
-	if decided then return end
-	decided=true; controlMode=mode; print("[MobileFly] Mode:",mode,"(",why,")")
-	if loaderConn then loaderConn:Disconnect() loaderConn=nil end
-	if keyConn then keyConn:Disconnect() keyConn=nil end
-	if touchConn then touchConn:Disconnect() touchConn=nil end
-	if inputConn then inputConn:Disconnect() inputConn=nil end
-	if loader then loader:Destroy() end
-	title.Text=(mode=="keyboard") and "Fly (Keyboard)" or "Fly (Mobile)"
-	setPanelOpen(true)
+    if decided then return end
+    decided=true; controlMode=mode; print("[MobileFly] Mode:",mode,"(",why,")")
+    if loaderConn then loaderConn:Disconnect() loaderConn=nil end
+    if keyConn then keyConn:Disconnect() keyConn=nil end
+    if touchConn then touchConn:Disconnect() touchConn=nil end
+    if inputConn then inputConn:Disconnect() inputConn=nil end
+    if loader then loader:Destroy() end
+    title.Text=(mode=="keyboard") and "Fly (Keyboard)" or "Fly (Mobile)"
+    setPanelOpen(true)
 end
 
 keyConn=UIS.InputBegan:Connect(function(i,gp)
-	if gp then return end
-	if i.UserInputType==Enum.UserInputType.Keyboard then decide("keyboard","keyboard press") end
+    if gp then return end
+    if i.UserInputType==Enum.UserInputType.Keyboard then decide("keyboard","keyboard press") end
 end)
 touchConn=UIS.TouchStarted:Connect(function() decide("mobile","touch") end)
 inputConn=UIS.InputBegan:Connect(function(i,gp)
-	if gp then return end
-	if i.UserInputType==Enum.UserInputType.Gamepad1 then decide("keyboard","gamepad favors desktop") end
+    if gp then return end
+    if i.UserInputType==Enum.UserInputType.Gamepad1 then decide("keyboard","gamepad favors desktop") end
 end)
 
 task.delay(1.2,function()
-	if decided then return end
-	if UIS.KeyboardEnabled and not UIS.TouchEnabled then decide("keyboard","kb enabled only")
-	elseif UIS.TouchEnabled and not UIS.KeyboardEnabled then decide("mobile","touch enabled only")
-	else decide("mobile","fallback") end
+    if decided then return end
+    if UIS.KeyboardEnabled and not UIS.TouchEnabled then decide("keyboard","kb enabled only")
+    elseif UIS.TouchEnabled and not UIS.KeyboardEnabled then decide("mobile","touch enabled only")
+    else decide("mobile","fallback") end
 end)
 
 -- Global
 local env=rawget(getfenv() or _G,"_G") or _G
 env.MobileFly={
-	Toggle=function() if flying then stopFlying() else startFlying() end end,
-	Start=startFlying, Stop=stopFlying, IsFlying=function() return flying end,
-	SetSpeed=function(v) speed=math.clamp(tonumber(v) or speed,10,300) end,
-	OpenUI=function() setPanelOpen(true) end, CloseUI=function() setPanelOpen(false) end,
+    Toggle=function() if flying then stopFlying() else startFlying() end end,
+    Start=startFlying, Stop=stopFlying, IsFlying=function() return flying end,
+    SetSpeed=function(v) speed=math.clamp(tonumber(v) or speed,10,300) end,
+    OpenUI=function() setPanelOpen(true) end, CloseUI=function() setPanelOpen(false) end,
 }
 
 -- Start
