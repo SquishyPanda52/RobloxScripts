@@ -1,13 +1,4 @@
---[[ 
-FlySuite v2 — Client-only, runtime UI. Loader -> Choice -> Identical Fly UIs (PC vs Phone).
-- PC mode: WASD only (backward allowed).
-- Phone mode: forward/strafe only (no backward).
-- Death auto-stop + UI reset.
-- Collapse (-) to draggable (+), touch-friendly and mouse-friendly.
-- Fully code-generated. Prints parent locations. Exposes _G.FlySuite API.
-]]--
-
--- Services / essentials
+-- FlySuite v3 — Client-only, runtime UI with choice (PC vs Phone), chartreuse gradient, panda branding, shiftlock on PC.
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UIS=game:GetService("UserInputService")
@@ -18,21 +9,29 @@ local humanoid=character:WaitForChild("Humanoid")
 
 print("[FlySuite] script parent:", script.Parent and script.Parent:GetFullName() or "nil (memory-only)")
 
--- UI root
 local pg=player:WaitForChild("PlayerGui")
 local existing=pg:FindFirstChild("FlySuiteUI"); if existing then existing:Destroy() end
 local gui=Instance.new("ScreenGui"); gui.Name="FlySuiteUI"; gui.ResetOnSpawn=false; gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.DisplayOrder=9999; gui.Parent=pg
 print("[FlySuite] UI parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
 
 -- Theme
-local C_PRIMARY=Color3.fromRGB(0,170,255)
-local C_BG=Color3.fromRGB(20,22,26)
-local C_BAR=Color3.fromRGB(30,33,38)
+local CHART_TOP=Color3.fromRGB(173,255,47)
+local CHART_BOTTOM=Color3.fromRGB(90,160,20)
+local BTN_TOP=Color3.fromRGB(120,220,30)
+local BTN_BOTTOM=Color3.fromRGB(70,140,15)
 local C_TEXT=Color3.new(1,1,1)
 local C_STOP=Color3.fromRGB(220,110,110)
-local C_STROKE=Color3.fromRGB(60,65,70)
+local C_BAR_DARK=Color3.fromRGB(25,35,20)
+local C_BLACK=Color3.new(0,0,0)
+local PANDA_ID="rbxassetid://132476751274689"
+local PC_IMG="rbxassetid://96310251311881"
+local PH_IMG="rbxassetid://112692568800008"
+
 local function corner(p,r) local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r or 8); c.Parent=p end
-local function stroke(p,t,c,tr) local s=Instance.new("UIStroke"); s.Thickness=t or 1; s.Color=c or C_STROKE; s.Transparency=tr or 0.2; s.Parent=p end
+local function stroke(p,t) local s=Instance.new("UIStroke"); s.Thickness=t or 1; s.Color=C_BLACK; s.Transparency=0; s.Parent=p end
+local function gradient(p,top,bottom,rot)
+	local g=Instance.new("UIGradient"); g.Color=ColorSequence.new(top or CHART_TOP,bottom or CHART_BOTTOM); g.Rotation=rot or 90; g.Parent=p; return g
+end
 
 -- State
 local mode="none" -- "pc" | "phone"
@@ -42,18 +41,18 @@ local flyConn,hDiedConn
 local rootAttachment,alignOrientation,linearVelocity,liftForce
 local kbConns={}
 local keyState={W=false,A=false,S=false,D=false}
+local prevMouseBehavior,prevMouseIcon=nil,nil
 
--- Controls accessor (for mobile)
+-- Controls (mobile)
 local controls
 local function getControls()
 	if controls then return controls end
-	local ps=player:FindFirstChild("PlayerScripts")
-	local pm=ps and ps:FindFirstChild("PlayerModule")
+	local ps=player:FindFirstChild("PlayerScripts"); local pm=ps and ps:FindFirstChild("PlayerModule")
 	if pm then controls=require(pm):GetControls() end
 	return controls
 end
 
--- Flight helpers
+-- Flight
 local function cleanFly()
 	if flyConn then flyConn:Disconnect() flyConn=nil end
 	if alignOrientation then alignOrientation:Destroy() alignOrientation=nil end
@@ -61,6 +60,11 @@ local function cleanFly()
 	if liftForce then liftForce:Destroy() liftForce=nil end
 	if rootAttachment then rootAttachment:Destroy() rootAttachment=nil end
 	if humanoid then humanoid.AutoRotate=true end
+	if mode=="pc" then
+		if prevMouseBehavior~=nil then UIS.MouseBehavior=prevMouseBehavior end
+		if prevMouseIcon~=nil then UIS.MouseIconEnabled=prevMouseIcon end
+		prevMouseBehavior=nil; prevMouseIcon=nil
+	end
 end
 
 local function desiredDir(camCF)
@@ -69,19 +73,18 @@ local function desiredDir(camCF)
 		local x=(keyState.D and 1 or 0)-(keyState.A and 1 or 0)
 		local v=camCF.RightVector*x + camCF.LookVector*(-z)
 		return (v.Magnitude>1e-3) and v.Unit or Vector3.zero
-	elseif mode=="phone" then
+	else
 		local m=getControls() and getControls():GetMoveVector() or Vector3.zero
-		local forward=math.max(0,-m.Z)
-		local strafe=m.X
+		local forward=math.max(0,-m.Z); local strafe=m.X
 		local v=camCF.RightVector*strafe + camCF.LookVector*forward
 		return (v.Magnitude>1e-3) and v.Unit or Vector3.zero
 	end
-	return Vector3.zero
 end
 
 local function startFlying()
 	if flying then return end
 	flying=true
+	if mode=="pc" then prevMouseBehavior=UIS.MouseBehavior; prevMouseIcon=UIS.MouseIconEnabled; UIS.MouseBehavior=Enum.MouseBehavior.LockCenter; UIS.MouseIconEnabled=false end
 	rootAttachment=Instance.new("Attachment"); rootAttachment.Name="FlyAttachment"; rootAttachment.Parent=hrp
 	alignOrientation=Instance.new("AlignOrientation"); alignOrientation.Attachment0=rootAttachment; alignOrientation.Mode=Enum.OrientationAlignmentMode.OneAttachment; alignOrientation.Responsiveness=60; alignOrientation.MaxTorque=math.huge; alignOrientation.Parent=hrp
 	linearVelocity=Instance.new("LinearVelocity"); linearVelocity.Attachment0=rootAttachment; linearVelocity.MaxForce=math.huge; linearVelocity.RelativeTo=Enum.ActuatorRelativeTo.World; linearVelocity.VectorVelocity=Vector3.zero; linearVelocity.Parent=hrp
@@ -98,9 +101,10 @@ local function startFlying()
 		if humanoid:GetState()~=Enum.HumanoidStateType.Freefall then humanoid:ChangeState(Enum.HumanoidStateType.Freefall) end
 	end)
 end
+
 local function stopFlying() if not flying then return end flying=false; cleanFly() end
 
--- Death hook (auto stop & UI-safe)
+-- Death
 local function hookHumanoid(h)
 	if hDiedConn then hDiedConn:Disconnect() hDiedConn=nil end
 	hDiedConn=h.Died:Connect(function()
@@ -115,7 +119,7 @@ player.CharacterAdded:Connect(function(c)
 	if flying then stopFlying() task.wait(0.15) startFlying() end
 end)
 
--- Drag helper (panels)
+-- Drag helpers
 local function makeDraggable(frame,handles)
 	local dragging=false; local dragStart; local startPos
 	local function begin(input)
@@ -131,13 +135,9 @@ local function makeDraggable(frame,handles)
 			frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
 		end
 	end
-	for _,h in ipairs(handles) do
-		h.InputBegan:Connect(begin)
-		h.InputChanged:Connect(move)
-	end
+	for _,h in ipairs(handles) do h.InputBegan:Connect(begin); h.InputChanged:Connect(move) end
 end
 
--- Drag helper (collapsed +)
 local function makePlusDraggable(btn)
 	local dragging=false; local dragStart; local startPos
 	btn.InputBegan:Connect(function(input)
@@ -155,30 +155,33 @@ local function makePlusDraggable(btn)
 	end)
 end
 
--- Panel builder (shared)
+-- Panel builder
 local function buildPanel(titleText,name)
 	local panel=Instance.new("Frame"); panel.Name=name or "Panel"; panel.AnchorPoint=Vector2.new(0.5,0.5); panel.Position=UDim2.new(0.5,0,0.5,0)
-	panel.Size=UDim2.fromOffset(280,150); panel.BackgroundColor3=C_BG; panel.BorderSizePixel=0; panel.Parent=gui; corner(panel,10); stroke(panel,1)
-	local bar=Instance.new("Frame"); bar.Name="Bar"; bar.BackgroundColor3=C_BAR; bar.BorderSizePixel=0; bar.Size=UDim2.new(1,0,0,32); bar.Parent=panel
+	panel.Size=UDim2.fromOffset(300,170); panel.BackgroundColor3=CHART_TOP; panel.BorderSizePixel=0; panel.Parent=gui; corner(panel,12); stroke(panel,1); gradient(panel,CHART_TOP,CHART_BOTTOM,90)
+	local bar=Instance.new("Frame"); bar.Name="Bar"; bar.BackgroundColor3=C_BAR_DARK; bar.BorderSizePixel=0; bar.Size=UDim2.new(1,0,0,34); bar.Parent=panel
+	gradient(bar,Color3.fromRGB(45,70,25),Color3.fromRGB(25,40,18),90)
+	local panda=Instance.new("ImageLabel"); panda.Name="Panda"; panda.BackgroundTransparency=1; panda.Image=PANDA_ID; panda.Size=UDim2.fromOffset(22,22); panda.Position=UDim2.new(0,8,0.5,-11); panda.Parent=bar
 	local title=Instance.new("TextLabel"); title.BackgroundTransparency=1; title.TextXAlignment=Enum.TextXAlignment.Left
-	title.Font=Enum.Font.GothamMedium; title.TextColor3=C_TEXT; title.TextSize=14; title.Text=titleText; title.Size=UDim2.new(1,-72,1,0); title.Position=UDim2.new(0,10,0,0); title.Parent=bar
+	title.Font=Enum.Font.GothamMedium; title.TextColor3=C_TEXT; title.TextSize=14; title.Text=titleText; title.Size=UDim2.new(1,-100,1,0); title.Position=UDim2.new(0,36,0,0); title.Parent=bar
 	local collapse=Instance.new("TextButton"); collapse.Size=UDim2.fromOffset(24,24); collapse.Position=UDim2.new(1,-56,0.5,-12); collapse.Text="-"
-	collapse.BackgroundColor3=Color3.fromRGB(50,54,60); collapse.TextColor3=C_TEXT; collapse.Font=Enum.Font.GothamBold; collapse.TextSize=16; collapse.Parent=bar; corner(collapse,6)
+	collapse.BackgroundColor3=Color3.fromRGB(50,54,60); collapse.TextColor3=C_TEXT; collapse.Font=Enum.Font.GothamBold; collapse.TextSize=16; collapse.Parent=bar; corner(collapse,6); stroke(collapse,1)
 	local close=Instance.new("TextButton"); close.Size=UDim2.fromOffset(24,24); close.Position=UDim2.new(1,-28,0.5,-12); close.Text="X"
-	close.BackgroundColor3=Color3.fromRGB(70,40,40); close.TextColor3=C_TEXT; close.Font=Enum.Font.GothamBold; close.TextSize=16; close.Parent=bar; corner(close,6)
+	close.BackgroundColor3=Color3.fromRGB(70,40,40); close.TextColor3=C_TEXT; close.Font=Enum.Font.GothamBold; close.TextSize=16; close.Parent=bar; corner(close,6); stroke(close,1)
 	makeDraggable(panel,{bar})
 	return panel,bar,close,collapse
 end
 
--- Loader (dots)
+-- Loader
 local loader=Instance.new("Frame"); loader.Name="Loader"; loader.AnchorPoint=Vector2.new(0.5,0.5); loader.Position=UDim2.new(0.5,0,0.5,0)
-loader.Size=UDim2.fromOffset(140,44); loader.BackgroundTransparency=1; loader.Parent=gui
-local function mkDot(x) local d=Instance.new("Frame"); d.Size=UDim2.fromOffset(12,12); d.Position=UDim2.new(0,x,0.5,0); d.AnchorPoint=Vector2.new(0,0.5); d.BackgroundColor3=C_PRIMARY; d.BorderSizePixel=0; d.Parent=loader; corner(d,6); return d end
+loader.Size=UDim2.fromOffset(160,60); loader.BackgroundColor3=CHART_TOP; loader.Parent=gui; corner(loader,12); stroke(loader,1); gradient(loader,CHART_TOP,CHART_BOTTOM,90)
+local dots=Instance.new("Frame"); dots.BackgroundTransparency=1; dots.Size=UDim2.fromScale(1,1); dots.Parent=loader
+local function mkDot(x) local d=Instance.new("Frame"); d.Size=UDim2.fromOffset(12,12); d.Position=UDim2.new(0,x,0.5,0); d.AnchorPoint=Vector2.new(0,0.5); d.BackgroundColor3=CHART_TOP; d.BorderSizePixel=0; d.Parent=dots; corner(d,6); stroke(d,1); gradient(d,CHART_TOP,CHART_BOTTOM,90); return d end
 local dot1=mkDot(32); local dot2=mkDot(64); local dot3=mkDot(96)
 local startT=os.clock()
 local loaderConn=RunService.RenderStepped:Connect(function()
 	local t=os.clock()-startT
-	local function y(ph) return math.sin((t*6)+ph)*8 end
+	local function y(ph) return math.sin((t*6)+ph)*10 end
 	dot1.Position=UDim2.new(0,32,0.5,y(0))
 	dot2.Position=UDim2.new(0,64,0.5,y(0.5))
 	dot3.Position=UDim2.new(0,96,0.5,y(1))
@@ -190,24 +193,29 @@ local function showChoice()
 	if loader then loader:Destroy() end
 	local panel,bar,close,collapse=buildPanel("Choose Input","ChoicePanel")
 	local prompt=Instance.new("TextLabel"); prompt.BackgroundTransparency=1; prompt.TextColor3=C_TEXT; prompt.Font=Enum.Font.Gotham; prompt.TextSize=16
-	prompt.Text="Are you on PC/Emulator or Phone?"; prompt.Size=UDim2.new(1,-20,0,24); prompt.Position=UDim2.new(0,10,0,46); prompt.Parent=panel
-	local pcBtn=Instance.new("TextButton"); pcBtn.Size=UDim2.new(0.5,-15,0,44); pcBtn.Position=UDim2.new(0,10,0,86); pcBtn.Text="PC / Emulator"
-	pcBtn.BackgroundColor3=C_PRIMARY; pcBtn.TextColor3=C_TEXT; pcBtn.Font=Enum.Font.GothamBold; pcBtn.TextSize=16; pcBtn.AutoButtonColor=true; pcBtn.Parent=panel; corner(pcBtn,8)
-	local phBtn=Instance.new("TextButton"); phBtn.Size=UDim2.new(0.5,-15,0,44); phBtn.Position=UDim2.new(0.5,5,0,86); phBtn.Text="Phone"
-	phBtn.BackgroundColor3=C_PRIMARY; phBtn.TextColor3=C_TEXT; phBtn.Font=Enum.Font.GothamBold; phBtn.TextSize=16; phBtn.AutoButtonColor=true; phBtn.Parent=panel; corner(phBtn,8)
+	prompt.Text="Are you on PC/Emulator or Phone?"; prompt.Size=UDim2.new(1,-20,0,24); prompt.Position=UDim2.new(0,10,0,44); prompt.Parent=panel
 
-	local collapsedBtn=Instance.new("TextButton")
-	collapsedBtn.Size=UDim2.fromOffset(46,46)
+	local pcImg=Instance.new("ImageLabel"); pcImg.BackgroundTransparency=1; pcImg.Image=PC_IMG; pcImg.Size=UDim2.fromOffset(36,36); pcImg.Position=UDim2.new(0,22,0,78); pcImg.Parent=panel
+	local phImg=Instance.new("ImageLabel"); phImg.BackgroundTransparency=1; phImg.Image=PH_IMG; phImg.Size=UDim2.fromOffset(36,36); phImg.Position=UDim2.new(0.5,22,0,78); phImg.Parent=panel
+
+	local pcBtn=Instance.new("TextButton"); pcBtn.Size=UDim2.new(0.5,-28,0,46); pcBtn.Position=UDim2.new(0,14,0,122); pcBtn.Text="PC / Emulator"
+	pcBtn.TextColor3=C_TEXT; pcBtn.Font=Enum.Font.GothamBold; pcBtn.TextSize=16; pcBtn.AutoButtonColor=true; pcBtn.Parent=panel
+	corner(pcBtn,10); stroke(pcBtn,1); gradient(pcBtn,BTN_TOP,BTN_BOTTOM,90)
+
+	local phBtn=Instance.new("TextButton"); phBtn.Size=UDim2.new(0.5,-28,0,46); phBtn.Position=UDim2.new(0.5,14,0,122); phBtn.Text="Phone"
+	phBtn.TextColor3=C_TEXT; phBtn.Font=Enum.Font.GothamBold; phBtn.TextSize=16; phBtn.AutoButtonColor=true; phBtn.Parent=panel
+	corner(phBtn,10); stroke(phBtn,1); gradient(phBtn,BTN_TOP,BTN_BOTTOM,90)
+
+	local collapsedBtn=Instance.new("ImageButton")
+	collapsedBtn.Size=UDim2.fromOffset(54,54)
 	collapsedBtn.AnchorPoint=Vector2.new(0.5,1)
-	collapsedBtn.Position=UDim2.new(0.5,0,1,-80)
-	collapsedBtn.BackgroundColor3=C_PRIMARY
-	collapsedBtn.Text="+"
-	collapsedBtn.TextColor3=C_TEXT
-	collapsedBtn.Font=Enum.Font.GothamBold
-	collapsedBtn.TextSize=22
+	collapsedBtn.Position=UDim2.new(0.5,0,1,-90)
+	collapsedBtn.BackgroundColor3=CHART_TOP
+	collapsedBtn.Image=PANDA_ID
+	collapsedBtn.ImageColor3=Color3.new(1,1,1)
 	collapsedBtn.Visible=false
 	collapsedBtn.Parent=gui
-	corner(collapsedBtn,12)
+	corner(collapsedBtn,14); stroke(collapsedBtn,1); gradient(collapsedBtn,CHART_TOP,CHART_BOTTOM,90)
 	makePlusDraggable(collapsedBtn)
 
 	local function setPanelOpen(open)
@@ -248,25 +256,24 @@ local function showChoice()
 	end)
 end
 
--- Shared Fly UI
+-- Fly UI
 function buildFlyUI(titleText,name)
 	local panel,bar,close,collapse=buildPanel(titleText,name)
 
-	local toggle=Instance.new("TextButton"); toggle.Name="Toggle"; toggle.Size=UDim2.new(1,-20,0,50); toggle.Position=UDim2.new(0,10,0,56)
-	toggle.BackgroundColor3=C_PRIMARY; toggle.TextColor3=C_TEXT; toggle.Font=Enum.Font.GothamBold; toggle.TextSize=18; toggle.Text="Enable Fly"; toggle.Parent=panel; corner(toggle,8)
+	local toggle=Instance.new("TextButton"); toggle.Name="Toggle"; toggle.Size=UDim2.new(1,-20,0,56); toggle.Position=UDim2.new(0,10,0,64)
+	toggle.TextColor3=C_TEXT; toggle.Font=Enum.Font.GothamBold; toggle.TextSize=18; toggle.Text="Enable Fly"; toggle.Parent=panel
+	corner(toggle,10); stroke(toggle,1); gradient(toggle,BTN_TOP,BTN_BOTTOM,90)
 
-	local collapsedBtn=Instance.new("TextButton")
-	collapsedBtn.Size=UDim2.fromOffset(46,46)
+	local collapsedBtn=Instance.new("ImageButton")
+	collapsedBtn.Size=UDim2.fromOffset(54,54)
 	collapsedBtn.AnchorPoint=Vector2.new(0.5,1)
-	collapsedBtn.Position=UDim2.new(0.5,0,1,-80)
-	collapsedBtn.BackgroundColor3=C_PRIMARY
-	collapsedBtn.Text="+"
-	collapsedBtn.TextColor3=C_TEXT
-	collapsedBtn.Font=Enum.Font.GothamBold
-	collapsedBtn.TextSize=22
+	collapsedBtn.Position=UDim2.new(0.5,0,1,-90)
+	collapsedBtn.BackgroundColor3=CHART_TOP
+	collapsedBtn.Image=PANDA_ID
+	collapsedBtn.ImageColor3=Color3.new(1,1,1)
 	collapsedBtn.Visible=false
 	collapsedBtn.Parent=gui
-	corner(collapsedBtn,12)
+	corner(collapsedBtn,14); stroke(collapsedBtn,1); gradient(collapsedBtn,CHART_TOP,CHART_BOTTOM,90)
 	makePlusDraggable(collapsedBtn)
 
 	local function setPanelOpen(open)
@@ -278,7 +285,7 @@ function buildFlyUI(titleText,name)
 
 	local function updateBtn()
 		toggle.Text=flying and "Disable Fly" or "Enable Fly"
-		toggle.BackgroundColor3=flying and C_STOP or C_PRIMARY
+		-- color stays gradient; no change needed
 	end
 	updateBtn()
 
@@ -306,5 +313,4 @@ function buildFlyUI(titleText,name)
 	return panel
 end
 
--- Begin: loader -> choice
 task.delay(1.0,showChoice)
