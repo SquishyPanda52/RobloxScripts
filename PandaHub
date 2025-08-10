@@ -1,132 +1,215 @@
--- Panda Fly Final (Local Only)
+-- Panda Fly — Compact, Local-Only, Draggable + Minimizable (v3)
+-- Hilton spec: 
+-- - Speed input controls fly velocity only (no WalkSpeed). Default 16, persists until changed.
+-- - Device select shows phone/laptop icons. Selection UI deletes on choice.
+-- - Main UI compact in a single frame, draggable, minimizable, with X close.
+-- - PC: toggle button + "(E can also toggle)". Body turns with camera while flying.
+-- - Mobile: toggle button + speed input (no joystick). All client-side.
+
 local Players=game:GetService("Players")
 local UIS=game:GetService("UserInputService")
 local RS=game:GetService("RunService")
 local LP=Players.LocalPlayer
 local PG=LP:FindFirstChildOfClass("PlayerGui") or LP:WaitForChild("PlayerGui")
-local ASSETS={Logo="rbxassetid://140281572489473",Phone="rbxassetid://75163729493008",PC="rbxassetid://75277585107743"}
-local SPEED_MIN,SPEED_MAX=8,300
-local speedVal=nil
-local flying=false
-local bg,bv
-local conns={}
 
-local function cleanupFly()
+local ASSETS={
+	Logo="rbxassetid://140281572489473",
+	Phone="rbxassetid://75163729493008",
+	PC="rbxassetid://75277585107743",
+}
+
+local GUI_NAME="PandaFlyUIv3"
+local DEFAULT_SPEED=16
+local SPEED_MIN,SPEED_MAX=8,300
+
+-- nuke old
+pcall(function() local old=PG:FindFirstChild(GUI_NAME); if old then old:Destroy() end end)
+
+local function makeDraggable(frame: Frame, dragHandle: Instance?)
+	local dragging=false; local dragStart; local startPos
+	local handle = dragHandle or frame
+	handle.InputBegan:Connect(function(input)
+		if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+			dragging=true; dragStart=input.Position; startPos=frame.Position
+		end
+	end)
+	handle.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+			local delta=input.Position-dragStart
+			frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
+		end
+	end)
+	handle.InputEnded:Connect(function(input)
+		if input.UserInputState==Enum.UserInputState.End then dragging=false end
+	end)
+end
+
+-- Fly runtime
+local flying=false
+local speedVal=DEFAULT_SPEED
+local bg,bv
+local stepConn:RBXScriptConnection?
+local inputConns={}
+
+local function disconnectInputs()
+	for _,c in ipairs(inputConns) do if c.Connected then c:Disconnect() end end
+	table.clear(inputConns)
+end
+
+local function stopFly()
 	flying=false
-	if bg then bg:Destroy() bg=nil end
-	if bv then bv:Destroy() bv=nil end
+	if stepConn then stepConn:Disconnect(); stepConn=nil end
+	if bg then bg:Destroy(); bg=nil end
+	if bv then bv:Destroy(); bv=nil end
 end
 
 local function startFly()
 	local char=LP.Character or LP.CharacterAdded:Wait()
 	local hrp=char:WaitForChild("HumanoidRootPart")
-	local hum=char:FindFirstChildOfClass("Humanoid")
-	bg=Instance.new("BodyGyro");bg.P=9e4;bg.MaxTorque=Vector3.new(9e9,9e9,9e9);bg.CFrame=hrp.CFrame;bg.Parent=hrp
-	bv=Instance.new("BodyVelocity");bv.MaxForce=Vector3.new(9e9,9e9,9e9);bv.Velocity=Vector3.zero;bv.Parent=hrp
-	if hum and speedVal then hum.WalkSpeed=speedVal end
-	conns[#conns+1]=RS.RenderStepped:Connect(function()
-		if flying and hrp then
-			bg.CFrame=workspace.CurrentCamera.CFrame
-			bv.Velocity=workspace.CurrentCamera.CFrame.LookVector*(speedVal or 0)
-		end
+	bg=Instance.new("BodyGyro"); bg.P=9e4; bg.MaxTorque=Vector3.new(9e9,9e9,9e9); bg.CFrame=hrp.CFrame; bg.Parent=hrp
+	bv=Instance.new("BodyVelocity"); bv.MaxForce=Vector3.new(9e9,9e9,9e9); bv.Velocity=Vector3.zero; bv.Parent=hrp
+	stepConn=RS.RenderStepped:Connect(function()
+		if not flying then return end
+		local cam=workspace.CurrentCamera
+		bg.CFrame=cam.CFrame
+		bv.Velocity=cam.CFrame.LookVector*(speedVal or DEFAULT_SPEED)
 	end)
 end
 
-local function stopFly()
-	for _,c in ipairs(conns) do if c.Connected then c:Disconnect() end end
-	table.clear(conns)
-	cleanupFly()
+local function setSpeedFromText(tb: TextBox)
+	local num=tonumber(tb.Text)
+	if num then
+		speedVal=math.clamp(math.floor(num+0.5),SPEED_MIN,SPEED_MAX)
+		tb.Text=tostring(speedVal)
+	else
+		tb.Text=tostring(speedVal)
+	end
 end
 
-local function toggleFly()
-	flying=not flying
-	if flying then startFly() else stopFly() end
+-- UI bits
+local function label(parent,text,size,pos,alignLeft)
+	local l=Instance.new("TextLabel")
+	l.BackgroundTransparency=1; l.Text=text
+	l.Font=Enum.Font.Gotham; l.TextSize=16; l.TextColor3=Color3.fromRGB(235,239,245)
+	l.Size=size; l.Position=pos
+	if alignLeft then l.TextXAlignment=Enum.TextXAlignment.Left end
+	l.Parent=parent
+	return l
 end
 
-local function makeBtn(txt,size,pos,parent,color)
+local function button(parent,text,size,pos,bgColor)
 	local b=Instance.new("TextButton")
-	b.Size=size;b.Position=pos;b.Text=txt
-	b.BackgroundColor3=color or Color3.fromRGB(24,24,28)
-	b.TextColor3=Color3.new(1,1,1)
-	b.Font=Enum.Font.GothamBold;b.TextSize=16;b.AutoButtonColor=true
+	b.Text=text; b.Size=size; b.Position=pos; b.AutoButtonColor=true
+	b.BackgroundColor3=bgColor or Color3.fromRGB(24,24,28)
+	b.TextColor3=Color3.new(1,1,1); b.Font=Enum.Font.GothamBold; b.TextSize=16
 	b.Parent=parent
 	return b
 end
 
-local function makeSpeedBox(parent)
-	local tb=Instance.new("TextBox")
-	tb.Size=UDim2.new(0,80,0,28)
-	tb.PlaceholderText="---"
-	tb.Text=(speedVal and tostring(speedVal) or "")
-	tb.BackgroundColor3=Color3.fromRGB(16,16,18)
-	tb.TextColor3=Color3.new(1,1,1)
-	tb.Font=Enum.Font.GothamSemibold;tb.TextSize=16
-	tb.ClearTextOnFocus=false
-	tb.Parent=parent
-	tb.FocusLost:Connect(function()
-		local num=tonumber(tb.Text)
-		if num then
-			speedVal=math.clamp(math.floor(num+0.5),SPEED_MIN,SPEED_MAX)
-			tb.Text=tostring(speedVal)
-		else
-			tb.Text=speedVal and tostring(speedVal) or ""
-		end
-	end)
-	return tb
+local function icon(parent,img,size,pos)
+	local i=Instance.new("ImageLabel")
+	i.BackgroundTransparency=1; i.Image=img; i.Size=size; i.Position=pos; i.Parent=parent
+	return i
 end
 
+-- Device select
 local function deviceSelect()
-	local gui=Instance.new("ScreenGui",PG)
-	gui.Name="PandaFlyUI";gui.ResetOnSpawn=false
+	local gui=Instance.new("ScreenGui"); gui.Name=GUI_NAME; gui.ResetOnSpawn=false; gui.Parent=PG
 	local frame=Instance.new("Frame",gui)
-	frame.AnchorPoint=Vector2.new(0.5,0.5);frame.Position=UDim2.new(0.5,0,0.5,0)
-	frame.Size=UDim2.new(0,300,0,200)
-	frame.BackgroundColor3=Color3.fromRGB(24,24,28)
+	frame.AnchorPoint=Vector2.new(0.5,0.5); frame.Position=UDim2.new(0.5,0,0.5,0)
+	frame.Size=UDim2.new(0,340,0,210); frame.BackgroundColor3=Color3.fromRGB(24,24,28)
 
-	local logo=Instance.new("ImageLabel",frame)
-	logo.Image=ASSETS.Logo;logo.BackgroundTransparency=1
-	logo.Size=UDim2.new(0,72,0,72);logo.Position=UDim2.new(0.5,-36,0,10)
+	icon(frame,ASSETS.Logo,UDim2.new(0,64,0,64),UDim2.new(0.5,-32,0,12))
+	label(frame,"Choose your device",UDim2.new(1,0,0,24),UDim2.new(0,0,0,86),true)
 
-	local phoneB=makeBtn("Phone",UDim2.new(0,120,0,40),UDim2.new(0.25,-60,0.7,-20),frame)
-	local pcB=makeBtn("PC",UDim2.new(0,120,0,40),UDim2.new(0.75,-60,0.7,-20),frame)
+	local phoneBtn=button(frame,"  Phone",UDim2.new(0.5,-20,0,48),UDim2.new(0,10,0,120),Color3.fromRGB(0,170,255))
+	icon(phoneBtn,ASSETS.Phone,UDim2.new(0,24,0,24),UDim2.new(0,10,0.5,-12))
+	phoneBtn.TextXAlignment=Enum.TextXAlignment.Left
 
-	phoneB.MouseButton1Click:Connect(function() gui:Destroy();mainUI("Phone") end)
-	pcB.MouseButton1Click:Connect(function() gui:Destroy();mainUI("PC") end)
+	local pcBtn=button(frame,"  PC / Emulator",UDim2.new(0.5,-20,0,48),UDim2.new(0.5,10,0,120),Color3.fromRGB(0,170,255))
+	icon(pcBtn,ASSETS.PC,UDim2.new(0,24,0,24),UDim2.new(0,10,0.5,-12))
+	pcBtn.TextXAlignment=Enum.TextXAlignment.Left
+
+	phoneBtn.MouseButton1Click:Connect(function() gui:Destroy(); buildMain("Phone") end)
+	pcBtn.MouseButton1Click:Connect(function() gui:Destroy(); buildMain("PC") end)
 end
 
-function mainUI(mode)
-	local gui=Instance.new("ScreenGui",PG)
-	gui.Name="PandaFlyMain";gui.ResetOnSpawn=false
-	local frame=Instance.new("Frame",gui)
-	frame.AnchorPoint=Vector2.new(0,1);frame.Position=UDim2.new(0,20,1,-20)
-	frame.Size=UDim2.new(0,260,0,100)
-	frame.BackgroundColor3=Color3.fromRGB(24,24,28)
+-- Main (compact, draggable, minimizable)
+function buildMain(mode)
+	local gui=Instance.new("ScreenGui"); gui.Name=GUI_NAME; gui.ResetOnSpawn=false; gui.Parent=PG
 
-	local logo=Instance.new("ImageLabel",frame)
-	logo.Image=ASSETS.Logo;logo.BackgroundTransparency=1
-	logo.Size=UDim2.new(0,40,0,40);logo.Position=UDim2.new(0,10,0,10)
+	local panel=Instance.new("Frame",gui)
+	panel.AnchorPoint=Vector2.new(0,1); panel.Position=UDim2.new(0,20,1,-20)
+	panel.Size=UDim2.new(0,320,0,140); panel.BackgroundColor3=Color3.fromRGB(24,24,28)
 
-	local close=makeBtn("X",UDim2.new(0,30,0,30),UDim2.new(1,-40,0,10),frame,Color3.fromRGB(200,50,50))
-	close.MouseButton1Click:Connect(function() stopFly();gui:Destroy() end)
+	local header=Instance.new("Frame",panel)
+	header.BackgroundColor3=Color3.fromRGB(16,16,18); header.Size=UDim2.new(1,0,0,40)
+
+	icon(header,ASSETS.Logo,UDim2.new(0,28,0,28),UDim2.new(0,8,0.5,-14))
+	label(header,"Panda Fly",UDim2.new(0,140,0,24),UDim2.new(0,44,0.5,-12),true)
+
+	local closeBtn=button(header,"X",UDim2.new(0,32,0,28),UDim2.new(1,-40,0.5,-14),Color3.fromRGB(200,50,50))
+	local collapseBtn=button(header,"-",UDim2.new(0,32,0,28),UDim2.new(1,-80,0.5,-14),Color3.fromRGB(40,40,44))
+
+	local miniBtn=Instance.new("ImageButton")
+	miniBtn.Name="Mini"; miniBtn.Image=ASSETS.Logo; miniBtn.BackgroundColor3=Color3.fromRGB(24,24,28)
+	miniBtn.Size=UDim2.new(0,56,0,56); miniBtn.Position=UDim2.new(0,20,1,-76); miniBtn.Parent=gui
+	miniBtn.Visible=false
+
+	makeDraggable(panel,header)
+	makeDraggable(miniBtn)
+
+	local content=Instance.new("Frame",panel)
+	content.BackgroundTransparency=1; content.Position=UDim2.new(0,10,0,46); content.Size=UDim2.new(1,-20,1,-56)
+
+	local status=label(content,mode=="PC" and "Press E to toggle" or "Tap Fly to toggle",UDim2.new(1,0,0,20),UDim2.new(0,0,0,0),true)
+
+	local toggleTxt = mode=="PC" and "Fly: OFF (E can also toggle)" or "Fly: OFF"
+	local toggleBtn=button(content,toggleTxt,UDim2.new(0,200,0,30),UDim2.new(0,0,0,26),Color3.fromRGB(0,170,255))
+
+	local spLbl=label(content,"Speed",UDim2.new(0,60,0,24),UDim2.new(0,0,0,62),true)
+	local spBox=Instance.new("TextBox")
+	spBox.Size=UDim2.new(0,80,0,28); spBox.Position=UDim2.new(0,66,0,62)
+	spBox.BackgroundColor3=Color3.fromRGB(16,16,18)
+	spBox.Text=tostring(speedVal or DEFAULT_SPEED)
+	spBox.PlaceholderText="16"
+	spBox.TextColor3=Color3.new(1,1,1)
+	spBox.Font=Enum.Font.GothamSemibold; spBox.TextSize=16
+	spBox.ClearTextOnFocus=false; spBox.Parent=content
+
+	spBox.FocusLost:Connect(function() setSpeedFromText(spBox) end)
+
+	local function setExpanded(open:boolean)
+		panel.Visible=open
+		miniBtn.Visible=not open
+	end
+	collapseBtn.MouseButton1Click:Connect(function() setExpanded(false) end)
+	miniBtn.MouseButton1Click:Connect(function() setExpanded(true) end)
+
+	local function applyToggleVisual()
+		toggleBtn.Text = flying and (mode=="PC" and "Fly: ON (E can also toggle)" or "Fly: ON") or (mode=="PC" and "Fly: OFF (E can also toggle)" or "Fly: OFF")
+		toggleBtn.BackgroundColor3 = flying and Color3.fromRGB(0,200,100) or Color3.fromRGB(0,170,255)
+		status.Text = flying and "Flying..." or (mode=="PC" and "Press E to toggle" or "Tap Fly to toggle")
+	end
+
+	closeBtn.MouseButton1Click:Connect(function() stopFly(); gui:Destroy() end)
+
+	toggleBtn.MouseButton1Click:Connect(function()
+		setSpeedFromText(spBox)
+		if not flying then startFly(); flying=true else stopFly() end
+		applyToggleVisual()
+	end)
 
 	if mode=="PC" then
-		local toggleB=makeBtn("Fly: OFF (E can also toggle)",UDim2.new(0,200,0,30),UDim2.new(0,10,0,50),frame,Color3.fromRGB(0,170,255))
-		toggleB.MouseButton1Click:Connect(function()
-			toggleFly()
-			toggleB.Text=flying and "Fly: ON (E can also toggle)" or "Fly: OFF (E can also toggle)"
-			toggleB.BackgroundColor3=flying and Color3.fromRGB(0,200,100) or Color3.fromRGB(0,170,255)
-		end)
-		UIS.InputBegan:Connect(function(i,gpe) if not gpe and i.KeyCode==Enum.KeyCode.E then toggleB:Activate() end end)
-		makeSpeedBox(frame)
-	else
-		local toggleB=makeBtn("Fly: OFF",UDim2.new(0,100,0,30),UDim2.new(0,10,0,50),frame,Color3.fromRGB(0,170,255))
-		toggleB.MouseButton1Click:Connect(function()
-			toggleFly()
-			toggleB.Text=flying and "Fly: ON" or "Fly: OFF"
-			toggleB.BackgroundColor3=flying and Color3.fromRGB(0,200,100) or Color3.fromRGB(0,170,255)
-		end)
-		makeSpeedBox(frame)
+		table.insert(inputConns, UIS.InputBegan:Connect(function(i,gpe)
+			if not gpe and i.KeyCode==Enum.KeyCode.E then
+				toggleBtn:Activate()
+			end
+		end))
 	end
+
+	setExpanded(true); applyToggleVisual()
 end
 
+-- boot
 deviceSelect()
