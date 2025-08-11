@@ -1,39 +1,408 @@
--- LocalScript (StarterPlayerScripts) – client-only, runtime UI, beveled, dock-on-minimize
-local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
-local CAS = game:GetService("ContextActionService")
-local RunService = game:GetService("RunService")
-local ContentProvider = game:GetService("ContentProvider")
+-- PandaFlyExecutor.lua
+-- Runtime-only script. Paste into your executor or StarterPlayerScripts.
 
-local lp = Players.LocalPlayer
-local function getChar()
-	local c = lp.Character or lp.CharacterAdded:Wait()
-	return c, c:WaitForChild("HumanoidRootPart"), c:WaitForChild("Humanoid")
+local Players       = game:GetService("Players")
+local RunService    = game:GetService("RunService")
+local UserInput     = game:GetService("UserInputService")
+
+local localPlayer   = Players.LocalPlayer
+local playerGui     = localPlayer:WaitForChild("PlayerGui")
+local camera        = workspace.CurrentCamera
+local guiRoot       = Instance.new("ScreenGui", playerGui)
+guiRoot.Name        = "PandaFlyGUI"
+
+-- Common theme colors
+local COLOR_TOP_TAB   = Color3.fromRGB(50, 200, 50)
+local COLOR_BODY_BG   = Color3.fromRGB(150, 250, 50)
+local COLOR_BUTTON    = Color3.fromRGB(0, 150, 0)
+local COLOR_BUTTON_TX = Color3.new(1,1,1)  -- white
+local COLOR_GRAD0     = Color3.fromRGB(0, 255, 0)
+local COLOR_GRAD1     = Color3.fromRGB(255, 255, 0)
+
+-- Utility: make any Frame draggable
+local function makeDraggable(frame)
+    local dragging, dragInput, dragStart, startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    UserInput.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            update(input)
+        end
+    end)
 end
 
--- Image assets
-local ASSETS = {
-	Logo   = "rbxassetid://140281572489473",
-	Phone  = "rbxassetid://75163729493008",
-	PC     = "rbxassetid://75277585107743",
-}
+-- Creates the top bar with Panda logo, minimize & close buttons
+local function createTopBar(parent, onMinimize, onClose)
+    local topBar = Instance.new("Frame", parent)
+    topBar.Name = "TopBar"
+    topBar.Size = UDim2.new(1,0,0,30)
+    topBar.BackgroundColor3 = COLOR_TOP_TAB
 
--- Preload for reliability
-local function preload(tbl)
-	local ghosts = {}
-	for _,id in pairs(tbl) do
-		local il = Instance.new("ImageLabel")
-		il.Image = id; il.Visible = false; il.Parent = game:GetService("CoreGui")
-		table.insert(ghosts, il)
-	end
-	pcall(function() ContentProvider:PreloadAsync(ghosts) end)
-	for _,g in ipairs(ghosts) do g:Destroy() end
+    -- Panda logo (top-left)
+    local pandaImg = Instance.new("ImageLabel", topBar)
+    pandaImg.Name = "PandaLogoTab"
+    pandaImg.Size = UDim2.new(0,24,0,24)
+    pandaImg.Position = UDim2.new(0,5,0,3)
+    pandaImg.Image = "rbxassetid://140281572489473"
+    pandaImg.BackgroundTransparency = 1
+
+    -- Minimize button
+    local btnMin = Instance.new("TextButton", topBar)
+    btnMin.Name = "BtnMinimize"
+    btnMin.Size = UDim2.new(0,24,0,24)
+    btnMin.Position = UDim2.new(1,-54,0,3)
+    btnMin.Text = "–"
+    btnMin.TextColor3 = COLOR_BUTTON_TX
+    btnMin.Font = Enum.Font.Bangers
+    btnMin.TextScaled = true
+    btnMin.BackgroundColor3 = COLOR_BUTTON
+    local cornerMin = Instance.new("UICorner", btnMin)
+    cornerMin.CornerRadius = UDim.new(0,4)
+    local strokeMin = Instance.new("UIStroke", btnMin)
+    strokeMin.Color = Color3.new(0,0,0)
+
+    -- Close button
+    local btnClose = Instance.new("TextButton", topBar)
+    btnClose.Name = "BtnClose"
+    btnClose.Size = UDim2.new(0,24,0,24)
+    btnClose.Position = UDim2.new(1,-28,0,3)
+    btnClose.Text = "✕"
+    btnClose.TextColor3 = COLOR_BUTTON_TX
+    btnClose.Font = Enum.Font.Bangers
+    btnClose.TextScaled = true
+    btnClose.BackgroundColor3 = COLOR_BUTTON
+    local cornerX = Instance.new("UICorner", btnClose)
+    cornerX.CornerRadius = UDim.new(0,4)
+    local strokeX = Instance.new("UIStroke", btnClose)
+    strokeX.Color = Color3.new(0,0,0)
+
+    -- Button callbacks
+    btnMin.MouseButton1Click:Connect(onMinimize)
+    btnClose.MouseButton1Click:Connect(onClose)
+
+    -- Make top bar draggable
+    makeDraggable(topBar)
+    return topBar
 end
-preload(ASSETS)
 
--- Root GUI
-local parentGui = (lp and lp:FindFirstChild("PlayerGui")) or game:GetService("CoreGui")
-local gui = Instance.new("ScreenGui")
+-- Mini-icon to reopen any minimized UI
+local function createMiniIcon(onClick)
+    local mini = Instance.new("Frame", guiRoot)
+    mini.Name = "MiniIcon"
+    mini.Size = UDim2.new(0,40,0,40)
+    mini.Position = UDim2.new(0.5,-20,0.5,-20)
+    mini.BackgroundColor3 = COLOR_TOP_TAB
+    local uc = Instance.new("UICorner", mini)
+    uc.CornerRadius = UDim.new(0,10)
+    makeDraggable(mini)
+
+    local img = Instance.new("ImageLabel", mini)
+    img.Size = UDim2.new(1,0,1,0)
+    img.BackgroundTransparency = 1
+    img.Image = "rbxassetid://140281572489473"
+
+    mini.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            mini:Destroy()
+            onClick()
+        end
+    end)
+end
+
+-- Cleans up GUI and disables fly
+local flyLoopConn, deathConn
+local function cleanupAll()
+    if flyLoopConn then flyLoopConn:Disconnect() end
+    if deathConn then deathConn:Disconnect() end
+    guiRoot:Destroy()
+end
+
+-- Setup dynamic fly behavior
+local function startFlying(isPC, speed)
+    local char = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local humanoid = char:WaitForChild("Humanoid")
+    local bv = Instance.new("BodyVelocity", hrp)
+    bv.MaxForce = Vector3.new(1e5,1e5,1e5)
+    local bg = Instance.new("BodyGyro", hrp)
+    bg.MaxTorque = Vector3.new(1e5,1e5,1e5)
+    bg.P = 1e4
+
+    local flying = false
+    local currentSpeed = speed
+
+    local function setFly(on)
+        flying = on
+        if not flying then
+            bv.Velocity = Vector3.zero
+        end
+    end
+
+    -- PC: toggle via E
+    if isPC then
+        UserInput.InputBegan:Connect(function(inp)
+            if inp.KeyCode == Enum.KeyCode.E then
+                setFly(not flying)
+            end
+        end)
+    end
+
+    -- Main loop
+    flyLoopConn = RunService.RenderStepped:Connect(function()
+        if not flying then return end
+        local dir = humanoid.MoveDirection
+        -- Prevent downward on mobile
+        if not isPC and dir.Y < 0 then dir = Vector3.new(dir.X,0,dir.Z) end
+        local vel = dir.Unit * currentSpeed
+        if dir.Magnitude == 0 then vel = Vector3.zero end
+        bv.Velocity = vel
+        -- Face camera direction on movement
+        if dir.Magnitude > 0 then
+            bg.CFrame = CFrame.new(hrp.Position, hrp.Position + camera.CFrame.LookVector)
+        end
+    end)
+
+    -- Turn off on death or cleanup
+    deathConn = humanoid.Died:Connect(function()
+        setFly(false)
+    end)
+
+    return setFly, function(newSpeed)
+        currentSpeed = newSpeed
+    end
+end
+
+-- Build Fly UI (for PC or Mobile)
+local function createFlyUI(isPC)
+    local flyGui = Instance.new("Frame", guiRoot)
+    flyGui.Name = isPC and "PCFlyFrame" or "MobileFlyFrame"
+    flyGui.Size = UDim2.new(0,300,0,200)
+    flyGui.Position = UDim2.new(0.4,0,0.3,0)
+    flyGui.BackgroundColor3 = COLOR_BODY_BG
+    flyGui.ClipsDescendants = true
+    -- gradient
+    local grad = Instance.new("UIGradient", flyGui)
+    grad.Color = ColorSequence.new(COLOR_GRAD0, COLOR_GRAD1)
+
+    -- Top bar
+    local top = createTopBar(flyGui,
+        function()  -- onMinimize
+            flyGui.Visible = false
+            createMiniIcon(function() flyGui.Visible = true end)
+        end,
+        cleanupAll
+    )
+
+    -- PC variant shows PC logo at top middle
+    if isPC then
+        local pcLogo = Instance.new("ImageLabel", top)
+        pcLogo.Name = "PCLogo"
+        pcLogo.Size = UDim2.new(0,24,0,24)
+        pcLogo.Position = UDim2.new(0.5,-12,0,3)
+        pcLogo.Image = "rbxassetid://75277585107743"
+        pcLogo.BackgroundTransparency = 1
+    end
+
+    -- Body container
+    local body = Instance.new("Frame", flyGui)
+    body.Name = "Body"
+    body.Size = UDim2.new(1,0,1,-30)
+    body.Position = UDim2.new(0,0,0,30)
+    body.BackgroundTransparency = 1
+
+    -- Speed input
+    local speedLabel = Instance.new("TextLabel", body)
+    speedLabel.Size = UDim2.new(0,100,0,30)
+    speedLabel.Position = UDim2.new(0,10,0,10)
+    speedLabel.Text = "Speed:"
+    speedLabel.Font = Enum.Font.Bangers
+    speedLabel.TextColor3 = COLOR_BUTTON_TX
+    speedLabel.TextScaled = true
+    speedLabel.BackgroundTransparency = 1
+
+    local speedBox = Instance.new("TextBox", body)
+    speedBox.Name = "SpeedBox"
+    speedBox.Size = UDim2.new(0,60,0,30)
+    speedBox.Position = UDim2.new(0,120,0,10)
+    speedBox.Text = "16"
+    speedBox.Font = Enum.Font.Bangers
+    speedBox.TextColor3 = COLOR_BUTTON_TX
+    speedBox.TextScaled = true
+    speedBox.BackgroundColor3 = COLOR_BUTTON
+    local cornerSB = Instance.new("UICorner", speedBox)
+    cornerSB.CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", speedBox).Color = Color3.new(0,0,0)
+
+    -- Fly toggle button
+    local btnFly = Instance.new("TextButton", body)
+    btnFly.Name = "BtnFly"
+    btnFly.Size = UDim2.new(0,80,0,30)
+    btnFly.Position = UDim2.new(0,10,0,60)
+    btnFly.Text = "Fly On"
+    btnFly.Font = Enum.Font.Bangers
+    btnFly.TextColor3 = COLOR_BUTTON_TX
+    btnFly.TextScaled = true
+    btnFly.BackgroundColor3 = COLOR_BUTTON
+    local cornerBtn = Instance.new("UICorner", btnFly)
+    cornerBtn.CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", btnFly).Color = Color3.new(0,0,0)
+
+    -- PC hint label
+    if isPC then
+        local hint = Instance.new("TextLabel", body)
+        hint.Size = UDim2.new(1,-20,0,20)
+        hint.Position = UDim2.new(0,10,0,100)
+        hint.Text = "Press E to toggle fly"
+        hint.Font = Enum.Font.Bangers
+        hint.TextColor3 = COLOR_BUTTON_TX
+        hint.TextScaled = true
+        hint.BackgroundTransparency = 1
+    end
+
+    makeDraggable(flyGui)
+
+    -- Launch flying system
+    local setFly, setSpeed = startFlying(isPC, tonumber(speedBox.Text) or 16)
+    local flying = false
+
+    -- Button click toggles
+    btnFly.MouseButton1Click:Connect(function()
+        flying = not flying
+        if flying then
+            btnFly.Text = "Fly Off"
+            setFly(true)
+        else
+            btnFly.Text = "Fly On"
+            setFly(false)
+        end
+    end)
+
+    -- Speed change
+    speedBox.FocusLost:Connect(function(enter)
+        if enter then
+            local val = tonumber(speedBox.Text)
+            if val and val > 0 then
+                setSpeed(val)
+            else
+                speedBox.Text = tostring(16)
+                setSpeed(16)
+            end
+        end
+    end)
+end
+
+-- Initial Device Selection UI
+local function createDeviceSelection()
+    local devGui = Instance.new("Frame", guiRoot)
+    devGui.Name = "DeviceSelect"
+    devGui.Size = UDim2.new(0,300,0,200)
+    devGui.Position = UDim2.new(0.3,0,0.3,0)
+    devGui.BackgroundColor3 = COLOR_BODY_BG
+    local grad = Instance.new("UIGradient", devGui)
+    grad.Color = ColorSequence.new(COLOR_GRAD0, COLOR_GRAD1)
+
+    local top = createTopBar(devGui,
+        function()
+            devGui.Visible = false
+            createMiniIcon(createDeviceSelection)
+        end,
+        cleanupAll
+    )
+
+    local body = Instance.new("Frame", devGui)
+    body.Name = "Body"
+    body.Size = UDim2.new(1,0,1,-30)
+    body.Position = UDim2.new(0,0,0,30)
+    body.BackgroundTransparency = 1
+
+    -- Panda logo top-center
+    local panda = Instance.new("ImageLabel", body)
+    panda.Size = UDim2.new(0,60,0,60)
+    panda.Position = UDim2.new(0.5,-30,0,10)
+    panda.Image = "rbxassetid://140281572489473"
+    panda.BackgroundTransparency = 1
+
+    local choose = Instance.new("TextLabel", body)
+    choose.Size = UDim2.new(1,0,0,20)
+    choose.Position = UDim2.new(0,0,0,80)
+    choose.Text = "Choose your device"
+    choose.Font = Enum.Font.Bangers
+    choose.TextColor3 = COLOR_BUTTON_TX
+    choose.TextScaled = true
+    choose.BackgroundTransparency = 1
+
+    -- PC button
+    local pcBtn = Instance.new("ImageButton", body)
+    pcBtn.Name = "PCBtn"
+    pcBtn.Size = UDim2.new(0,80,0,80)
+    pcBtn.Position = UDim2.new(0.25,-40,0,110)
+    pcBtn.Image = "rbxassetid://75277585107743"
+    pcBtn.BackgroundTransparency = 1
+
+    local pcLbl = Instance.new("TextLabel", body)
+    pcLbl.Size = UDim2.new(0,100,0,20)
+    pcLbl.Position = UDim2.new(0.25,-50,0,200)
+    pcLbl.Text = "PC/Emulator"
+    pcLbl.Font = Enum.Font.Bangers
+    pcLbl.TextColor3 = COLOR_BUTTON_TX
+    pcLbl.TextScaled = true
+    pcLbl.BackgroundTransparency = 1
+
+    -- Phone button
+    local phBtn = Instance.new("ImageButton", body)
+    phBtn.Name = "PhoneBtn"
+    phBtn.Size = UDim2.new(0,80,0,80)
+    phBtn.Position = UDim2.new(0.75,-40,0,110)
+    phBtn.Image = "rbxassetid://75163729493008"
+    phBtn.BackgroundTransparency = 1
+
+    local phLbl = Instance.new("TextLabel", body)
+    phLbl.Size = UDim2.new(0,100,0,20)
+    phLbl.Position = UDim2.new(0.75,-50,0,200)
+    phLbl.Text = "Phone"
+    phLbl.Font = Enum.Font.Bangers
+    phLbl.TextColor3 = COLOR_BUTTON_TX
+    phLbl.TextScaled = true
+    phLbl.BackgroundTransparency = 1
+
+    makeDraggable(devGui)
+
+    pcBtn.MouseButton1Click:Connect(function()
+        devGui:Destroy()
+        createFlyUI(true)
+    end)
+    phBtn.MouseButton1Click:Connect(function()
+        devGui:Destroy()
+        createFlyUI(false)
+    end)
+end
+
+-- Kick off
+createDeviceSelection()
 gui.Name = "PandaFlyUI"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
