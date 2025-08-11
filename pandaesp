@@ -1,22 +1,26 @@
 --[[
-  Simple ESP Executor Script
-  Features: Draggable, Minimize, Close; Toggle ESP; Team filtering
---]]
+  ESP Executor Script (Collapsible UI, Full Disable, Auto New-Char Support)
+  - Draggable UI + Minimized bar ("ESP +"), both draggable
+  - X fully deletes UI and script, cleans all ESP
+  - Toggle ESP on/off (disables highlights and name tags)
+  - Team whitelist filter (comma-separated, case-insensitive)
+  - Auto-add for new characters; cleanup on death/leave
+]]
 
 --// Services
-local Players       = game:GetService("Players")
-local RunService    = game:GetService("RunService")
-local UserInput     = game:GetService("UserInputService")
+local Players    = game:GetService("Players")
+local UserInput  = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
-local localPlayer   = Players.LocalPlayer
-local playerGui     = localPlayer:WaitForChild("PlayerGui")
+local localPlayer = Players.LocalPlayer
+local playerGui   = localPlayer:WaitForChild("PlayerGui")
 
 --// State
-local espEnabled    = false
-local teamFilters   = {}      -- list of lowercase team names
-local highlights    = {}      -- [player] = {highlight, healthConn}
+local espEnabled  = false
+local teamFilters = {} -- lowercase whitelist
+local highlights  = {} -- [Player] = {hl=Highlight, bb=BillboardGui, conns={...}}
 
---// UI Creation
+--// UI: Build
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ESPExecutorUI"
 screenGui.ResetOnSpawn = false
@@ -30,7 +34,6 @@ mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 
--- Title Bar
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 26)
@@ -49,7 +52,6 @@ titleLabel.Text = "ESP Admin"
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 titleLabel.Parent = titleBar
 
--- Minimize Button
 local btnMin = Instance.new("TextButton")
 btnMin.Size = UDim2.new(0, 26, 0, 26)
 btnMin.Position = UDim2.new(1, -52, 0, 0)
@@ -60,7 +62,6 @@ btnMin.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
 btnMin.TextColor3 = Color3.fromRGB(240, 240, 240)
 btnMin.Parent = titleBar
 
--- Close Button
 local btnClose = Instance.new("TextButton")
 btnClose.Size = UDim2.new(0, 26, 0, 26)
 btnClose.Position = UDim2.new(1, -26, 0, 0)
@@ -71,7 +72,6 @@ btnClose.BackgroundColor3 = Color3.fromRGB(80, 20, 20)
 btnClose.TextColor3 = Color3.fromRGB(255, 200, 200)
 btnClose.Parent = titleBar
 
--- ESP Toggle Button
 local btnToggle = Instance.new("TextButton")
 btnToggle.Size = UDim2.new(1, -16, 0, 30)
 btnToggle.Position = UDim2.new(0, 8, 0, 36)
@@ -82,35 +82,45 @@ btnToggle.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
 btnToggle.TextColor3 = Color3.fromRGB(240, 240, 240)
 btnToggle.Parent = mainFrame
 
--- Team Filter Input
 local txtFilter = Instance.new("TextBox")
 txtFilter.Size = UDim2.new(1, -16, 0, 24)
 txtFilter.Position = UDim2.new(0, 8, 0, 76)
 txtFilter.Font = Enum.Font.Gotham
 txtFilter.TextSize = 14
 txtFilter.PlaceholderText = "Teams (comma separated)"
-txtFilter.Text = ""
 txtFilter.ClearTextOnFocus = false
 txtFilter.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
 txtFilter.TextColor3 = Color3.fromRGB(240, 240, 240)
 txtFilter.Parent = mainFrame
 
---// Draggable
-do
+-- Minimized bar (collapsible view)
+local minBar = Instance.new("TextButton")
+minBar.Name = "ESPMinBar"
+minBar.Size = UDim2.new(0, 100, 0, 26)
+minBar.Position = mainFrame.Position
+minBar.Font = Enum.Font.GothamBold
+minBar.TextSize = 14
+minBar.Text = "ESP +"
+minBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+minBar.TextColor3 = Color3.fromRGB(235, 235, 235)
+minBar.Visible = false
+minBar.Parent = screenGui
+
+--// Draggable helper (works for both frames)
+local function makeDraggable(frame, handle)
   local dragging, dragInput, dragStart, startPos
   local function update(input)
     local delta = input.Position - dragStart
-    mainFrame.Position = UDim2.new(
+    frame.Position = UDim2.new(
       startPos.X.Scale, startPos.X.Offset + delta.X,
       startPos.Y.Scale, startPos.Y.Offset + delta.Y
     )
   end
-
-  titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+  handle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
       dragging = true
       dragStart = input.Position
-      startPos = mainFrame.Position
+      startPos = frame.Position
       input.Changed:Connect(function()
         if input.UserInputState == Enum.UserInputState.End then
           dragging = false
@@ -118,183 +128,260 @@ do
       end)
     end
   end)
-
-  titleBar.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
+  handle.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
       dragInput = input
     end
   end)
-
   UserInput.InputChanged:Connect(function(input)
     if dragging and input == dragInput then
       update(input)
     end
   end)
 end
+makeDraggable(mainFrame, titleBar)
+makeDraggable(minBar, minBar)
 
---// Minimize Logic
-local isMinimized = false
+-- Collapse/expand behavior
 btnMin.MouseButton1Click:Connect(function()
-  isMinimized = not isMinimized
-  mainFrame.Size = isMinimized
-    and UDim2.new(0, 260, 0, 26)
-    or UDim2.new(0, 260, 0, 120)
+  minBar.Position = mainFrame.Position
+  mainFrame.Visible = false
+  minBar.Visible = true
+end)
+minBar.MouseButton1Click:Connect(function()
+  mainFrame.Position = minBar.Position
+  mainFrame.Visible = true
+  minBar.Visible = false
 end)
 
---// Close Logic
-btnClose.MouseButton1Click:Connect(function()
-  -- disable ESP cleanup
-  espEnabled = false
-  for _, data in pairs(highlights) do
-    if data.highlight then
-      data.highlight:Destroy()
-    end
-    if data.healthConn then
-      data.healthConn:Disconnect()
-    end
-  end
-  screenGui:Destroy()
-  -- also delete this script if parented under the GUI
-  if script.Parent == screenGui then
-    script:Destroy()
-  end
-end)
+--// Utils
+local function trim(s) return (s:match("^%s*(.-)%s*$")) end
 
---// Team Filter Parser
-local function updateFilters(txt)
+local function updateFilters(text)
   teamFilters = {}
-  for name in txt:lower():gmatch("([^,]+)") do
-    name = name:match("^%s*(.-)%s*$") -- trim spaces
-    if name ~= "" then
-      table.insert(teamFilters, name)
-    end
+  for name in (text or ""):lower():gmatch("([^,]+)") do
+    name = trim(name)
+    if name ~= "" then table.insert(teamFilters, name) end
   end
 end
+
 txtFilter:GetPropertyChangedSignal("Text"):Connect(function()
   updateFilters(txtFilter.Text)
-  -- reapply filtering immediately
+  -- re-evaluate visibility for all
   for plr, data in pairs(highlights) do
-    if data.highlight then
-      local joinName = plr.Team and plr.Team.Name:lower() or ""
-      local show = #teamFilters == 0
-        or table.find(teamFilters, joinName) ~= nil
-      data.highlight.Enabled = espEnabled and show
-    end
+    local teamName = (plr.Team and plr.Team.Name:lower()) or ""
+    local pass = (#teamFilters == 0) or (teamName ~= "" and table.find(teamFilters, teamName) ~= nil)
+    if data.hl then data.hl.Enabled = espEnabled and pass end
+    if data.bb then data.bb.Enabled = espEnabled and pass end
   end
 end)
 
---// Health-based Color Map
 local function healthToColor(hp, maxHp)
-  local frac = math.clamp(hp / maxHp, 0, 1)
-  -- 0 = red, 0.33 = yellow, 0.66 = green
-  local hue = frac * 0.33
-  return Color3.fromHSV(hue, 1, 1)
+  local frac = 0
+  if maxHp and maxHp > 0 then
+    frac = math.clamp(hp / maxHp, 0, 1)
+  end
+  return Color3.fromHSV(frac * 0.33, 1, 1) -- red->yellow->green
 end
 
---// Create / Remove Highlight for One Player
+local function getAdorneePart(character)
+  if not character then return nil end
+  return character:FindFirstChild("Head")
+      or character:FindFirstChild("HumanoidRootPart")
+      or character:FindFirstChildWhichIsA("BasePart")
+end
+
+local function destroyESP(plr)
+  local data = highlights[plr]
+  if not data then return end
+  if data.conns then
+    for _, c in ipairs(data.conns) do
+      pcall(function() c:Disconnect() end)
+    end
+  end
+  if data.bb then pcall(function() data.bb:Destroy() end) end
+  if data.hl then pcall(function() data.hl:Destroy() end) end
+  highlights[plr] = nil
+end
+
 local function applyESP(plr)
-  -- cleanup old
-  local old = highlights[plr]
-  if old then
-    if old.highlight then old.highlight:Destroy() end
-    if old.healthConn then old.healthConn:Disconnect() end
-    highlights[plr] = nil
-  end
+  -- clean any existing
+  destroyESP(plr)
+  local char = plr.Character
+  if not char then return end
+  local humanoid = char:FindFirstChildOfClass("Humanoid")
+  if not humanoid then return end
 
-  -- must have character + humanoid
-  if not plr.Character or not plr.Character:FindFirstChild("Humanoid") then
-    return
-  end
-
-  -- create Highlight
+  -- Highlight
   local hl = Instance.new("Highlight")
-  hl.Parent = plr.Character
-  hl.FillColor = Color3.fromRGB(0, 255, 0)
+  hl.Name = "ESP_Highlight"
+  hl.Parent = char
+  hl.FillColor = Color3.fromRGB(0, 255, 0) -- fill always green
   hl.FillTransparency = 0.6
-  hl.OutlineTransparency = 0 -- we'll color outline
-  hl.OutlineColor = Color3.new(1, 1, 1)
+  hl.OutlineTransparency = 0
+  hl.OutlineColor = healthToColor(humanoid.Health, humanoid.MaxHealth)
   hl.Enabled = false
 
-  -- billboard for display name
-  local billboard = Instance.new("BillboardGui")
-  billboard.Size = UDim2.new(0, 80, 0, 16)
-  billboard.StudsOffset = Vector3.new(0, 3, 0)
-  billboard.Adornee = plr.Character:FindFirstChild("Head")
-  billboard.AlwaysOnTop = true
-  billboard.Parent = hl
-
-  local lbl = Instance.new("TextLabel")
-  lbl.Size = UDim2.new(1, 0, 1, 0)
-  lbl.BackgroundTransparency = 1
-  lbl.Text = plr.DisplayName
-  lbl.Font = Enum.Font.Gotham
-  lbl.TextSize = 12
-  lbl.TextColor3 = Color3.new(1, 1, 1)
-  lbl.TextStrokeTransparency = 0.5
-  lbl.Parent = billboard
-
-  -- update outline color on health change
-  local humanoid = plr.Character:FindFirstChild("Humanoid")
-  local conn = humanoid.HealthChanged:Connect(function(hp)
-    hl.OutlineColor = healthToColor(hp, humanoid.MaxHealth)
-  end)
-  -- initial color
-  hl.OutlineColor = healthToColor(humanoid.Health, humanoid.MaxHealth)
-
-  -- store
-  highlights[plr] = { highlight = hl, healthConn = conn }
-
-  -- apply initial enable state based on filters
-  local teamName = plr.Team and plr.Team.Name:lower() or ""
-  local pass = (#teamFilters == 0)
-    or table.find(teamFilters, teamName) ~= nil
-  hl.Enabled = espEnabled and pass
-end
-
---// Clean up when character dies or player leaves
-local function cleanESP(plr)
-  if highlights[plr] then
-    local data = highlights[plr]
-    if data.highlight then data.highlight:Destroy() end
-    if data.healthConn then data.healthConn:Disconnect() end
-    highlights[plr] = nil
+  -- Billboard name (small, not visible across map)
+  local adornee = getAdorneePart(char)
+  local bb = Instance.new("BillboardGui")
+  bb.Name = "ESP_Name"
+  bb.Size = UDim2.new(0, 80, 0, 16)
+  bb.StudsOffset = Vector3.new(0, 3, 0)
+  bb.AlwaysOnTop = true
+  bb.Enabled = false
+  pcall(function() bb.MaxDistance = 150 end) -- keep subtle if property exists
+  if adornee then
+    bb.Adornee = adornee
+    bb.Parent = adornee
+  else
+    -- fallback: parent to character; still works with Adornee set when part appears
+    bb.Parent = char
   end
+
+  local nameLbl = Instance.new("TextLabel")
+  nameLbl.BackgroundTransparency = 1
+  nameLbl.Size = UDim2.new(1, 0, 1, 0)
+  nameLbl.Font = Enum.Font.Gotham
+  nameLbl.TextSize = 12
+  nameLbl.Text = plr.DisplayName
+  nameLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+  nameLbl.TextStrokeTransparency = 0.5
+  nameLbl.Parent = bb
+
+  -- Connections
+  local conns = {}
+
+  -- Keep outline color in sync with health
+  table.insert(conns, humanoid.HealthChanged:Connect(function(hp)
+    hl.OutlineColor = healthToColor(hp, humanoid.MaxHealth)
+  end))
+
+  -- If the head (adornee) appears later (spawn race), try to attach once
+  table.insert(conns, char.ChildAdded:Connect(function(child)
+    if not bb.Adornee and child:IsA("BasePart") and (child.Name == "Head" or child.Name == "HumanoidRootPart") then
+      bb.Adornee = child
+      bb.Parent = child
+    end
+  end))
+
+  -- Cleanup on death/character removing
+  table.insert(conns, humanoid.Died:Connect(function()
+    destroyESP(plr)
+  end))
+  table.insert(conns, plr.CharacterRemoving:Connect(function()
+    destroyESP(plr)
+  end))
+
+  -- Store
+  highlights[plr] = { hl = hl, bb = bb, conns = conns }
+
+  -- Apply current visibility state based on filters + toggle
+  local teamName = (plr.Team and plr.Team.Name:lower()) or ""
+  local pass = (#teamFilters == 0) or (teamName ~= "" and table.find(teamFilters, teamName) ~= nil)
+  hl.Enabled = espEnabled and pass
+  bb.Enabled = espEnabled and pass
 end
 
---// Listen to Players
-Players.PlayerAdded:Connect(function(plr)
-  plr.CharacterAdded:Connect(function()
-    if espEnabled then applyESP(plr) end
-  end)
-end)
-
-Players.PlayerRemoving:Connect(cleanESP)
-
---// Pre-apply for existing players
-for _, plr in pairs(Players:GetPlayers()) do
-  if plr ~= localPlayer then
-    plr.CharacterAdded:Connect(function() if espEnabled then applyESP(plr) end end)
-    if plr.Character then
-      applyESP(plr)
+-- Ensure ESP objects exist for all relevant players when toggling on
+local function ensureESPForAll()
+  for _, plr in ipairs(Players:GetPlayers()) do
+    if plr ~= localPlayer then
+      if plr.Character then
+        if not highlights[plr] then
+          applyESP(plr)
+        else
+          -- refresh visibility (handles filter changes)
+          local data = highlights[plr]
+          local teamName = (plr.Team and plr.Team.Name:lower()) or ""
+          local pass = (#teamFilters == 0) or (teamName ~= "" and table.find(teamFilters, teamName) ~= nil)
+          if data.hl then data.hl.Enabled = espEnabled and pass end
+          if data.bb then data.bb.Enabled = espEnabled and pass end
+        end
+      end
     end
   end
 end
 
---// Toggle Button Logic
+--// Toggle behavior
 btnToggle.MouseButton1Click:Connect(function()
   espEnabled = not espEnabled
   btnToggle.Text = espEnabled and "ESP: ON" or "ESP: OFF"
-  btnToggle.BackgroundColor3 = espEnabled
-    and Color3.fromRGB(30, 80, 30)
-    or Color3.fromRGB(80, 30, 30)
+  btnToggle.BackgroundColor3 = espEnabled and Color3.fromRGB(30, 80, 30) or Color3.fromRGB(80, 30, 30)
 
-  -- enable/disable all existing highlights
-  for plr, data in pairs(highlights) do
-    if data.highlight then
-      local teamName = plr.Team and plr.Team.Name:lower() or ""
-      local pass = (#teamFilters == 0)
-        or table.find(teamFilters, teamName) ~= nil
-      data.highlight.Enabled = espEnabled and pass
+  if espEnabled then
+    ensureESPForAll()
+  else
+    -- fully disable visuals (highlights and name tags)
+    for _, data in pairs(highlights) do
+      if data.hl then data.hl.Enabled = false end
+      if data.bb then data.bb.Enabled = false end
     end
   end
 end)
+
+--// Close: full cleanup
+btnClose.MouseButton1Click:Connect(function()
+  espEnabled = false
+  for plr, _ in pairs(highlights) do
+    destroyESP(plr)
+  end
+  screenGui:Destroy()
+  minBar:Destroy()
+  pcall(function() script:Destroy() end)
+end)
+
+--// Player lifecycle wiring
+local function wirePlayer(plr)
+  if plr == localPlayer then return end
+
+  -- Track team changes to re-evaluate visibility
+  local teamConn = plr:GetPropertyChangedSignal("Team"):Connect(function()
+    local data = highlights[plr]
+    if data then
+      local teamName = (plr.Team and plr.Team.Name:lower()) or ""
+      local pass = (#teamFilters == 0) or (teamName ~= "" and table.find(teamFilters, teamName) ~= nil)
+      if data.hl then data.hl.Enabled = espEnabled and pass end
+      if data.bb then data.bb.Enabled = espEnabled and pass end
+    end
+  end)
+
+  -- Apply on character spawns
+  plr.CharacterAdded:Connect(function(char)
+    if espEnabled then
+      -- slight yield to ensure Humanoid/parts exist
+      task.wait()
+      applyESP(plr)
+    else
+      -- if off, ensure any residual is cleared
+      destroyESP(plr)
+    end
+  end)
+
+  -- If already spawned
+  if plr.Character then
+    if espEnabled then
+      applyESP(plr)
+    else
+      destroyESP(plr)
+    end
+  end
+
+  -- Remember to clear the teamConn when player leaves via destroyESP in PlayerRemoving
+  -- We'll store it alongside others by tucking it into highlights when first apply happens.
+  -- If player leaves before apply, it's fine (RBX cleans connections on instance removal).
+end
+
+Players.PlayerAdded:Connect(wirePlayer)
+Players.PlayerRemoving:Connect(function(plr)
+  destroyESP(plr)
+end)
+
+-- Wire existing players
+for _, plr in ipairs(Players:GetPlayers()) do
+  wirePlayer(plr)
+end
+
+-- Initialize filters from any pre-filled text
+updateFilters(txtFilter.Text)
+```
