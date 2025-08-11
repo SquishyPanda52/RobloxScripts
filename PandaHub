@@ -1,62 +1,109 @@
--- TPUA Executor Script
+-- Place this as a LocalScript (e.g. under StarterPlayerScripts)
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
-local Players     = game:GetService("Players")
-local RunService  = game:GetService("RunService")
-local CoreGui     = game:GetService("CoreGui")
+local localPlayer = Players.LocalPlayer
+local playerGui   = localPlayer:WaitForChild("PlayerGui")
 
--- Global toggle state
-getgenv().TPUA_ENABLED = getgenv().TPUA_ENABLED or false
-
--- Create UI
+--[[-------------------------------------------------------------------------
+   1. BUILD UI
+---------------------------------------------------------------------------]]
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "TPUA_GUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = CoreGui
+screenGui.Name   = "TPUA_UI"
+screenGui.Parent = playerGui
 
+-- Main Frame (draggable)
 local frame = Instance.new("Frame")
-frame.Name = "TPUA_Frame"
-frame.Size = UDim2.new(0, 140, 0, 40)
-frame.Position = UDim2.new(0, 10, 0, 10)
-frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
+frame.Name             = "ControlFrame"
+frame.Size             = UDim2.new(0, 200, 0, 100)
+frame.Position         = UDim2.new(0.5, -100, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel  = 0
+frame.Active           = true
+frame.Draggable        = true
+frame.Parent           = screenGui
 
-local button = Instance.new("TextButton")
-button.Name = "TPUA_Button"
-button.Size = UDim2.new(1, -10, 1, -10)
-button.Position = UDim2.new(0, 5, 0, 5)
-button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-button.BorderSizePixel = 0
-button.Font = Enum.Font.SourceSansBold
-button.TextSize = 18
-button.TextColor3 = Color3.new(1, 1, 1)
-button.Text = "TPUA: Off"
-button.Parent = frame
+-- Title Bar
+local title = Instance.new("TextLabel")
+title.Size               = UDim2.new(1, 0, 0, 20)
+title.Position           = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text               = "TPUA Panel"
+title.TextColor3         = Color3.fromRGB(255, 255, 255)
+title.TextScaled         = true
+title.Parent             = frame
 
--- Toggle handler
-button.MouseButton1Click:Connect(function()
-    getgenv().TPUA_ENABLED = not getgenv().TPUA_ENABLED
-    button.Text = getgenv().TPUA_ENABLED and "TPUA: On" or "TPUA: Off"
+-- Username Input
+local userInput = Instance.new("TextBox")
+userInput.Name           = "UsernameBox"
+userInput.PlaceholderText= "Target Username"
+userInput.Size           = UDim2.new(1, -10, 0, 30)
+userInput.Position       = UDim2.new(0, 5, 0, 25)
+userInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+userInput.TextColor3     = Color3.fromRGB(255, 255, 255)
+userInput.ClearTextOnFocus = false
+userInput.Parent         = frame
+
+-- Toggle Button
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name           = "ToggleTPUA"
+toggleBtn.Size           = UDim2.new(1, -10, 0, 30)
+toggleBtn.Position       = UDim2.new(0, 5, 0, 60)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+toggleBtn.TextColor3     = Color3.fromRGB(255, 255, 255)
+toggleBtn.Text           = "TPUA: Off"
+toggleBtn.Parent         = frame
+
+--[[-------------------------------------------------------------------------
+   2. TELEPORT LOGIC
+---------------------------------------------------------------------------]]
+local enabled = false
+
+-- Remove all existing BodyPositions created by this script
+local function clearForces()
+    for _, part in ipairs(workspace:GetDescendants()) do
+        local bp = part:FindFirstChild("tpuaBP")
+        if bp and bp:IsA("BodyPosition") then
+            bp:Destroy()
+        end
+    end
+end
+
+-- On each Heartbeat, snap every unanchored part to the target's head
+RunService.Heartbeat:Connect(function()
+    if not enabled then return end
+
+    local targetName   = userInput.Text
+    local targetPlayer = Players:FindFirstChild(targetName)
+    if not targetPlayer 
+       or not targetPlayer.Character 
+       or not targetPlayer.Character:FindFirstChild("Head") then
+        return
+    end
+
+    local headPos = targetPlayer.Character.Head.Position
+    for _, part in ipairs(workspace:GetDescendants()) do
+        if part:IsA("BasePart") 
+           and not part.Anchored 
+           and not part:IsDescendantOf(localPlayer.Character) then
+
+            local bp = part:FindFirstChild("tpuaBP") 
+                    or Instance.new("BodyPosition")
+
+            bp.Name        = "tpuaBP"
+            bp.Parent      = part
+            bp.MaxForce    = Vector3.new(math.huge, math.huge, math.huge)
+            bp.Position    = headPos
+        end
+    end
 end)
 
--- Continuous teleport loop
-spawn(function()
-    while true do
-        if getgenv().TPUA_ENABLED then
-            local lp  = Players.LocalPlayer
-            local char = lp and lp.Character
-            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    if obj:IsA("BasePart") and not obj.Anchored then
-                        -- Protect against nils or errors
-                        pcall(function()
-                            obj.CFrame = hrp.CFrame
-                        end)
-                    end
-                end
-            end
-        end
-        RunService.Heartbeat:Wait()
+-- Toggle handler
+toggleBtn.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    toggleBtn.Text = "TPUA: " .. (enabled and "On" or "Off")
+
+    if not enabled then
+        clearForces()
     end
 end)
