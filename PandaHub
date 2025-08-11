@@ -1,542 +1,471 @@
--- Panda Fly (runtime-only, client-side)
--- Device select -> PC/Mobile fly UIs, draggable/minimizable, themed green→yellow
--- Torso-based flight; animations off while flying; auto-off on death and on UI delete
+-- PandaFly v2 — unified draggable panels, compact scaling, torso-based flight (PC/Mobile),
+-- animations off while flying, E toggle (PC), mobile blocks backward, minimized icon draggable.
+-- Paste into an executor or StarterPlayerScripts for testing.
 
 -- Services
-local Players = game:GetService("Players")
+local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInput = game:GetService("UserInputService")
-local Content = game:GetService("ContentProvider")
-local TweenService = game:GetService("TweenService")
+local UserInput  = game:GetService("UserInputService")
+local Content    = game:GetService("ContentProvider")
+
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- ScreenGui root (idempotent)
-local guiParent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
-local old = guiParent:FindFirstChild("PandaFlyGUI")
-if old then old:Destroy() end
+-- UI root (idempotent)
+local parentGui = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+if parentGui:FindFirstChild("PandaFlyGUI") then
+    parentGui.PandaFlyGUI:Destroy()
+end
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "PandaFlyGUI"
-gui.DisplayOrder = 10_000_000
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.Parent = guiParent
+gui.DisplayOrder = 1e7
+gui.Parent = parentGui
 
--- Assets (provided)
+-- Assets
 local PANDA = "rbxassetid://140281572489473"
 local PCIMG = "rbxassetid://75277585107743"
 local PHIMG = "rbxassetid://75163729493008"
 pcall(function() Content:PreloadAsync({PANDA, PCIMG, PHIMG}) end)
 
--- Theme
-local C_TOPBAR = Color3.fromRGB(40, 120, 30)   -- distinct top tab
-local C_BTN    = Color3.fromRGB(0, 140, 0)     -- button dark green
+-- Theme colors
+local C_TOPBAR = Color3.fromRGB(40,120,30)
+local C_BODY_A = Color3.fromRGB(0,255,0)
+local C_BODY_B = Color3.fromRGB(255,255,0)
+local C_BTN    = Color3.fromRGB(0,140,0)
 local C_TEXT   = Color3.new(1,1,1)
 local C_BLACK  = Color3.new(0,0,0)
-local GRAD_A   = Color3.fromRGB(0,255,0)       -- bright green
-local GRAD_B   = Color3.fromRGB(255,255,0)     -- yellow
 
--- Style helpers
-local function corner(p, r) local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0, r or 10); c.Parent=p end
-local function stroke(p, t) local s=Instance.new("UIStroke"); s.Color=C_BLACK; s.Thickness=t or 1; s.Parent=p end
-local function gradient(p, a, b, rot)
-    local g=Instance.new("UIGradient")
-    g.Color = ColorSequence.new(a or GRAD_A, b or GRAD_B)
-    g.Rotation = rot or 90
-    g.Parent = p
+-- Helpers
+local function corner(inst,r)
+    local c = Instance.new("UICorner", inst)
+    c.CornerRadius = UDim.new(0, r or 8)
 end
-local function fontify(lblOrBtn)
-    lblOrBtn.Font = Enum.Font.Bangers -- bold, comical
-    lblOrBtn.TextColor3 = C_TEXT
-    lblOrBtn.TextStrokeColor3 = C_BLACK
-    lblOrBtn.TextStrokeTransparency = 0
+
+local function stroke(inst,t)
+    local s = Instance.new("UIStroke", inst)
+    s.Color = C_BLACK
+    s.Thickness = t or 1
 end
-local function styleButton(btn)
+
+local function gradient(inst)
+    local g = Instance.new("UIGradient", inst)
+    g.Color = ColorSequence.new(C_BODY_A, C_BODY_B)
+    g.Rotation = 90
+end
+
+local function styleBtn(btn)
     btn.BackgroundColor3 = C_BTN
     btn.AutoButtonColor = true
+    btn.Font = Enum.Font.Bangers
+    btn.TextColor3 = C_TEXT
+    btn.TextStrokeColor3 = C_BLACK
+    btn.TextStrokeTransparency = 0
     btn.TextScaled = true
-    fontify(btn); corner(btn, 8); stroke(btn, 1)
+    corner(btn,8)
+    stroke(btn,1)
 end
 
--- Drag logic (panel or mini)
-local function makeDraggable(panel, handle)
-    local dragging=false
-    local dragStart, startPos
-    handle.InputBegan:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-            dragging=true; dragStart = input.Position; startPos = panel.Position
-            input.Changed:Connect(function()
-                if input.UserInputState==Enum.UserInputState.End then dragging=false end
+local function labelFont(lbl)
+    lbl.Font = Enum.Font.Bangers
+    lbl.TextColor3 = C_TEXT
+    lbl.TextStrokeColor3 = C_BLACK
+    lbl.TextStrokeTransparency = 0
+end
+
+-- Drag logic (mouse & touch)
+local function makeDraggable(frame, handle)
+    local dragging, startPos, dragStart = false
+    handle.InputBegan:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 or
+           inp.UserInputType==Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = inp.Position
+            startPos  = frame.Position
+            inp.Changed:Connect(function()
+                if inp.UserInputState==Enum.UserInputState.End then
+                    dragging = false
+                end
             end)
         end
     end)
-    handle.InputChanged:Connect(function(input)
+    handle.InputChanged:Connect(function(inp)
         if not dragging then return end
-        if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
-            local delta = input.Position - dragStart
-            panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        if inp.UserInputType==Enum.UserInputType.MouseMovement or
+           inp.UserInputType==Enum.UserInputType.Touch then
+            local delta = inp.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
         end
     end)
 end
 
--- Flight state
-local mode = "none" -- "pc" | "phone"
-local flying = false
-local speed = 16
-local flightConn, orientConn, deathConn
-local key = {W=false,A=false,S=false,D=false}
-local kbConns = {}
-
--- Physics attachments
-local rootAtt, align, antiGrav
-
-local function character()
-    return player.Character or player.CharacterAdded:Wait()
-end
-
-local function humanoid()
-    local c = character()
-    return c:FindFirstChildOfClass("Humanoid")
-end
-
-local function rootPart()
-    local c = character()
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-
-local function stopAnimations(hum)
-    for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
-        track:Stop(0.1)
-    end
-end
-
-local function cleanupFlight()
-    flying = false
-    if flightConn then flightConn:Disconnect(); flightConn=nil end
-    if orientConn then orientConn:Disconnect(); orientConn=nil end
-    if align then align:Destroy(); align=nil end
-    if antiGrav then antiGrav:Destroy(); antiGrav=nil end
-    if rootAtt then rootAtt:Destroy(); rootAtt=nil end
-    for _,c in ipairs(kbConns) do c:Disconnect() end
-    kbConns = {}
-    local hum = humanoid()
-    if hum then hum.AutoRotate = true end
-end
-
-local function bindPCKeys()
-    for _,c in ipairs(kbConns) do c:Disconnect() end
-    kbConns = {}
-    table.insert(kbConns, UserInput.InputBegan:Connect(function(inp, gp)
-        if gp then return end
-        if UserInput:GetFocusedTextBox() then return end
-        if inp.KeyCode==Enum.KeyCode.W then key.W=true end
-        if inp.KeyCode==Enum.KeyCode.A then key.A=true end
-        if inp.KeyCode==Enum.KeyCode.S then key.S=true end
-        if inp.KeyCode==Enum.KeyCode.D then key.D=true end
-        if inp.KeyCode==Enum.KeyCode.E and mode=="pc" then flying = not flying end
-    end))
-    table.insert(kbConns, UserInput.InputEnded:Connect(function(inp)
-        if inp.KeyCode==Enum.KeyCode.W then key.W=false end
-        if inp.KeyCode==Enum.KeyCode.A then key.A=false end
-        if inp.KeyCode==Enum.KeyCode.S then key.S=false end
-        if inp.KeyCode==Enum.KeyCode.D then key.D=false end
-    end))
-end
-
--- Mobile move vector via PlayerModule (fallback to Humanoid.MoveDirection)
-local function getMobileMove2()
-    local ps = player:FindFirstChild("PlayerScripts")
-    local pm = ps and ps:FindFirstChild("PlayerModule")
-    if pm then
-        local ok, controls = pcall(function() return require(pm):GetControls() end)
-        if ok and controls and controls.GetMoveVector then
-            local v = controls:GetMoveVector()
-            return Vector2.new(v.X, v.Z) -- x=strafe, y=forward(+)
-        end
-    end
-    local hum = humanoid()
-    if hum then
-        local dir = hum.MoveDirection
-        -- Project onto camera axes
-        local forward = dir:Dot(camera.CFrame.LookVector)
-        local strafe = dir:Dot(camera.CFrame.RightVector)
-        return Vector2.new(strafe, forward)
-    end
-    return Vector2.zero
-end
-
-local function startFlight()
-    cleanupFlight()
-
-    local hum = humanoid()
-    local root = rootPart()
-    if not (hum and root) then return end
-
-    hum.AutoRotate = false
-
-    -- Attachment + AlignOrientation to face camera yaw/pitch (no roll)
-    rootAtt = Instance.new("Attachment")
-    rootAtt.Name = "PandaFly_Att"
-    rootAtt.Parent = root
-
-    align = Instance.new("AlignOrientation")
-    align.Mode = Enum.OrientationAlignmentMode.OneAttachment
-    align.Attachment0 = rootAtt
-    align.Responsiveness = 60
-    align.RigidityEnabled = false
-    align.Parent = root
-
-    -- Anti-gravity force to neutralize gravity so velocity control is crisp
-    antiGrav = Instance.new("VectorForce")
-    antiGrav.Force = Vector3.new(0, root.AssemblyMass * workspace.Gravity, 0)
-    antiGrav.Attachment0 = rootAtt
-    antiGrav.RelativeTo = Enum.ActuatorRelativeTo.World
-    antiGrav.Parent = root
-
-    -- Kill animations while flying
-    orientConn = RunService.RenderStepped:Connect(function()
-        if not flying then return end
-        local camC = camera.CFrame
-        -- build rotation without roll
-        local look = camC.LookVector
-        local up = Vector3.new(0,1,0)
-        local right = look:Cross(up).Unit
-        local flatUp = right:Cross(look).Unit
-        local rot = CFrame.fromMatrix(Vector3.zero, right, flatUp, look)
-        align.CFrame = rot
-        stopAnimations(hum)
-    end)
-
-    -- Main motion loop
-    flightConn = RunService.RenderStepped:Connect(function(dt)
-        if not flying then return end
-        if not root.Parent then cleanupFlight(); return end
-
-        local torsoCF = root.CFrame
-        local f = torsoCF.LookVector -- includes pitch for up/down
-        local r = torsoCF.RightVector
-        local move = Vector3.zero
-
-        if mode == "pc" then
-            local forward = (key.W and 1 or 0) + (key.S and -1 or 0)
-            local strafe  = (key.D and 1 or 0) + (key.A and -1 or 0)
-            -- Forward/back uses full torso look (with vertical component)
-            move = move + f * forward
-            -- Strafe is horizontal left/right of torso (remove vertical)
-            local rFlat = Vector3.new(r.X, 0, r.Z).Magnitude > 0 and Vector3.new(r.X,0,r.Z).Unit or r
-            move = move + rFlat * strafe
-        else
-            -- Mobile: joystick; disable backward (no behind)
-            local mv2 = getMobileMove2()
-            local forward = math.max(0, mv2.Y) -- no backward
-            local strafe  = mv2.X
-            -- Camera pan controls direction; forward uses full camera look (with pitch)
-            local cf = camera.CFrame
-            local camF = cf.LookVector
-            local camR = cf.RightVector
-            local camRFlat = Vector3.new(camR.X,0,camR.Z).Magnitude>0 and Vector3.new(camR.X,0,camR.Z).Unit or camR
-            move = camF * forward + camRFlat * strafe
-        end
-
-        if move.Magnitude > 0 then
-            move = move.Unit * speed
-        end
-
-        -- Apply desired velocity directly; anti-gravity holds altitude when not moving
-        root.AssemblyLinearVelocity = Vector3.new(move.X, move.Y, move.Z)
-    end)
-
-    -- Auto-off on death
-    local humConn
-    humConn = hum.Died:Connect(function()
-        flying = false
-        cleanupFlight()
-        if humConn then humConn:Disconnect() end
-    end)
-    deathConn = humConn
-end
-
--- UI: minimized panda icon
+-- Minimized icon
 local function spawnMini(onRestore)
-    local mini = Instance.new("Frame")
+    local mini = Instance.new("Frame", gui)
     mini.Name = "MiniPanda"
-    mini.Size = UDim2.fromOffset(56,56)
-    mini.Position = UDim2.new(0.5,-28, 0.4,-28)
+    mini.Size = UDim2.fromOffset(48,48)
+    mini.Position = UDim2.new(0.5, -24, 0.5, -24)
     mini.BackgroundColor3 = C_TOPBAR
-    mini.Active = true
-    corner(mini, 12); stroke(mini, 1)
-    mini.Parent = gui
+    corner(mini,12); stroke(mini,1)
 
-    local img = Instance.new("ImageLabel")
+    local img = Instance.new("ImageLabel", mini)
+    img.Size = UDim2.fromScale(1,1)
     img.BackgroundTransparency = 1
     img.Image = PANDA
-    img.Size = UDim2.fromScale(1,1)
-    img.Parent = mini
 
-    makeDraggable(mini, mini)
-
-    local moved = 0
-    mini.InputBegan:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-            moved = 0
+    -- click vs drag threshold
+    local dragging, moved = false, 0
+    mini.InputBegan:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 or
+           inp.UserInputType==Enum.UserInputType.Touch then
+            dragging, moved = true, 0
         end
     end)
-    mini.InputChanged:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then
-            moved += 1
+    mini.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType==Enum.UserInputType.MouseMovement or
+                         inp.UserInputType==Enum.UserInputType.Touch) then
+            moved = moved + 1
         end
     end)
-    mini.InputEnded:Connect(function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+    mini.InputEnded:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 or
+           inp.UserInputType==Enum.UserInputType.Touch then
+            dragging = false
             if moved < 3 then
                 mini:Destroy()
                 onRestore()
             end
         end
     end)
+
+    makeDraggable(mini, mini)
+    return mini
 end
 
--- UI building blocks
-local function buildTopBar(parentFrame, withLeftPanda)
-    local bar = Instance.new("Frame")
-    bar.Name = "TopBar"
-    bar.Size = UDim2.new(1, 0, 0, 36)
-    bar.BackgroundColor3 = C_TOPBAR
-    bar.Parent = parentFrame
-    corner(bar, 10); stroke(bar, 1)
+-- Flight state & cleanup
+local flying, mode, speed = false, "none", 16
+local flyConn, animConn, deathConn, kbConns = nil, nil, nil, {}
+local align, linVel, antiGrav, att = nil,nil,nil,nil
 
-    local dragHandle = Instance.new("TextLabel")
-    dragHandle.BackgroundTransparency = 1
-    dragHandle.Text = ""
-    dragHandle.Size = UDim2.new(1, -100, 1, 0)
-    dragHandle.Position = UDim2.new(0, withLeftPanda and 36 or 0, 0, 0)
-    dragHandle.Parent = bar
+local function stopAnims(hum)
+    for _,t in ipairs(hum:GetPlayingAnimationTracks()) do
+        t:Stop(0.1)
+    end
+end
 
-    if withLeftPanda then
-        local panda = Instance.new("ImageLabel")
-        panda.Name = "Panda"
-        panda.BackgroundTransparency = 1
-        panda.Image = PANDA
-        panda.Size = UDim2.fromOffset(28,28)
-        panda.Position = UDim2.new(0,4, 0,4)
-        panda.Parent = bar
+local function cleanFlight()
+    if flyConn  then flyConn:Disconnect() end
+    if animConn then animConn:Disconnect() end
+    if deathConn then deathConn:Disconnect() end
+    for _,c in ipairs(kbConns) do c:Disconnect() end
+    kbConns = {}
+    if align then align:Destroy() end
+    if linVel then linVel:Destroy() end
+    if antiGrav then antiGrav:Destroy() end
+    if att then att:Destroy() end
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.AutoRotate = true end
+    end
+    flying = false
+end
+
+-- Mobile move vector (blocks backwards)
+local function getmoveMobile()
+    local ps = player:FindFirstChild("PlayerScripts")
+    local controls
+    if ps and ps:FindFirstChild("PlayerModule") then
+        local ok, mod = pcall(require, ps.PlayerModule)
+        if ok then controls = mod:GetControls() end
+    end
+    if controls and controls.GetMoveVector then
+        local v = controls:GetMoveVector()
+        return Vector2.new(v.X, math.clamp(-v.Z, 0, 1))
+    end
+    -- fallback
+    local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        local d = hum.MoveDirection
+        local f = d:Dot(camera.CFrame.LookVector)
+        local s = d:Dot(camera.CFrame.RightVector)
+        return Vector2.new(s,math.clamp(f,0,1))
+    end
+    return Vector2.zero
+end
+
+-- PC WASD & E toggle
+local keys = {W=false,A=false,S=false,D=false}
+local function bindPC()
+    table.foreach(kbConns, function(i,c) c:Disconnect() end)
+    kbConns = {}
+    table.insert(kbConns, UserInput.InputBegan:Connect(function(i,gp)
+        if gp or UserInput:GetFocusedTextBox() then return end
+        if i.KeyCode==Enum.KeyCode.W then keys.W=true end
+        if i.KeyCode==Enum.KeyCode.A then keys.A=true end
+        if i.KeyCode==Enum.KeyCode.S then keys.S=true end
+        if i.KeyCode==Enum.KeyCode.D then keys.D=true end
+        if i.KeyCode==Enum.KeyCode.E and mode=="pc" then
+            flying = not flying
+        end
+    end))
+    table.insert(kbConns, UserInput.InputEnded:Connect(function(i)
+        if i.KeyCode==Enum.KeyCode.W then keys.W=false end
+        if i.KeyCode==Enum.KeyCode.A then keys.A=false end
+        if i.KeyCode==Enum.KeyCode.S then keys.S=false end
+        if i.KeyCode==Enum.KeyCode.D then keys.D=false end
+    end))
+end
+
+-- Core flight updater
+local function startFlight()
+    cleanFlight()
+    local char = player.Character or player.CharacterAdded:Wait()
+    local root = char:WaitForChild("HumanoidRootPart")
+    local hum  = char:FindFirstChildOfClass("Humanoid")
+    hum.AutoRotate = false
+
+    antigrav = Instance.new("BodyForce", root)
+    antigrav.Force = Vector3.new(0, workspace.Gravity * root:GetMass(), 0)
+
+    att = Instance.new("Attachment", root)
+    linVel = Instance.new("LinearVelocity", root)
+    linVel.Attachment0 = att
+    linVel.MaxForce = math.huge
+    linVel.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
+
+    if mode=="pc" then
+        bindPC()
+        flyConn = RunService.Heartbeat:Connect(function()
+            if not flying then
+                linVel.VectorVelocity = Vector3.zero
+                return
+            end
+            -- build camera-based direction
+            local dir = Vector3.zero
+            if keys.W then dir += camera.CFrame.LookVector end
+            if keys.S then dir -= camera.CFrame.LookVector end
+            if keys.A then dir -= camera.CFrame.RightVector end
+            if keys.D then dir += camera.CFrame.RightVector end
+            dir = dir.Unit * speed
+            linVel.VectorVelocity = dir
+            stopAnims(hum)
+        end)
+    else
+        flyConn = RunService.Heartbeat:Connect(function()
+            if not flying then
+                linVel.VectorVelocity = Vector3.zero
+                return
+            end
+            local mv = getmoveMobile()
+            local forward = camera.CFrame.LookVector * mv.Y
+            local sideways = camera.CFrame.RightVector * mv.X
+            local dir = (forward + sideways).Unit * speed
+            linVel.VectorVelocity = dir
+            stopAnims(hum)
+        end)
     end
 
-    local close = Instance.new("TextButton")
-    close.Name = "Close"
-    close.Size = UDim2.fromOffset(32,24)
-    close.Position = UDim2.new(1, -36, 0, 6)
-    close.Text = "X"
-    styleButton(close); close.Parent = bar
-
-    local min = Instance.new("TextButton")
-    min.Name = "Min"
-    min.Size = UDim2.fromOffset(32,24)
-    min.Position = UDim2.new(1, -72, 0, 6)
-    min.Text = "-"
-    styleButton(min); min.Parent = bar
-
-    makeDraggable(parentFrame, dragHandle)
-
-    return bar, min, close
+    deathConn = player.Character.Humanoid.Died:Connect(cleanFlight)
 end
 
-local function themedBody(parentFrame)
-    local body = Instance.new("Frame")
-    body.Name = "Body"
-    body.Size = UDim2.new(1, 0, 1, -36)
-    body.Position = UDim2.new(0,0, 0,36)
-    body.BackgroundColor3 = GRAD_A
-    body.Parent = parentFrame
-    corner(body, 12); stroke(body, 1); gradient(body, GRAD_A, GRAD_B, 90)
-    return body
-end
+-- Build panels
+local function makePanel(title, parent, layoutFunc)
+    local fr = Instance.new("Frame", gui)
+    fr.Size = UDim2.new(0, 250, 0, 160)
+    fr.Position = UDim2.new(0.5, -125, 0.5, -80)
+    gradient(fr)
+    fr.Active = true
+    corner(fr, 12)
+    fr.Name = title
 
-local function makeWindow(size, pos)
-    local frame = Instance.new("Frame")
-    frame.Name = "Window"
-    frame.Size = size
-    frame.Position = pos
-    frame.BackgroundTransparency = 1
-    frame.Active = true
-    frame.Parent = gui
-    return frame
+    -- topbar
+    local top = Instance.new("Frame", fr)
+    top.Size = UDim2.new(1,0,0,32)
+    top.BackgroundColor3 = C_TOPBAR
+    corner(top,12)
+    stroke(top,1)
+
+    local titleLbl = Instance.new("TextLabel", top)
+    titleLbl.Size = UDim2.new(1,-64,1,0)
+    titleLbl.Position = UDim2.new(0,32,0,0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Text = title
+    titleLbl.TextColor3 = C_TEXT
+    titleLbl.Font = Enum.Font.Bangers
+    titleLbl.TextSize = 18
+    titleLbl.TextStrokeColor3 = C_BLACK
+    titleLbl.TextStrokeTransparency = 0
+
+    -- Panda icon top-left
+    local pandaIcon = Instance.new("ImageLabel", top)
+    pandaIcon.Size = UDim2.new(0,28,0,28)
+    pandaIcon.Position = UDim2.new(0,4,0,2)
+    pandaIcon.BackgroundTransparency = 1
+    pandaIcon.Image = PANDA
+
+    -- minimize button
+    local btnMin = Instance.new("TextButton", top)
+    btnMin.Size = UDim2.new(0,24,0,24)
+    btnMin.Position = UDim2.new(1,-56,0,4)
+    btnMin.Text = "-"
+    styleBtn(btnMin)
+
+    -- close button
+    local btnClose = Instance.new("TextButton", top)
+    btnClose.Size = UDim2.new(0,24,0,24)
+    btnClose.Position = UDim2.new(1,-28,0,4)
+    btnClose.Text = "X"
+    styleBtn(btnClose)
+
+    -- drag handle = top
+    makeDraggable(fr, top)
+
+    -- collapse logic
+    btnMin.MouseButton1Click:Connect(function()
+        fr:Destroy()
+        spawnMini(function() layoutFunc() end)
+    end)
+    btnClose.MouseButton1Click:Connect(function()
+        gui:Destroy()
+        cleanFlight()
+    end)
+
+    return fr
 end
 
 -- Device select UI
-local function deviceSelectUI()
-    local win = makeWindow(UDim2.fromOffset(360, 240), UDim2.new(0.5, -180, 0.5, -120))
-    local top, minBtn, closeBtn = buildTopBar(win, false)
-    local body = themedBody(win)
+local function showDeviceUI()
+    local panel = makePanel("Choose Device", gui, showDeviceUI)
 
-    -- Panda centered at top-middle (in body)
-    local panda = Instance.new("ImageLabel")
-    panda.BackgroundTransparency = 1
-    panda.Image = PANDA
-    panda.Size = UDim2.fromOffset(64,64)
-    panda.Position = UDim2.new(0.5, -32, 0, 8)
-    panda.Parent = body
+    -- Panda at top center
+    local img = Instance.new("ImageLabel", panel)
+    img.Size = UDim2.new(0,64,0,64)
+    img.Position = UDim2.new(0.5,-32,0,40)
+    img.BackgroundTransparency = 1
+    img.Image = PANDA
 
-    local choose = Instance.new("TextLabel")
-    choose.BackgroundTransparency = 1
-    choose.Text = "Choose your device"
-    choose.TextScaled = true
-    choose.Size = UDim2.new(1, -20, 0, 28)
-    choose.Position = UDim2.new(0, 10, 0, 80)
-    fontify(choose); choose.Parent = body
+    -- label
+    local lbl = Instance.new("TextLabel", panel)
+    lbl.Size = UDim2.new(1,0,0,24)
+    lbl.Position = UDim2.new(0,0,0,112)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "Choose your device"
+    lbl.TextSize = 16
+    labelFont(lbl)
 
-    local pcLbl = Instance.new("TextLabel")
-    pcLbl.BackgroundTransparency = 1
-    pcLbl.Text = "PC/Emulator"
-    pcLbl.TextScaled = true
-    pcLbl.Size = UDim2.fromOffset(140, 22)
-    pcLbl.Position = UDim2.new(0, 30, 0, 112)
-    fontify(pcLbl); pcLbl.Parent = body
-
-    local phLbl = pcLbl:Clone()
-    phLbl.Text = "Phone"
-    phLbl.Position = UDim2.new(1, -170, 0, 112)
-    phLbl.Parent = body
-
-    local pcBtn = Instance.new("ImageButton")
+    -- PC side
+    local pcBtn = Instance.new("ImageButton", panel)
+    pcBtn.Size = UDim2.new(0,48,0,48)
+    pcBtn.Position = UDim2.new(0.3,-24,0,56)
     pcBtn.BackgroundTransparency = 1
     pcBtn.Image = PCIMG
-    pcBtn.Size = UDim2.fromOffset(96,96)
-    pcBtn.Position = UDim2.new(0, 52, 0, 138)
-    pcBtn.Parent = body
+    local pcLbl = Instance.new("TextLabel", panel)
+    pcLbl.Size = UDim2.new(0,60,0,16)
+    pcLbl.Position = UDim2.new(0.3,-30,0,48)
+    pcLbl.BackgroundTransparency = 1
+    pcLbl.Text = "PC/Emulator"
+    pcLbl.TextSize = 14
+    labelFont(pcLbl)
 
-    local phBtn = pcBtn:Clone()
+    -- Phone side
+    local phBtn = Instance.new("ImageButton", panel)
+    phBtn.Size = UDim2.new(0,48,0,48)
+    phBtn.Position = UDim2.new(0.7,-24,0,56)
+    phBtn.BackgroundTransparency = 1
     phBtn.Image = PHIMG
-    phBtn.Position = UDim2.new(1, -148, 0, 138)
-    phBtn.Parent = body
+    local phLbl = Instance.new("TextLabel", panel)
+    phLbl.Size = UDim2.new(0,60,0,16)
+    phLbl.Position = UDim2.new(0.7,-30,0,48)
+    phLbl.BackgroundTransparency = 1
+    phLbl.Text = "Phone"
+    phLbl.TextSize = 14
+    labelFont(phLbl)
 
-    -- Wire top buttons
-    minBtn.MouseButton1Click:Connect(function()
-        win.Visible = false
-        spawnMini(function() win.Visible = true end)
-    end)
-    closeBtn.MouseButton1Click:Connect(function()
-        cleanupFlight()
-        gui:Destroy()
-        pcall(function() script:Destroy() end)
-    end)
-
-    -- Device routes
+    -- click handlers
     pcBtn.MouseButton1Click:Connect(function()
-        win:Destroy()
+        panel:Destroy()
         mode = "pc"
-        bindPCKeys()
-        flyUI_PC()
+        showFlyUI()
     end)
     phBtn.MouseButton1Click:Connect(function()
-        win:Destroy()
+        panel:Destroy()
         mode = "phone"
-        flyUI_Phone()
+        showFlyUI()
     end)
 end
 
--- Shared fly UI pieces
-local function commonFlyBody(win, topCenterIconImage, showEText)
-    local top, minBtn, closeBtn = buildTopBar(win, true)
-    local body = themedBody(win)
+-- Fly UI
+function showFlyUI()
+    local panel = makePanel("Fly Controls", gui, showFlyUI)
 
-    -- Device icon at top middle
-    local icon = Instance.new("ImageLabel")
-    icon.BackgroundTransparency = 1
-    icon.Image = topCenterIconImage
-    icon.Size = UDim2.fromOffset(48,48)
-    icon.Position = UDim2.new(0.5, -24, 0, 6)
-    icon.Parent = top
-
-    -- Controls
-    local speedLabel = Instance.new("TextLabel")
-    speedLabel.BackgroundTransparency = 1
-    speedLabel.Text = "Speed"
-    speedLabel.TextScaled = true
-    speedLabel.Size = UDim2.new(0, 90, 0, 28)
-    speedLabel.Position = UDim2.new(0, 12, 0, 8)
-    fontify(speedLabel); speedLabel.Parent = body
-
-    local speedBox = Instance.new("TextBox")
-    speedBox.Text = tostring(speed)
-    speedBox.ClearTextOnFocus = false
-    speedBox.Size = UDim2.new(0, 90, 0, 36)
-    speedBox.Position = UDim2.new(0, 12, 0, 40)
-    speedBox.TextScaled = true
-    styleButton(speedBox); speedBox.Parent = body
-
-    local toggle = Instance.new("TextButton")
-    toggle.Text = flying and "Fly: ON" or "Fly: OFF"
-    toggle.Size = UDim2.new(0, 120, 0, 36)
-    toggle.Position = UDim2.new(0, 120, 0, 40)
-    styleButton(toggle); toggle.Parent = body
-
-    local eHint
-    if showEText then
-        eHint = Instance.new("TextLabel")
-        eHint.BackgroundTransparency = 1
-        eHint.Text = "Press E to toggle fly on and off"
-        eHint.TextScaled = true
-        eHint.Size = UDim2.new(1, -12, 0, 24)
-        eHint.Position = UDim2.new(0, 8, 0, 84)
-        fontify(eHint); eHint.Parent = body
+    -- PC icon at top center for PC mode
+    if mode=="pc" then
+        local pcIcon = Instance.new("ImageLabel", panel)
+        pcIcon.Size = UDim2.new(0,48,0,48)
+        pcIcon.Position = UDim2.new(0.5,-24,0,40)
+        pcIcon.Image = PCIMG
+        pcIcon.BackgroundTransparency = 1
     end
 
-    -- Wire buttons
-    minBtn.MouseButton1Click:Connect(function()
-        win.Visible = false
-        spawnMini(function() win.Visible = true end)
-    end)
-    closeBtn.MouseButton1Click:Connect(function()
-        cleanupFlight()
-        gui:Destroy()
-        pcall(function() script:Destroy() end)
+    -- flyspeed input label
+    local spLbl = Instance.new("TextLabel", panel)
+    spLbl.Size = UDim2.new(0,100,0,20)
+    spLbl.Position = UDim2.new(0,16,0,56)
+    spLbl.BackgroundTransparency = 1
+    spLbl.Text = "Fly Speed:"
+    spLbl.TextSize = 14
+    labelFont(spLbl)
+
+    -- speed text box
+    local spBox = Instance.new("TextBox", panel)
+    spBox.Size = UDim2.new(0,60,0,24)
+    spBox.Position = UDim2.new(0,120,0,52)
+    spBox.Text = tostring(speed)
+    spBox.TextSize = 16
+    spBox.ClearTextOnFocus = false
+    spBox.Font = Enum.Font.Bangers
+    spBox.TextColor3 = C_TEXT
+    spBox.TextStrokeColor3 = C_BLACK
+    spBox.TextStrokeTransparency = 0
+    corner(spBox,8); stroke(spBox,1)
+    spBox.FocusLost:Connect(function(enter)
+        local n = tonumber(spBox.Text)
+        if n and n>0 then speed = n end
+        spBox.Text = tostring(speed)
     end)
 
-    speedBox.FocusLost:Connect(function(enter)
-        local n = tonumber(speedBox.Text)
-        if n and n > 0 then
-            speed = n
-        else
-            speedBox.Text = tostring(speed)
-        end
-    end)
+    -- on/off toggle
+    local tog = Instance.new("TextButton", panel)
+    tog.Size = UDim2.new(0,60,0,28)
+    tog.Position = UDim2.new(1,-76,0,48)
+    tog.Text = "OFF"
+    styleBtn(tog)
 
-    toggle.MouseButton1Click:Connect(function()
+    if mode=="pc" then
+        local hint = Instance.new("TextLabel", panel)
+        hint.Size = UDim2.new(1,0,0,16)
+        hint.Position = UDim2.new(0,0,1,-16)
+        hint.BackgroundTransparency = 1
+        hint.Text = "Press E to toggle"
+        hint.TextSize = 12
+        hint.TextColor3 = C_TEXT
+        hint.Font = Enum.Font.Bangers
+        hint.TextStrokeColor3 = C_BLACK
+        hint.TextStrokeTransparency = 0
+    end
+
+    tog.MouseButton1Click:Connect(function()
         flying = not flying
-        toggle.Text = flying and "Fly: ON" or "Fly: OFF"
-        if flying and not align then
-            startFlight()
-        elseif not flying then
-            -- keep attachments for quick resume; motion loop checks flag
-        end
+        tog.Text = flying and "ON" or "OFF"
+        if flying then startFlight() else cleanFlight() end
     end)
-
-    return body, toggle
 end
 
--- PC Fly UI
-function flyUI_PC()
-    local win = makeWindow(UDim2.fromOffset(380, 180), UDim2.new(0.5, -190, 0.5, -90))
-    local body, toggle = commonFlyBody(win, PCIMG, true)
-
-    -- Start flight rig so E/toggle works immediately
-    startFlight()
-end
-
--- Phone Fly UI
-function flyUI_Phone()
-    local win = makeWindow(UDim2.fromOffset(380, 180), UDim2.new(0.5, -190, 0.5, -90))
-    local body, toggle = commonFlyBody(win, PHIMG, false)
-
-    -- Start flight rig so toggle works immediately
-    startFlight()
-end
-
--- Rebuild rig on respawn (flight off by default)
-player.CharacterAdded:Connect(function()
-    cleanupFlight()
-end)
-
--- Boot: device select
-deviceSelectUI()
+-- kick it off
+showDeviceUI()
