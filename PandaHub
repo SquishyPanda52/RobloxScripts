@@ -1,109 +1,371 @@
--- Place this as a LocalScript (e.g. under StarterPlayerScripts)
-local Players    = game:GetService("Players")
-local RunService = game:GetService("RunService")
+-- TPUA v2 - Continuous unanchored teleport with compact draggable UI
+-- Place as a LocalScript (StarterPlayerScripts). Runtime-only, UI persists across death.
 
-local localPlayer = Players.LocalPlayer
-local playerGui   = localPlayer:WaitForChild("PlayerGui")
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local UserInputService   = game:GetService("UserInputService")
+local TweenService       = game:GetService("TweenService")
 
---[[-------------------------------------------------------------------------
-   1. BUILD UI
----------------------------------------------------------------------------]]
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name   = "TPUA_UI"
-screenGui.Parent = playerGui
+local LP = Players.LocalPlayer
 
--- Main Frame (draggable)
-local frame = Instance.new("Frame")
-frame.Name             = "ControlFrame"
-frame.Size             = UDim2.new(0, 200, 0, 100)
-frame.Position         = UDim2.new(0.5, -100, 0.2, 0)
-frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-frame.BorderSizePixel  = 0
-frame.Active           = true
-frame.Draggable        = true
-frame.Parent           = screenGui
+-- Prevent duplicate UIs on respawn
+local GUI_NAME = "TPUA_Panel"
+local existing = (LP:WaitForChild("PlayerGui", 5) and LP.PlayerGui:FindFirstChild(GUI_NAME))
+if existing then
+    return
+end
 
--- Title Bar
-local title = Instance.new("TextLabel")
-title.Size               = UDim2.new(1, 0, 0, 20)
-title.Position           = UDim2.new(0, 0, 0, 0)
-title.BackgroundTransparency = 1
-title.Text               = "TPUA Panel"
-title.TextColor3         = Color3.fromRGB(255, 255, 255)
-title.TextScaled         = true
-title.Parent             = frame
-
--- Username Input
-local userInput = Instance.new("TextBox")
-userInput.Name           = "UsernameBox"
-userInput.PlaceholderText= "Target Username"
-userInput.Size           = UDim2.new(1, -10, 0, 30)
-userInput.Position       = UDim2.new(0, 5, 0, 25)
-userInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-userInput.TextColor3     = Color3.fromRGB(255, 255, 255)
-userInput.ClearTextOnFocus = false
-userInput.Parent         = frame
-
--- Toggle Button
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Name           = "ToggleTPUA"
-toggleBtn.Size           = UDim2.new(1, -10, 0, 30)
-toggleBtn.Position       = UDim2.new(0, 5, 0, 60)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-toggleBtn.TextColor3     = Color3.fromRGB(255, 255, 255)
-toggleBtn.Text           = "TPUA: Off"
-toggleBtn.Parent         = frame
-
---[[-------------------------------------------------------------------------
-   2. TELEPORT LOGIC
----------------------------------------------------------------------------]]
+-- STATE
 local enabled = false
+local minimized = false
+local targetName = ""
+local headPos = nil
 
--- Remove all existing BodyPositions created by this script
+-- Keep references for clean shutdown
+local connections = {}
+local candidateParts = {}   -- [BasePart] = true
+local createdForces = {}    -- [BasePart] = BodyPosition
+local heartbeatConn = nil
+
+-- CONFIG
+local COLOR_OFF = Color3.fromRGB(30, 120, 255)   -- blue
+local COLOR_ON  = Color3.fromRGB(230, 45, 45)    -- red
+local BG_PRIMARY = Color3.fromRGB(24, 24, 28)
+local BG_SECOND  = Color3.fromRGB(36, 36, 42)
+local TEXT_WHITE = Color3.new(1, 1, 1)
+local CORNER = UDim.new(0, 8) -- subtle bevel
+local BTN_CORNER = UDim.new(0, 6)
+
+-- UTIL
+local function isCharacterPart(part)
+    local model = part:FindFirstAncestorOfClass("Model")
+    return model and model:FindFirstChildOfClass("Humanoid") ~= nil
+end
+
+local function shouldConsider(part)
+    return part:IsA("BasePart")
+        and not part.Anchored
+        and not isCharacterPart(part)
+end
+
 local function clearForces()
-    for _, part in ipairs(workspace:GetDescendants()) do
-        local bp = part:FindFirstChild("tpuaBP")
-        if bp and bp:IsA("BodyPosition") then
-            bp:Destroy()
-        end
+    for part, bp in pairs(createdForces) do
+        if bp and bp.Parent then bp:Destroy() end
+        createdForces[part] = nil
     end
 end
 
--- On each Heartbeat, snap every unanchored part to the target's head
-RunService.Heartbeat:Connect(function()
-    if not enabled then return end
+local function setToggleVisuals(btn)
+    btn.Text = enabled and "TPUA: On" or "TPUA: Off"
+    btn.BackgroundColor3 = enabled and COLOR_ON or COLOR_OFF
+end
 
-    local targetName   = userInput.Text
-    local targetPlayer = Players:FindFirstChild(targetName)
-    if not targetPlayer 
-       or not targetPlayer.Character 
-       or not targetPlayer.Character:FindFirstChild("Head") then
-        return
+local function resolveTarget(name)
+    if not name or name == "" then return nil end
+    -- Case-insensitive partial match, prefer exact
+    local lower = string.lower(name)
+    local exact = Players:FindFirstChild(name)
+    if exact then return exact end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if string.sub(string.lower(plr.Name), 1, #lower) == lower then
+            return plr
+        end
+    end
+    return nil
+end
+
+local function connectHumanoidDeath()
+    -- Disable on death; rebind on respawn
+    local function bind(char)
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        table.insert(connections, hum.Died:Connect(function()
+            enabled = false
+            setToggleVisuals(toggleBtn) -- forward-declared; safe after UI build
+            clearForces()
+        end))
+    end
+    if LP.Character then bind(LP.Character) end
+    table.insert(connections, LP.CharacterAdded:Connect(function(char)
+        bind(char)
+    end))
+end
+
+-- UI BUILD
+local pg = LP:WaitForChild("PlayerGui")
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = GUI_NAME
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.IgnoreGuiInset = false
+screenGui.Parent = pg
+
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.new(0, 300, 0, 120)
+main.Position = UDim2.new(0.5, -150, 0.15, 0)
+main.BackgroundColor3 = BG_PRIMARY
+main.ClipsDescendants = true
+main.Parent = screenGui
+local mainCorner = Instance.new("UICorner", main)
+mainCorner.CornerRadius = CORNER
+local mainStroke = Instance.new("UIStroke", main)
+mainStroke.Thickness = 1
+mainStroke.Color = Color3.fromRGB(60, 60, 70)
+
+local padding = Instance.new("UIPadding", main)
+padding.PaddingLeft   = UDim.new(0, 8)
+padding.PaddingRight  = UDim.new(0, 8)
+padding.PaddingTop    = UDim.new(0, 8)
+padding.PaddingBottom = UDim.new(0, 8)
+
+-- Top bar
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.BackgroundColor3 = BG_SECOND
+topBar.Size = UDim2.new(1, 0, 0, 28)
+topBar.Parent = main
+local topCorner = Instance.new("UICorner", topBar)
+topCorner.CornerRadius = BTN_CORNER
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.BackgroundTransparency = 1
+title.Size = UDim2.new(1, -68, 1, 0) -- leave space for two buttons + gaps
+title.Position = UDim2.new(0, 8, 0, 0)
+title.Text = "TPUA"
+title.Font = Enum.Font.GothamBold
+title.TextColor3 = TEXT_WHITE
+title.TextScaled = true
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = topBar
+local tsc = Instance.new("UITextSizeConstraint", title)
+tsc.MaxTextSize = 20
+
+local btnClose = Instance.new("TextButton")
+btnClose.Name = "Close"
+btnClose.Size = UDim2.new(0, 28, 0, 24)
+btnClose.Position = UDim2.new(1, -28, 0.5, -12)
+btnClose.BackgroundColor3 = BG_PRIMARY
+btnClose.Text = "X"
+btnClose.Font = Enum.Font.GothamBold
+btnClose.TextColor3 = TEXT_WHITE
+btnClose.TextScaled = true
+btnClose.AutoButtonColor = true
+btnClose.Parent = topBar
+local closeCorner = Instance.new("UICorner", btnClose)
+closeCorner.CornerRadius = BTN_CORNER
+
+local btnMin = Instance.new("TextButton")
+btnMin.Name = "Minimize"
+btnMin.Size = UDim2.new(0, 28, 0, 24)
+btnMin.Position = UDim2.new(1, -60, 0.5, -12)
+btnMin.BackgroundColor3 = BG_PRIMARY
+btnMin.Text = "-"
+btnMin.Font = Enum.Font.GothamBold
+btnMin.TextColor3 = TEXT_WHITE
+btnMin.TextScaled = true
+btnMin.AutoButtonColor = true
+btnMin.Parent = topBar
+local minCorner = Instance.new("UICorner", btnMin)
+minCorner.CornerRadius = BTN_CORNER
+
+-- Content area
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.BackgroundTransparency = 1
+content.Size = UDim2.new(1, 0, 1, -36) -- 28 topbar + 8 bottom padding
+content.Position = UDim2.new(0, 0, 0, 32)
+content.ClipsDescendants = true
+content.Parent = main
+
+local hPad = Instance.new("UIPadding", content)
+hPad.PaddingTop = UDim.new(0, 0)
+
+local row = Instance.new("Frame")
+row.Name = "Row"
+row.BackgroundTransparency = 1
+row.Size = UDim2.new(1, 0, 0, 40)
+row.Position = UDim2.new(0, 0, 0, 0)
+row.Parent = content
+
+local rowLayout = Instance.new("UIListLayout", row)
+rowLayout.FillDirection = Enum.FillDirection.Horizontal
+rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+rowLayout.Padding = UDim.new(0, 8)
+
+-- Username box (60%)
+local userBox = Instance.new("TextBox")
+userBox.Name = "Username"
+userBox.Size = UDim2.new(0.6, -4, 1, 0)
+userBox.BackgroundColor3 = BG_SECOND
+userBox.Text = ""
+userBox.PlaceholderText = "Target username"
+userBox.Font = Enum.Font.GothamBold
+userBox.TextColor3 = TEXT_WHITE
+userBox.PlaceholderColor3 = Color3.fromRGB(180, 180, 190)
+userBox.TextScaled = true
+userBox.ClearTextOnFocus = false
+userBox.Parent = row
+local userCorner = Instance.new("UICorner", userBox)
+userCorner.CornerRadius = BTN_CORNER
+local userStroke = Instance.new("UIStroke", userBox)
+userStroke.Thickness = 1
+userStroke.Color = Color3.fromRGB(70, 70, 80)
+local userTSC = Instance.new("UITextSizeConstraint", userBox)
+userTSC.MaxTextSize = 18
+
+-- Toggle button (40%)
+toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "Toggle"
+toggleBtn.Size = UDim2.new(0.4, -4, 1, 0)
+toggleBtn.BackgroundColor3 = COLOR_OFF
+toggleBtn.Text = "TPUA: Off"
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextColor3 = TEXT_WHITE
+toggleBtn.TextScaled = true
+toggleBtn.AutoButtonColor = true
+toggleBtn.Parent = row
+local toggleCorner = Instance.new("UICorner", toggleBtn)
+toggleCorner.CornerRadius = BTN_CORNER
+local toggleStroke = Instance.new("UIStroke", toggleBtn)
+toggleStroke.Thickness = 1
+toggleStroke.Color = Color3.fromRGB(70, 70, 80)
+local toggleTSC = Instance.new("UITextSizeConstraint", toggleBtn)
+toggleTSC.MaxTextSize = 18
+
+-- Make main draggable (custom; topBar is the drag handle)
+do
+    local dragging = false
+    local dragStart
+    local startPos
+
+    local function update(input)
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
     end
 
-    local headPos = targetPlayer.Character.Head.Position
-    for _, part in ipairs(workspace:GetDescendants()) do
-        if part:IsA("BasePart") 
-           and not part.Anchored 
-           and not part:IsDescendantOf(localPlayer.Character) then
+    table.insert(connections, topBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end))
 
-            local bp = part:FindFirstChild("tpuaBP") 
-                    or Instance.new("BodyPosition")
+    table.insert(connections, topBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging then update(input) end
+        end
+    end))
+end
 
-            bp.Name        = "tpuaBP"
-            bp.Parent      = part
-            bp.MaxForce    = Vector3.new(math.huge, math.huge, math.huge)
-            bp.Position    = headPos
+-- Minimize behavior
+local expandedSize = main.Size
+local minimizedSize = UDim2.new(expandedSize.X.Scale, expandedSize.X.Offset, 0, 36)
+table.insert(connections, btnMin.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        content.Visible = false
+        TweenService:Create(main, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = minimizedSize}):Play()
+    else
+        TweenService:Create(main, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = expandedSize}):Play()
+        task.delay(0.15, function() content.Visible = true end)
+    end
+end))
+
+-- Close behavior (delete script fully)
+local function destroyAll()
+    enabled = false
+    clearForces()
+    for _, c in ipairs(connections) do
+        pcall(function() c:Disconnect() end)
+    end
+    connections = {}
+    if heartbeatConn then pcall(function() heartbeatConn:Disconnect() end) end
+    if screenGui then screenGui:Destroy() end
+end
+table.insert(connections, btnClose.MouseButton1Click:Connect(destroyAll))
+
+-- Toggle logic
+table.insert(connections, toggleBtn.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    setToggleVisuals(toggleBtn)
+    if not enabled then
+        clearForces()
+    end
+end))
+
+-- Username input tracking
+table.insert(connections, userBox:GetPropertyChangedSignal("Text"):Connect(function()
+    targetName = userBox.Text
+end))
+
+-- Build candidate list and keep it updated without rescanning every frame
+local function addCandidate(obj)
+    if obj:IsA("BasePart") and shouldConsider(obj) then
+        candidateParts[obj] = true
+    end
+end
+
+local function removeCandidate(obj)
+    if candidateParts[obj] then
+        candidateParts[obj] = nil
+    end
+    local bp = createdForces[obj]
+    if bp then
+        if bp.Parent then bp:Destroy() end
+        createdForces[obj] = nil
+    end
+end
+
+-- Initial population
+for _, d in ipairs(workspace:GetDescendants()) do
+    addCandidate(d)
+end
+table.insert(connections, workspace.DescendantAdded:Connect(addCandidate))
+table.insert(connections, workspace.DescendantRemoving:Connect(removeCandidate))
+
+-- Heartbeat loop: retarget forces
+heartbeatConn = RunService.Heartbeat:Connect(function()
+    if not enabled then return end
+
+    local target = resolveTarget(targetName)
+    local head = target and target.Character and target.Character:FindFirstChild("Head")
+    if not head then return end
+    headPos = head.Position
+
+    for part in pairs(candidateParts) do
+        if part and part.Parent and shouldConsider(part) then
+            local bp = createdForces[part]
+            if not bp or not bp.Parent then
+                bp = Instance.new("BodyPosition")
+                bp.Name = "tpuaBP"
+                bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                bp.D = 1250 -- strong damping to prevent overshoot
+                bp.P = 100000 -- strong power to snap quickly
+                bp.Position = headPos
+                bp.Parent = part
+                createdForces[part] = bp
+            else
+                bp.Position = headPos
+            end
+        else
+            removeCandidate(part)
         end
     end
 end)
 
--- Toggle handler
-toggleBtn.MouseButton1Click:Connect(function()
-    enabled = not enabled
-    toggleBtn.Text = "TPUA: " .. (enabled and "On" or "Off")
-
-    if not enabled then
-        clearForces()
-    end
-end)
+-- Disable on death (and clean forces), UI persists
+connectHumanoidDeath()
