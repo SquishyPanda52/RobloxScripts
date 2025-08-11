@@ -1,5 +1,5 @@
--- TPUA v4.1 - Teleport Unanchored Parts to Target with Consistent Local Highlights
--- LocalScript in StarterPlayerScripts
+-- TPUA v5 - Intense Teleport + Consistent Local Highlights + Brookhaven Vehicles Addon
+-- LocalScript (StarterPlayerScripts)
 
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
@@ -7,7 +7,7 @@ local TweenService = game:GetService("TweenService")
 
 local LP = Players.LocalPlayer
 
--- Prevent duplicate UI
+-- Avoid duplicates
 local GUI_NAME = "TPUA_Panel"
 local pg = LP:WaitForChild("PlayerGui", 5)
 if pg:FindFirstChild(GUI_NAME) then return end
@@ -16,14 +16,21 @@ if pg:FindFirstChild(GUI_NAME) then return end
 local enabled = false
 local minimized = false
 local targetName = ""
-local connections = {}            -- general connections
-local partConns = {}              -- [BasePart] = {RBXScriptConnection,...}
-local candidateParts = {}         -- [BasePart] = true
-local createdForces = {}          -- [BasePart] = BodyPosition
-local highlights = {}             -- [BasePart] = Highlight
-local highlightFolder = nil
-local heartbeatConn = nil
+
+local connections      = {}            -- general connections
+local partConns        = {}            -- [BasePart] = {connections}
+local candidateParts   = {}            -- [BasePart] = true
+local createdForces    = {}            -- [BasePart] = BodyPosition
+local highlights       = {}            -- [BasePart] = Highlight (parts)
+local highlightFolder  = nil
+local heartbeatConn    = nil
 local toggleBtn
+
+-- Brookhaven vehicle addon state
+local vehiclesFolder   = workspace:FindFirstChild("vehicles") or workspace:FindFirstChild("Vehicles")
+local vehicleModels    = {}            -- [Model] = true
+local vehicleHighlights= {}            -- [Model] = Highlight
+local vehicleConns     = {}            -- [Model] = {connections}
 
 -- CONFIG
 local COLOR_OFF  = Color3.fromRGB(30, 120, 255)
@@ -37,16 +44,24 @@ local TEXT_WHITE = Color3.new(1, 1, 1)
 local CORNER     = UDim.new(0, 8)
 local BTN_CORNER = UDim.new(0, 6)
 
+-- Intensity tuning
+local P_NORMAL, D_NORMAL       = 250000, 900
+local P_VEHICLE, D_VEHICLE     = 800000, 600    -- stronger for vehicles
+local MAXFORCE_NORMAL          = Vector3.new(math.huge, math.huge, math.huge)
+local MAXFORCE_VEHICLE         = Vector3.new(math.huge, math.huge, math.huge) -- same cap, higher P
+
 -- UTILITIES
 local function isCharacterPart(part)
     local model = part:FindFirstAncestorOfClass("Model")
     return model and model:FindFirstChildOfClass("Humanoid") ~= nil
 end
 
+local function partUsable(part)
+    return part and part:IsA("BasePart") and part.Parent and not isCharacterPart(part)
+end
+
 local function shouldConsider(part)
-    return part and part:IsA("BasePart") and part.Parent
-        and not part.Anchored
-        and not isCharacterPart(part)
+    return partUsable(part) and not part.Anchored
 end
 
 local function ensureHighlightFolder()
@@ -58,58 +73,6 @@ local function ensureHighlightFolder()
     return highlightFolder
 end
 
-local function addHighlight(part)
-    if not enabled then return end
-    if highlights[part] then return end
-    local folder = ensureHighlightFolder()
-    local h = Instance.new("Highlight")
-    h.Name = "TPUA_Highlight"
-    h.Adornee = part
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- see through walls
-    h.OutlineColor = H_OUTLINE
-    h.OutlineTransparency = 0
-    h.FillColor = H_FILL
-    h.FillTransparency = H_FILL_T
-    h.Parent = folder
-    highlights[part] = h
-end
-
-local function removeHighlight(part)
-    local h = highlights[part]
-    if h then
-        highlights[part] = nil
-        pcall(function() h:Destroy() end)
-    end
-end
-
-local function clearHighlights()
-    for part, h in pairs(highlights) do
-        pcall(function() h:Destroy() end)
-        highlights[part] = nil
-    end
-    if highlightFolder and highlightFolder.Parent then
-        pcall(function() highlightFolder:Destroy() end)
-    end
-    highlightFolder = nil
-end
-
-local function clearForces()
-    for part, bp in pairs(createdForces) do
-        if bp and bp.Parent then bp:Destroy() end
-        createdForces[part] = nil
-    end
-end
-
-local function disconnectPartConns(part)
-    local lst = partConns[part]
-    if lst then
-        for _, c in ipairs(lst) do
-            pcall(function() c:Disconnect() end)
-        end
-        partConns[part] = nil
-    end
-end
-
 local function setToggleVisuals(btn)
     btn.Text = enabled and "TPUA: On" or "TPUA: Off"
     btn.BackgroundColor3 = enabled and COLOR_ON or COLOR_OFF
@@ -117,9 +80,9 @@ end
 
 local function resolveTarget(name)
     if not name or name == "" then return nil end
-    local lower = name:lower()
     local exact = Players:FindFirstChild(name)
     if exact then return exact end
+    local lower = name:lower()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr.Name:lower():sub(1, #lower) == lower then
             return plr
@@ -128,21 +91,117 @@ local function resolveTarget(name)
     return nil
 end
 
+-- PART HIGHLIGHTS (for general unanchored parts)
+local function addPartHighlight(part)
+    if not enabled then return end
+    if highlights[part] then return end
+    local folder = ensureHighlightFolder()
+    local h = Instance.new("Highlight")
+    h.Name = "TPUA_Highlight_Part"
+    h.Adornee = part
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.OutlineColor = H_OUTLINE
+    h.OutlineTransparency = 0
+    h.FillColor = H_FILL
+    h.FillTransparency = H_FILL_T
+    h.Parent = folder
+    highlights[part] = h
+end
+
+local function removePartHighlight(part)
+    local h = highlights[part]
+    if h then
+        highlights[part] = nil
+        pcall(function() h:Destroy() end)
+    end
+end
+
+-- VEHICLE HELPERS
+local function modelHasUnanchoredBasePart(model)
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("BasePart") and partUsable(d) and not d.Anchored then
+            return true
+        end
+    end
+    return false
+end
+
+local function isInVehiclesFolder(instance)
+    if not vehiclesFolder then return false end
+    return instance:IsDescendantOf(vehiclesFolder)
+end
+
+-- VEHICLE HIGHLIGHTS (model-level)
+local function addVehicleHighlight(model)
+    if not enabled then return end
+    if vehicleHighlights[model] then return end
+    if not modelHasUnanchoredBasePart(model) then return end
+    local folder = ensureHighlightFolder()
+    local h = Instance.new("Highlight")
+    h.Name = "TPUA_Highlight_Vehicle"
+    h.Adornee = model
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.OutlineColor = H_OUTLINE
+    h.OutlineTransparency = 0
+    h.FillColor = H_FILL
+    h.FillTransparency = H_FILL_T
+    h.Parent = folder
+    vehicleHighlights[model] = h
+end
+
+local function removeVehicleHighlight(model)
+    local h = vehicleHighlights[model]
+    if h then
+        vehicleHighlights[model] = nil
+        pcall(function() h:Destroy() end)
+    end
+end
+
+local function refreshVehicleHighlight(model)
+    if not enabled then
+        removeVehicleHighlight(model)
+        return
+    end
+    if modelHasUnanchoredBasePart(model) then
+        addVehicleHighlight(model)
+    else
+        removeVehicleHighlight(model)
+    end
+end
+
+-- FORCES
+local function clearForces()
+    for part, bp in pairs(createdForces) do
+        if bp and bp.Parent then pcall(function() bp:Destroy() end) end
+        createdForces[part] = nil
+    end
+end
+
+-- CONNECTION MGMT
+local function disconnectPartConns(part)
+    local lst = partConns[part]
+    if lst then
+        for _, c in ipairs(lst) do pcall(function() c:Disconnect() end) end
+        partConns[part] = nil
+    end
+end
+
+-- CANDIDATE MGMT
 local function removeCandidate(part)
     candidateParts[part] = nil
     disconnectPartConns(part)
     local bp = createdForces[part]
     if bp then
-        if bp.Parent then bp:Destroy() end
+        if bp.Parent then pcall(function() bp:Destroy() end) end
         createdForces[part] = nil
     end
-    removeHighlight(part)
+    removePartHighlight(part)
 end
 
 local function trackPart(part)
     if enabled and shouldConsider(part) then
         candidateParts[part] = true
-        addHighlight(part)
+        addPartHighlight(part)
     else
         removeCandidate(part)
     end
@@ -153,33 +212,102 @@ local function connectPerPart(part)
     local lst = {}
     lst[#lst+1] = part:GetPropertyChangedSignal("Anchored"):Connect(function()
         trackPart(part)
+        if isInVehiclesFolder(part) then
+            local model = part:FindFirstAncestorOfClass("Model")
+            if model then refreshVehicleHighlight(model) end
+        end
     end)
     lst[#lst+1] = part.AncestryChanged:Connect(function()
         trackPart(part)
+        if isInVehiclesFolder(part) then
+            local model = part:FindFirstAncestorOfClass("Model")
+            if model then refreshVehicleHighlight(model) end
+        end
     end)
     partConns[part] = lst
 end
 
--- DYNAMIC DETECTION
+-- GLOBAL DYNAMIC DETECTION
 table.insert(connections, workspace.DescendantAdded:Connect(function(obj)
     if obj:IsA("BasePart") then
         connectPerPart(obj)
         trackPart(obj)
     end
 end))
-
 table.insert(connections, workspace.DescendantRemoving:Connect(function(obj)
     if obj:IsA("BasePart") then
         removeCandidate(obj)
     end
 end))
 
--- INITIAL POPULATION
+-- VEHICLES ADDON (Brookhaven-style folder)
+local function connectVehicleModel(model)
+    if vehicleConns[model] then return end
+    vehicleModels[model] = true
+    -- watch for any unanchored change inside this model
+    local lst = {}
+    lst[#lst+1] = model.DescendantAdded:Connect(function(obj)
+        if obj:IsA("BasePart") then
+            connectPerPart(obj)
+            if enabled then
+                if not obj.Anchored then addPartHighlight(obj) end
+                refreshVehicleHighlight(model)
+            end
+        end
+    end)
+    lst[#lst+1] = model.DescendantRemoving:Connect(function(obj)
+        if obj:IsA("BasePart") and enabled then
+            refreshVehicleHighlight(model)
+        end
+    end)
+    lst[#lst+1] = model.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            vehicleModels[model] = nil
+            removeVehicleHighlight(model)
+            if vehicleConns[model] then
+                for _, c in ipairs(vehicleConns[model]) do pcall(function() c:Disconnect() end) end
+                vehicleConns[model] = nil
+            end
+        end
+    end)
+    vehicleConns[model] = lst
+
+    -- initial pass
+    if enabled then refreshVehicleHighlight(model) end
+end
+
+local function initVehiclesFolder(folder)
+    if not folder then return end
+    -- existing children
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Model") then
+            connectVehicleModel(child)
+        end
+    end
+    -- live add/remove
+    table.insert(connections, folder.ChildAdded:Connect(function(child)
+        if child:IsA("Model") then
+            connectVehicleModel(child)
+        end
+    end))
+    table.insert(connections, folder.ChildRemoved:Connect(function(child)
+        if child:IsA("Model") then
+            removeVehicleHighlight(child)
+            if vehicleConns[child] then
+                for _, c in ipairs(vehicleConns[child]) do pcall(function() c:Disconnect() end) end
+                vehicleConns[child] = nil
+            end
+            vehicleModels[child] = nil
+        end
+    end))
+end
+
+initVehiclesFolder(vehiclesFolder)
+
+-- INITIAL POPULATION (prep per-part signals; highlights are created on enable)
 for _, obj in ipairs(workspace:GetDescendants()) do
     if obj:IsA("BasePart") then
         connectPerPart(obj)
-        -- Only add as candidate when enabled; but we can still prep connections
-        -- Highlights are created by trackPart when enabled toggled on
     end
 end
 
@@ -195,15 +323,12 @@ main.Name = "Main"
 main.Size = UDim2.new(0, 300, 0, 120)
 main.Position = UDim2.new(0.5, -150, 0.15, 0)
 main.BackgroundColor3 = BG_PRIMARY
+main.ClipsDescendants = true
 main.Parent = screenGui
 do
-    local c = Instance.new("UICorner", main)
-    c.CornerRadius = CORNER
-    local s = Instance.new("UIStroke", main)
-    s.Thickness = 1
-    s.Color = Color3.fromRGB(60, 60, 70)
+    Instance.new("UICorner", main).CornerRadius = CORNER
+    local s = Instance.new("UIStroke", main); s.Thickness = 1; s.Color = Color3.fromRGB(60, 60, 70)
 end
-
 local padding = Instance.new("UIPadding", main)
 padding.PaddingLeft = UDim.new(0, 8)
 padding.PaddingRight = UDim.new(0, 8)
@@ -212,13 +337,10 @@ padding.PaddingBottom = UDim.new(0, 8)
 
 local topBar = Instance.new("Frame")
 topBar.Name = "TopBar"
-topBar.Size = UDim2.new(1, 0, 0, 28)
 topBar.BackgroundColor3 = BG_SECOND
+topBar.Size = UDim2.new(1, 0, 0, 28)
 topBar.Parent = main
-do
-    local c = Instance.new("UICorner", topBar)
-    c.CornerRadius = BTN_CORNER
-end
+Instance.new("UICorner", topBar).CornerRadius = BTN_CORNER
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
@@ -228,12 +350,10 @@ title.Position = UDim2.new(0, 8, 0, 0)
 title.Text = "TPUA"
 title.Font = Enum.Font.GothamBold
 title.TextColor3 = TEXT_WHITE
+title.TextScaled = true
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = topBar
-do
-    local tsc = Instance.new("UITextSizeConstraint", title)
-    tsc.MaxTextSize = 20
-end
+Instance.new("UITextSizeConstraint", title).MaxTextSize = 20
 
 local btnClose = Instance.new("TextButton")
 btnClose.Name = "Close"
@@ -246,10 +366,7 @@ btnClose.TextColor3 = TEXT_WHITE
 btnClose.TextScaled = true
 btnClose.AutoButtonColor = true
 btnClose.Parent = topBar
-do
-    local c = Instance.new("UICorner", btnClose)
-    c.CornerRadius = BTN_CORNER
-end
+Instance.new("UICorner", btnClose).CornerRadius = BTN_CORNER
 
 local btnMin = Instance.new("TextButton")
 btnMin.Name = "Minimize"
@@ -262,10 +379,7 @@ btnMin.TextColor3 = TEXT_WHITE
 btnMin.TextScaled = true
 btnMin.AutoButtonColor = true
 btnMin.Parent = topBar
-do
-    local c = Instance.new("UICorner", btnMin)
-    c.CornerRadius = BTN_CORNER
-end
+Instance.new("UICorner", btnMin).CornerRadius = BTN_CORNER
 
 local content = Instance.new("Frame")
 content.Name = "Content"
@@ -299,13 +413,9 @@ userBox.TextScaled = true
 userBox.ClearTextOnFocus = false
 userBox.Parent = row
 do
-    local c = Instance.new("UICorner", userBox)
-    c.CornerRadius = BTN_CORNER
-    local s = Instance.new("UIStroke", userBox)
-    s.Thickness = 1
-    s.Color = Color3.fromRGB(70, 70, 80)
-    local tsc = Instance.new("UITextSizeConstraint", userBox)
-    tsc.MaxTextSize = 18
+    Instance.new("UICorner", userBox).CornerRadius = BTN_CORNER
+    local s = Instance.new("UIStroke", userBox); s.Thickness = 1; s.Color = Color3.fromRGB(70, 70, 80)
+    Instance.new("UITextSizeConstraint", userBox).MaxTextSize = 18
 end
 
 toggleBtn = Instance.new("TextButton")
@@ -319,45 +429,28 @@ toggleBtn.TextScaled = true
 toggleBtn.AutoButtonColor = true
 toggleBtn.Parent = row
 do
-    local c = Instance.new("UICorner", toggleBtn)
-    c.CornerRadius = BTN_CORNER
-    local s = Instance.new("UIStroke", toggleBtn)
-    s.Thickness = 1
-    s.Color = Color3.fromRGB(70, 70, 80)
-    local tsc = Instance.new("UITextSizeConstraint", toggleBtn)
-    tsc.MaxTextSize = 18
+    Instance.new("UICorner", toggleBtn).CornerRadius = BTN_CORNER
+    local s = Instance.new("UIStroke", toggleBtn); s.Thickness = 1; s.Color = Color3.fromRGB(70, 70, 80)
+    Instance.new("UITextSizeConstraint", toggleBtn).MaxTextSize = 18
 end
 
--- DRAGGING (mouse + touch)
+-- DRAGGING
 do
-    local dragging = false
-    local dragStart
-    local startPos
+    local dragging, dragStart, startPos
     local function update(input)
         local delta = input.Position - dragStart
-        main.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
-
     topBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = main.Position
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = main.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
-
     topBar.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch) then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             update(input)
         end
     end)
@@ -377,60 +470,88 @@ btnMin.MouseButton1Click:Connect(function()
     end
 end)
 
--- CLOSE (hard cleanup)
+-- CLOSE (full cleanup)
 local function destroyAll()
     enabled = false
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
     connections = {}
     if heartbeatConn then pcall(function() heartbeatConn:Disconnect() end) end
-    for part in pairs(partConns) do disconnectPartConns(part) end
+    for part in pairs(partConns) do
+        for _, c in ipairs(partConns[part]) do pcall(function() c:Disconnect() end) end
+        partConns[part] = nil
+    end
     clearForces()
-    clearHighlights()
+    -- clear highlights (parts + vehicles)
+    for _, h in pairs(vehicleHighlights) do pcall(function() h:Destroy() end) end
+    vehicleHighlights = {}
+    for _, h in pairs(highlights) do pcall(function() h:Destroy() end) end
+    highlights = {}
+    if highlightFolder and highlightFolder.Parent then pcall(function() highlightFolder:Destroy() end) end
+    highlightFolder = nil
     if screenGui and screenGui.Parent then screenGui:Destroy() end
 end
 btnClose.MouseButton1Click:Connect(destroyAll)
 
--- USERNAME input
+-- INPUT
 userBox:GetPropertyChangedSignal("Text"):Connect(function()
     targetName = userBox.Text
 end)
 
--- TOGGLE
+-- ENABLE/DISABLE
 toggleBtn.MouseButton1Click:Connect(function()
     enabled = not enabled
     setToggleVisuals(toggleBtn)
     if enabled then
         ensureHighlightFolder()
-        -- sweep existing parts now that we're enabled
+        -- sweep current world
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("BasePart") then
                 connectPerPart(obj)
                 trackPart(obj)
             end
         end
+        -- refresh vehicle highlights
+        if vehiclesFolder then
+            for _, model in ipairs(vehiclesFolder:GetChildren()) do
+                if model:IsA("Model") then
+                    connectVehicleModel(model)
+                    refreshVehicleHighlight(model)
+                end
+            end
+        end
     else
         clearForces()
-        clearHighlights()
-        -- keep candidateParts and connections warm for instant re-enable
+        -- remove all highlights but keep connections for instant resume
+        for _, h in pairs(vehicleHighlights) do pcall(function() h:Destroy() end) end
+        vehicleHighlights = {}
+        for _, h in pairs(highlights) do pcall(function() h:Destroy() end) end
+        highlights = {}
+        if highlightFolder and highlightFolder.Parent then pcall(function() highlightFolder:Destroy() end) end
+        highlightFolder = nil
     end
 end)
 
--- HEARTBEAT: drive parts to target head
+-- HEARTBEAT: apply forces (intense, with special vehicle tuning)
 heartbeatConn = RunService.Heartbeat:Connect(function()
     if not enabled then return end
 
-    -- keep highlight folder alive while enabled
     ensureHighlightFolder()
 
     local target = resolveTarget(targetName)
     local head = target and target.Character and target.Character:FindFirstChild("Head")
     if not head then
-        -- no target: maintain highlights only
+        -- maintain only highlights while no target
         for part in pairs(candidateParts) do
             if not shouldConsider(part) then
                 removeCandidate(part)
             else
-                if not highlights[part] then addHighlight(part) end
+                if not highlights[part] then addPartHighlight(part) end
+            end
+        end
+        -- keep vehicle highlights synced
+        if vehiclesFolder then
+            for model in pairs(vehicleModels) do
+                refreshVehicleHighlight(model)
             end
         end
         return
@@ -442,28 +563,43 @@ heartbeatConn = RunService.Heartbeat:Connect(function()
         if not shouldConsider(part) then
             removeCandidate(part)
         else
-            -- maintain highlight
-            if not highlights[part] then addHighlight(part) end
+            -- highlight upkeep
+            if not highlights[part] then addPartHighlight(part) end
 
-            -- force towards head
+            local isVehicle = isInVehiclesFolder(part)
             local bp = createdForces[part]
             if not bp or not bp.Parent then
                 bp = Instance.new("BodyPosition")
                 bp.Name = "tpuaBP"
-                bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                bp.D = 1250
-                bp.P = 100000
+                bp.MaxForce = isVehicle and MAXFORCE_VEHICLE or MAXFORCE_NORMAL
+                bp.D = isVehicle and D_VEHICLE or D_NORMAL
+                bp.P = isVehicle and P_VEHICLE or P_NORMAL
                 bp.Position = headPos
                 bp.Parent = part
                 createdForces[part] = bp
             else
+                -- crank intensity continuously, in case a part moved folders
+                bp.MaxForce = isVehicle and MAXFORCE_VEHICLE or MAXFORCE_NORMAL
+                bp.D = isVehicle and D_VEHICLE or D_NORMAL
+                bp.P = isVehicle and P_VEHICLE or P_NORMAL
                 bp.Position = headPos
             end
+
+            -- optional: quash drift for more "intense" snap
+            -- pcall(function() part.AssemblyLinearVelocity = Vector3.zero end)
+            -- pcall(function() part.AssemblyAngularVelocity = Vector3.zero end)
+        end
+    end
+
+    -- keep vehicle model highlights synced
+    if vehiclesFolder then
+        for model in pairs(vehicleModels) do
+            refreshVehicleHighlight(model)
         end
     end
 end)
 
--- DEATH-SAFE: disable and clean on death, UI persists
+-- DEATH HANDLING: disable and clean forces/highlights; UI persists
 local function bindDeath(char)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
@@ -471,7 +607,13 @@ local function bindDeath(char)
         enabled = false
         setToggleVisuals(toggleBtn)
         clearForces()
-        clearHighlights()
+        -- clear visuals
+        for _, h in pairs(vehicleHighlights) do pcall(function() h:Destroy() end) end
+        vehicleHighlights = {}
+        for _, h in pairs(highlights) do pcall(function() h:Destroy() end) end
+        highlights = {}
+        if highlightFolder and highlightFolder.Parent then pcall(function() highlightFolder:Destroy() end) end
+        highlightFolder = nil
     end))
 end
 if LP.Character then bindDeath(LP.Character) end
