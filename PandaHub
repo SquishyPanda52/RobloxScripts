@@ -1,50 +1,52 @@
--- TPUA v4 - Teleport Unanchored Parts to Target with Local Highlights (AlwaysOnTop)
+-- TPUA v4.1 - Teleport Unanchored Parts to Target with Consistent Local Highlights
 -- LocalScript in StarterPlayerScripts
 
-local Players          = game:GetService("Players")
-local RunService       = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService     = game:GetService("TweenService")
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local LP = Players.LocalPlayer
 
 -- Prevent duplicate UI
 local GUI_NAME = "TPUA_Panel"
-if LP:WaitForChild("PlayerGui", 5):FindFirstChild(GUI_NAME) then return end
+local pg = LP:WaitForChild("PlayerGui", 5)
+if pg:FindFirstChild(GUI_NAME) then return end
 
 -- STATE
 local enabled = false
 local minimized = false
 local targetName = ""
-local connections = {}
-local candidateParts = {}    -- parts eligible for manipulation
-local createdForces = {}     -- BodyPositions for manipulation
-local highlights = {}        -- [BasePart] = Highlight
-local highlightFolder
-local heartbeatConn
-
--- CONFIG
-local COLOR_OFF = Color3.fromRGB(30, 120, 255)
-local COLOR_ON = Color3.fromRGB(230, 45, 45)
-local H_OUTLINE = Color3.fromRGB(30, 120, 255)
-local H_FILL = Color3.fromRGB(150, 195, 255)
-local H_FILL_T = 0.7
-local BG_PRIMARY = Color3.fromRGB(24, 24, 28)
-local BG_SECOND = Color3.fromRGB(36, 36, 42)
-local TEXT_WHITE = Color3.new(1, 1, 1)
-local CORNER = UDim.new(0, 8)
-local BTN_CORNER = UDim.new(0, 6)
-
+local connections = {}            -- general connections
+local partConns = {}              -- [BasePart] = {RBXScriptConnection,...}
+local candidateParts = {}         -- [BasePart] = true
+local createdForces = {}          -- [BasePart] = BodyPosition
+local highlights = {}             -- [BasePart] = Highlight
+local highlightFolder = nil
+local heartbeatConn = nil
 local toggleBtn
 
--- UTIL
+-- CONFIG
+local COLOR_OFF  = Color3.fromRGB(30, 120, 255)
+local COLOR_ON   = Color3.fromRGB(230, 45, 45)
+local H_OUTLINE  = Color3.fromRGB(30, 120, 255)
+local H_FILL     = Color3.fromRGB(150, 195, 255)
+local H_FILL_T   = 0.7
+local BG_PRIMARY = Color3.fromRGB(24, 24, 28)
+local BG_SECOND  = Color3.fromRGB(36, 36, 42)
+local TEXT_WHITE = Color3.new(1, 1, 1)
+local CORNER     = UDim.new(0, 8)
+local BTN_CORNER = UDim.new(0, 6)
+
+-- UTILITIES
 local function isCharacterPart(part)
     local model = part:FindFirstAncestorOfClass("Model")
     return model and model:FindFirstChildOfClass("Humanoid") ~= nil
 end
 
 local function shouldConsider(part)
-    return part:IsA("BasePart") and not part.Anchored and not isCharacterPart(part)
+    return part and part:IsA("BasePart") and part.Parent
+        and not part.Anchored
+        and not isCharacterPart(part)
 end
 
 local function ensureHighlightFolder()
@@ -57,12 +59,13 @@ local function ensureHighlightFolder()
 end
 
 local function addHighlight(part)
+    if not enabled then return end
     if highlights[part] then return end
     local folder = ensureHighlightFolder()
     local h = Instance.new("Highlight")
     h.Name = "TPUA_Highlight"
     h.Adornee = part
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- see through walls
     h.OutlineColor = H_OUTLINE
     h.OutlineTransparency = 0
     h.FillColor = H_FILL
@@ -72,26 +75,39 @@ local function addHighlight(part)
 end
 
 local function removeHighlight(part)
-    if highlights[part] then
-        highlights[part]:Destroy()
+    local h = highlights[part]
+    if h then
         highlights[part] = nil
+        pcall(function() h:Destroy() end)
     end
 end
 
 local function clearHighlights()
-    for _, h in pairs(highlights) do
-        h:Destroy()
+    for part, h in pairs(highlights) do
+        pcall(function() h:Destroy() end)
+        highlights[part] = nil
     end
-    highlights = {}
-    if highlightFolder then highlightFolder:Destroy() end
+    if highlightFolder and highlightFolder.Parent then
+        pcall(function() highlightFolder:Destroy() end)
+    end
     highlightFolder = nil
 end
 
 local function clearForces()
     for part, bp in pairs(createdForces) do
         if bp and bp.Parent then bp:Destroy() end
+        createdForces[part] = nil
     end
-    createdForces = {}
+end
+
+local function disconnectPartConns(part)
+    local lst = partConns[part]
+    if lst then
+        for _, c in ipairs(lst) do
+            pcall(function() c:Disconnect() end)
+        end
+        partConns[part] = nil
+    end
 end
 
 local function setToggleVisuals(btn)
@@ -109,126 +125,354 @@ local function resolveTarget(name)
             return plr
         end
     end
+    return nil
 end
 
 local function removeCandidate(part)
     candidateParts[part] = nil
-    if createdForces[part] then
-        createdForces[part]:Destroy()
+    disconnectPartConns(part)
+    local bp = createdForces[part]
+    if bp then
+        if bp.Parent then bp:Destroy() end
         createdForces[part] = nil
     end
     removeHighlight(part)
 end
 
+local function trackPart(part)
+    if enabled and shouldConsider(part) then
+        candidateParts[part] = true
+        addHighlight(part)
+    else
+        removeCandidate(part)
+    end
+end
+
+local function connectPerPart(part)
+    if partConns[part] then return end
+    local lst = {}
+    lst[#lst+1] = part:GetPropertyChangedSignal("Anchored"):Connect(function()
+        trackPart(part)
+    end)
+    lst[#lst+1] = part.AncestryChanged:Connect(function()
+        trackPart(part)
+    end)
+    partConns[part] = lst
+end
+
 -- DYNAMIC DETECTION
 table.insert(connections, workspace.DescendantAdded:Connect(function(obj)
     if obj:IsA("BasePart") then
-        local function track()
-            if enabled and shouldConsider(obj) then
-                candidateParts[obj] = true
-                addHighlight(obj)
-            else
-                removeCandidate(obj)
-            end
-        end
-        track()
-        table.insert(connections, obj:GetPropertyChangedSignal("Anchored"):Connect(track))
+        connectPerPart(obj)
+        trackPart(obj)
     end
 end))
 
 table.insert(connections, workspace.DescendantRemoving:Connect(function(obj)
-    removeCandidate(obj)
+    if obj:IsA("BasePart") then
+        removeCandidate(obj)
+    end
 end))
 
--- Populate initial parts
+-- INITIAL POPULATION
 for _, obj in ipairs(workspace:GetDescendants()) do
-    if obj:IsA("BasePart") and shouldConsider(obj) then
-        candidateParts[obj] = true
+    if obj:IsA("BasePart") then
+        connectPerPart(obj)
+        -- Only add as candidate when enabled; but we can still prep connections
+        -- Highlights are created by trackPart when enabled toggled on
     end
 end
 
--- UI
-local pg = LP.PlayerGui
-local screenGui = Instance.new("ScreenGui", pg)
+-- UI BUILD
+local screenGui = Instance.new("ScreenGui")
 screenGui.Name = GUI_NAME
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = pg
 
-local main = Instance.new("Frame", screenGui)
+local main = Instance.new("Frame")
+main.Name = "Main"
 main.Size = UDim2.new(0, 300, 0, 120)
 main.Position = UDim2.new(0.5, -150, 0.15, 0)
 main.BackgroundColor3 = BG_PRIMARY
-Instance.new("UICorner", main).CornerRadius = CORNER
-Instance.new("UIStroke", main).Color = Color3.fromRGB(60, 60, 70)
+main.Parent = screenGui
+do
+    local c = Instance.new("UICorner", main)
+    c.CornerRadius = CORNER
+    local s = Instance.new("UIStroke", main)
+    s.Thickness = 1
+    s.Color = Color3.fromRGB(60, 60, 70)
+end
 
-local topBar = Instance.new("Frame", main)
+local padding = Instance.new("UIPadding", main)
+padding.PaddingLeft = UDim.new(0, 8)
+padding.PaddingRight = UDim.new(0, 8)
+padding.PaddingTop = UDim.new(0, 8)
+padding.PaddingBottom = UDim.new(0, 8)
+
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
 topBar.Size = UDim2.new(1, 0, 0, 28)
 topBar.BackgroundColor3 = BG_SECOND
-Instance.new("UICorner", topBar).CornerRadius = BTN_CORNER
+topBar.Parent = main
+do
+    local c = Instance.new("UICorner", topBar)
+    c.CornerRadius = BTN_CORNER
+end
 
-local title = Instance.new("TextLabel", topBar)
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.BackgroundTransparency = 1
 title.Size = UDim2.new(1, -68, 1, 0)
 title.Position = UDim2.new(0, 8, 0, 0)
-title.BackgroundTransparency = 1
 title.Text = "TPUA"
 title.Font = Enum.Font.GothamBold
 title.TextColor3 = TEXT_WHITE
 title.TextXAlignment = Enum.TextXAlignment.Left
-Instance.new("UITextSizeConstraint", title).MaxTextSize = 20
+title.Parent = topBar
+do
+    local tsc = Instance.new("UITextSizeConstraint", title)
+    tsc.MaxTextSize = 20
+end
 
-local btnClose = Instance.new("TextButton", topBar)
+local btnClose = Instance.new("TextButton")
+btnClose.Name = "Close"
 btnClose.Size = UDim2.new(0, 28, 0, 24)
 btnClose.Position = UDim2.new(1, -28, 0.5, -12)
-btnClose.Text = "X"
 btnClose.BackgroundColor3 = BG_PRIMARY
-btnClose.TextColor3 = TEXT_WHITE
+btnClose.Text = "X"
 btnClose.Font = Enum.Font.GothamBold
-Instance.new("UICorner", btnClose).CornerRadius = BTN_CORNER
+btnClose.TextColor3 = TEXT_WHITE
+btnClose.TextScaled = true
+btnClose.AutoButtonColor = true
+btnClose.Parent = topBar
+do
+    local c = Instance.new("UICorner", btnClose)
+    c.CornerRadius = BTN_CORNER
+end
 
-local btnMin = Instance.new("TextButton", topBar)
+local btnMin = Instance.new("TextButton")
+btnMin.Name = "Minimize"
 btnMin.Size = UDim2.new(0, 28, 0, 24)
 btnMin.Position = UDim2.new(1, -60, 0.5, -12)
-btnMin.Text = "-"
 btnMin.BackgroundColor3 = BG_PRIMARY
-btnMin.TextColor3 = TEXT_WHITE
+btnMin.Text = "-"
 btnMin.Font = Enum.Font.GothamBold
-Instance.new("UICorner", btnMin).CornerRadius = BTN_CORNER
+btnMin.TextColor3 = TEXT_WHITE
+btnMin.TextScaled = true
+btnMin.AutoButtonColor = true
+btnMin.Parent = topBar
+do
+    local c = Instance.new("UICorner", btnMin)
+    c.CornerRadius = BTN_CORNER
+end
 
-local content = Instance.new("Frame", main)
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.BackgroundTransparency = 1
 content.Size = UDim2.new(1, 0, 1, -36)
 content.Position = UDim2.new(0, 0, 0, 32)
-content.BackgroundTransparency = 1
+content.ClipsDescendants = true
+content.Parent = main
 
-local row = Instance.new("Frame", content)
-row.Size = UDim2.new(1, 0, 0, 40)
+local row = Instance.new("Frame")
+row.Name = "Row"
 row.BackgroundTransparency = 1
+row.Size = UDim2.new(1, 0, 0, 40)
+row.Parent = content
 local rowLayout = Instance.new("UIListLayout", row)
 rowLayout.FillDirection = Enum.FillDirection.Horizontal
+rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 rowLayout.Padding = UDim.new(0, 8)
 
-local userBox = Instance.new("TextBox", row)
+local userBox = Instance.new("TextBox")
+userBox.Name = "Username"
 userBox.Size = UDim2.new(0.6, -4, 1, 0)
-userBox.PlaceholderText = "Target username"
 userBox.BackgroundColor3 = BG_SECOND
-userBox.TextColor3 = TEXT_WHITE
+userBox.Text = ""
+userBox.PlaceholderText = "Target username"
 userBox.Font = Enum.Font.GothamBold
-Instance.new("UICorner", userBox).CornerRadius = BTN_CORNER
+userBox.TextColor3 = TEXT_WHITE
+userBox.PlaceholderColor3 = Color3.fromRGB(180, 180, 190)
+userBox.TextScaled = true
+userBox.ClearTextOnFocus = false
+userBox.Parent = row
+do
+    local c = Instance.new("UICorner", userBox)
+    c.CornerRadius = BTN_CORNER
+    local s = Instance.new("UIStroke", userBox)
+    s.Thickness = 1
+    s.Color = Color3.fromRGB(70, 70, 80)
+    local tsc = Instance.new("UITextSizeConstraint", userBox)
+    tsc.MaxTextSize = 18
+end
 
-toggleBtn = Instance.new("TextButton", row)
+toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "Toggle"
 toggleBtn.Size = UDim2.new(0.4, -4, 1, 0)
 toggleBtn.BackgroundColor3 = COLOR_OFF
-toggleBtn.TextColor3 = TEXT_WHITE
-toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.Text = "TPUA: Off"
-Instance.new("UICorner", toggleBtn).CornerRadius = BTN_CORNER
-
--- DRAG
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextColor3 = TEXT_WHITE
+toggleBtn.TextScaled = true
+toggleBtn.AutoButtonColor = true
+toggleBtn.Parent = row
 do
-    local dragging, dragStart, startPos
+    local c = Instance.new("UICorner", toggleBtn)
+    c.CornerRadius = BTN_CORNER
+    local s = Instance.new("UIStroke", toggleBtn)
+    s.Thickness = 1
+    s.Color = Color3.fromRGB(70, 70, 80)
+    local tsc = Instance.new("UITextSizeConstraint", toggleBtn)
+    tsc.MaxTextSize = 18
+end
+
+-- DRAGGING (mouse + touch)
+do
+    local dragging = false
+    local dragStart
+    local startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+
     topBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = main.Position
             input.Changed:Connect(function()
-                if input
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    topBar.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            update(input)
+        end
+    end)
+end
+
+-- MINIMIZE
+local expandedSize = main.Size
+local minimizedSize = UDim2.new(expandedSize.X.Scale, expandedSize.X.Offset, 0, 36)
+btnMin.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        content.Visible = false
+        TweenService:Create(main, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = minimizedSize}):Play()
+    else
+        TweenService:Create(main, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = expandedSize}):Play()
+        task.delay(0.15, function() content.Visible = true end)
+    end
+end)
+
+-- CLOSE (hard cleanup)
+local function destroyAll()
+    enabled = false
+    for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+    connections = {}
+    if heartbeatConn then pcall(function() heartbeatConn:Disconnect() end) end
+    for part in pairs(partConns) do disconnectPartConns(part) end
+    clearForces()
+    clearHighlights()
+    if screenGui and screenGui.Parent then screenGui:Destroy() end
+end
+btnClose.MouseButton1Click:Connect(destroyAll)
+
+-- USERNAME input
+userBox:GetPropertyChangedSignal("Text"):Connect(function()
+    targetName = userBox.Text
+end)
+
+-- TOGGLE
+toggleBtn.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    setToggleVisuals(toggleBtn)
+    if enabled then
+        ensureHighlightFolder()
+        -- sweep existing parts now that we're enabled
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                connectPerPart(obj)
+                trackPart(obj)
+            end
+        end
+    else
+        clearForces()
+        clearHighlights()
+        -- keep candidateParts and connections warm for instant re-enable
+    end
+end)
+
+-- HEARTBEAT: drive parts to target head
+heartbeatConn = RunService.Heartbeat:Connect(function()
+    if not enabled then return end
+
+    -- keep highlight folder alive while enabled
+    ensureHighlightFolder()
+
+    local target = resolveTarget(targetName)
+    local head = target and target.Character and target.Character:FindFirstChild("Head")
+    if not head then
+        -- no target: maintain highlights only
+        for part in pairs(candidateParts) do
+            if not shouldConsider(part) then
+                removeCandidate(part)
+            else
+                if not highlights[part] then addHighlight(part) end
+            end
+        end
+        return
+    end
+
+    local headPos = head.Position
+
+    for part in pairs(candidateParts) do
+        if not shouldConsider(part) then
+            removeCandidate(part)
+        else
+            -- maintain highlight
+            if not highlights[part] then addHighlight(part) end
+
+            -- force towards head
+            local bp = createdForces[part]
+            if not bp or not bp.Parent then
+                bp = Instance.new("BodyPosition")
+                bp.Name = "tpuaBP"
+                bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                bp.D = 1250
+                bp.P = 100000
+                bp.Position = headPos
+                bp.Parent = part
+                createdForces[part] = bp
+            else
+                bp.Position = headPos
+            end
+        end
+    end
+end)
+
+-- DEATH-SAFE: disable and clean on death, UI persists
+local function bindDeath(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    table.insert(connections, hum.Died:Connect(function()
+        enabled = false
+        setToggleVisuals(toggleBtn)
+        clearForces()
+        clearHighlights()
+    end))
+end
+if LP.Character then bindDeath(LP.Character) end
+table.insert(connections, LP.CharacterAdded:Connect(bindDeath))
