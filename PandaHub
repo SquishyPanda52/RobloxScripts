@@ -1,5 +1,5 @@
--- TPUA v2 - Continuous unanchored teleport with compact draggable UI
--- Place as a LocalScript (StarterPlayerScripts). Runtime-only, UI persists across death.
+-- TPUA v3 - Continuous unanchored teleport with compact draggable UI + local highlights
+-- Place as a LocalScript (StarterPlayerScripts). UI persists across death.
 
 local Players            = game:GetService("Players")
 local RunService         = game:GetService("RunService")
@@ -27,14 +27,24 @@ local candidateParts = {}   -- [BasePart] = true
 local createdForces = {}    -- [BasePart] = BodyPosition
 local heartbeatConn = nil
 
+-- Highlight state
+local highlights = {}       -- [BasePart] = Highlight
+local highlightFolder = nil
+
 -- CONFIG
-local COLOR_OFF = Color3.fromRGB(30, 120, 255)   -- blue
-local COLOR_ON  = Color3.fromRGB(230, 45, 45)    -- red
-local BG_PRIMARY = Color3.fromRGB(24, 24, 28)
-local BG_SECOND  = Color3.fromRGB(36, 36, 42)
-local TEXT_WHITE = Color3.new(1, 1, 1)
-local CORNER = UDim.new(0, 8) -- subtle bevel
-local BTN_CORNER = UDim.new(0, 6)
+local COLOR_OFF   = Color3.fromRGB(30, 120, 255)   -- blue
+local COLOR_ON    = Color3.fromRGB(230, 45, 45)    -- red
+local H_OUTLINE   = Color3.fromRGB(30, 120, 255)   -- blue outline
+local H_FILL      = Color3.fromRGB(150, 195, 255)  -- light blue fill
+local H_FILL_T    = 0.7
+local BG_PRIMARY  = Color3.fromRGB(24, 24, 28)
+local BG_SECOND   = Color3.fromRGB(36, 36, 42)
+local TEXT_WHITE  = Color3.new(1, 1, 1)
+local CORNER      = UDim.new(0, 8)  -- subtle bevel
+local BTN_CORNER  = UDim.new(0, 6)
+
+-- forward-declare for death handler
+local toggleBtn
 
 -- UTIL
 local function isCharacterPart(part)
@@ -55,6 +65,50 @@ local function clearForces()
     end
 end
 
+local function ensureHighlightFolder()
+    if not highlightFolder or not highlightFolder.Parent then
+        highlightFolder = Instance.new("Folder")
+        highlightFolder.Name = "TPUA_LocalHighlights"
+        -- Parent to workspace on client; stays local-only
+        highlightFolder.Parent = workspace
+    end
+    return highlightFolder
+end
+
+local function addHighlight(part)
+    if highlights[part] then return end
+    local folder = ensureHighlightFolder()
+    local h = Instance.new("Highlight")
+    h.Name = "TPUA_Highlight"
+    h.Adornee = part
+    h.DepthMode = Enum.HighlightDepthMode.Occluded
+    h.OutlineColor = H_OUTLINE
+    h.OutlineTransparency = 0
+    h.FillColor = H_FILL
+    h.FillTransparency = H_FILL_T
+    h.Parent = folder
+    highlights[part] = h
+end
+
+local function removeHighlight(part)
+    local h = highlights[part]
+    if h then
+        if h.Parent then h:Destroy() end
+        highlights[part] = nil
+    end
+end
+
+local function clearHighlights()
+    for part, h in pairs(highlights) do
+        if h and h.Parent then h:Destroy() end
+        highlights[part] = nil
+    end
+    if highlightFolder and highlightFolder.Parent then
+        highlightFolder:Destroy()
+    end
+    highlightFolder = nil
+end
+
 local function setToggleVisuals(btn)
     btn.Text = enabled and "TPUA: On" or "TPUA: Off"
     btn.BackgroundColor3 = enabled and COLOR_ON or COLOR_OFF
@@ -62,7 +116,6 @@ end
 
 local function resolveTarget(name)
     if not name or name == "" then return nil end
-    -- Case-insensitive partial match, prefer exact
     local lower = string.lower(name)
     local exact = Players:FindFirstChild(name)
     if exact then return exact end
@@ -75,14 +128,14 @@ local function resolveTarget(name)
 end
 
 local function connectHumanoidDeath()
-    -- Disable on death; rebind on respawn
     local function bind(char)
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not hum then return end
         table.insert(connections, hum.Died:Connect(function()
             enabled = false
-            setToggleVisuals(toggleBtn) -- forward-declared; safe after UI build
+            if toggleBtn then setToggleVisuals(toggleBtn) end
             clearForces()
+            clearHighlights()
         end))
     end
     if LP.Character then bind(LP.Character) end
@@ -131,7 +184,7 @@ topCorner.CornerRadius = BTN_CORNER
 local title = Instance.new("TextLabel")
 title.Name = "Title"
 title.BackgroundTransparency = 1
-title.Size = UDim2.new(1, -68, 1, 0) -- leave space for two buttons + gaps
+title.Size = UDim2.new(1, -68, 1, 0) -- space for buttons
 title.Position = UDim2.new(0, 8, 0, 0)
 title.Text = "TPUA"
 title.Font = Enum.Font.GothamBold
@@ -289,6 +342,7 @@ end))
 local function destroyAll()
     enabled = false
     clearForces()
+    clearHighlights()
     for _, c in ipairs(connections) do
         pcall(function() c:Disconnect() end)
     end
@@ -304,6 +358,9 @@ table.insert(connections, toggleBtn.MouseButton1Click:Connect(function()
     setToggleVisuals(toggleBtn)
     if not enabled then
         clearForces()
+        clearHighlights()
+    else
+        ensureHighlightFolder()
     end
 end))
 
@@ -312,7 +369,7 @@ table.insert(connections, userBox:GetPropertyChangedSignal("Text"):Connect(funct
     targetName = userBox.Text
 end))
 
--- Build candidate list and keep it updated without rescanning every frame
+-- Candidate management
 local function addCandidate(obj)
     if obj:IsA("BasePart") and shouldConsider(obj) then
         candidateParts[obj] = true
@@ -328,6 +385,7 @@ local function removeCandidate(obj)
         if bp.Parent then bp:Destroy() end
         createdForces[obj] = nil
     end
+    removeHighlight(obj)
 end
 
 -- Initial population
@@ -337,29 +395,47 @@ end
 table.insert(connections, workspace.DescendantAdded:Connect(addCandidate))
 table.insert(connections, workspace.DescendantRemoving:Connect(removeCandidate))
 
--- Heartbeat loop: retarget forces
+-- Heartbeat loop: retarget forces and maintain highlights
 heartbeatConn = RunService.Heartbeat:Connect(function()
     if not enabled then return end
 
+    ensureHighlightFolder()
+
     local target = resolveTarget(targetName)
     local head = target and target.Character and target.Character:FindFirstChild("Head")
-    if not head then return end
+    if not head then
+        -- Still maintain highlights in "enabled" state, even without a valid head.
+        for part in pairs(candidateParts) do
+            if part and part.Parent and shouldConsider(part) then
+                if not highlights[part] then addHighlight(part) end
+            else
+                removeCandidate(part)
+            end
+        end
+        return
+    end
+
     headPos = head.Position
 
     for part in pairs(candidateParts) do
         if part and part.Parent and shouldConsider(part) then
+            -- force
             local bp = createdForces[part]
             if not bp or not bp.Parent then
                 bp = Instance.new("BodyPosition")
                 bp.Name = "tpuaBP"
                 bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                bp.D = 1250 -- strong damping to prevent overshoot
-                bp.P = 100000 -- strong power to snap quickly
+                bp.D = 1250
+                bp.P = 100000
                 bp.Position = headPos
                 bp.Parent = part
                 createdForces[part] = bp
             else
                 bp.Position = headPos
+            end
+            -- highlight
+            if not highlights[part] then
+                addHighlight(part)
             end
         else
             removeCandidate(part)
@@ -367,5 +443,5 @@ heartbeatConn = RunService.Heartbeat:Connect(function()
     end
 end)
 
--- Disable on death (and clean forces), UI persists
+-- Disable on death (and clean forces/highlights), UI persists
 connectHumanoidDeath()
