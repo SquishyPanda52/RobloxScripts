@@ -1,4 +1,4 @@
--- TPUA v7 - Aggressive unanchored detection + yellow-green highlights + Brookhaven vehicles + live P/D
+-- TPUA v6 - Intense Teleport + Live Strength/Damping + Brookhaven Vehicles Addon
 -- LocalScript (StarterPlayerScripts)
 
 -- Services
@@ -11,7 +11,8 @@ local LP = Players.LocalPlayer
 -- Avoid duplicates
 local GUI_NAME = "TPUA_Panel"
 local pg = LP:WaitForChild("PlayerGui", 5)
-if not pg or pg:FindFirstChild(GUI_NAME) then return end
+if not pg then return end
+if pg:FindFirstChild(GUI_NAME) then return end
 
 -- STATE
 local enabled           = false
@@ -33,55 +34,48 @@ local vehicleHighlights = {}            -- [Model] = Highlight
 local vehicleConns      = {}            -- [Model] = {connections}
 
 -- CONFIG (UI + Visuals)
-local COLOR_OFF   = Color3.fromRGB(30, 120, 255)    -- toggle blue when off
-local COLOR_ON    = Color3.fromRGB(230, 45, 45)     -- toggle red when on
-
--- New highlight scheme: yellow-green fill, dark green outline
-local H_OUTLINE   = Color3.fromRGB(20, 90, 20)      -- dark green outline
-local H_FILL      = Color3.fromRGB(185, 230, 90)    -- yellow-green fill
+local COLOR_OFF   = Color3.fromRGB(30, 120, 255)
+local COLOR_ON    = Color3.fromRGB(230, 45, 45)
+local H_OUTLINE   = Color3.fromRGB(30, 120, 255)
+local H_FILL      = Color3.fromRGB(150, 195, 255)
 local H_FILL_T    = 0.7
-
 local BG_PRIMARY  = Color3.fromRGB(24, 24, 28)
 local BG_SECOND   = Color3.fromRGB(36, 36, 42)
 local TEXT_WHITE  = Color3.new(1, 1, 1)
 local CORNER      = UDim.new(0, 8)
 local BTN_CORNER  = UDim.new(0, 6)
 
--- Intensity defaults
+-- Intensity defaults (v5 baseline)
 local P_NORMAL_DEFAULT  = 250000
 local D_NORMAL_DEFAULT  = 900
-local P_VEHICLE_DEFAULT = 800000
-local D_VEHICLE_DEFAULT = 600
+local P_VEHICLE_DEFAULT = 800000     -- stronger for vehicles
+local D_VEHICLE_DEFAULT = 600        -- lower damping for snappier grab
 
 -- Maintain feel ratios when user customizes values
-local VEHICLE_P_RATIO = P_VEHICLE_DEFAULT / P_NORMAL_DEFAULT   -- ~3.2
-local VEHICLE_D_RATIO = D_VEHICLE_DEFAULT / D_NORMAL_DEFAULT   -- ~0.667
+local VEHICLE_P_RATIO = P_VEHICLE_DEFAULT / P_NORMAL_DEFAULT   -- 3.2
+local VEHICLE_D_RATIO = D_VEHICLE_DEFAULT / D_NORMAL_DEFAULT   -- ~0.6667
 
 -- Live-adjustable values (nil = use defaults)
-local customP = nil   -- affects both normal and vehicles (vehicle uses ratio)
-local customD = nil   -- affects both normal and vehicles (vehicle uses ratio)
+local customP = nil   -- affects both normal and vehicles, preserving ratio
+local customD = nil   -- affects both normal and vehicles, preserving ratio
 
--- Derived getters
+-- Derived getters so we always apply the right tuning
 local function getP(isVehicle)
+    local base = customP or P_NORMAL_DEFAULT
     if isVehicle then
-        return customP and (customP * VEHICLE_P_RATIO) or P_VEHICLE_DEFAULT
-    else
-        return customP or P_NORMAL_DEFAULT
+        return (customP and (customP * VEHICLE_P_RATIO)) or P_VEHICLE_DEFAULT
     end
+    return base
 end
 local function getD(isVehicle)
+    local base = customD or D_NORMAL_DEFAULT
     if isVehicle then
-        return customD and (customD * VEHICLE_D_RATIO) or D_VEHICLE_DEFAULT
-    else
-        return customD or D_NORMAL_DEFAULT
+        return (customD and (customD * VEHICLE_D_RATIO)) or D_VEHICLE_DEFAULT
     end
+    return base
 end
 
 local MAXFORCE_ALL = Vector3.new(math.huge, math.huge, math.huge)
-
--- Aggressive rescan cadence (seconds)
-local RESCAN_INTERVAL = 0.5
-local rescanAccum = 0
 
 -- UTILITIES
 local function isCharacterPart(part)
@@ -124,7 +118,7 @@ local function resolveTarget(name)
     return nil
 end
 
--- PART HIGHLIGHTS
+-- PART HIGHLIGHTS (for general unanchored parts)
 local function addPartHighlight(part)
     if not enabled then return end
     if highlights[part] then return end
@@ -150,11 +144,6 @@ local function removePartHighlight(part)
 end
 
 -- VEHICLE HELPERS
-local function isInVehiclesFolder(instance)
-    if not vehiclesFolder then return false end
-    return instance:IsDescendantOf(vehiclesFolder)
-end
-
 local function modelHasUnanchoredBasePart(model)
     for _, d in ipairs(model:GetDescendants()) do
         if d:IsA("BasePart") and partUsable(d) and not d.Anchored then
@@ -162,6 +151,11 @@ local function modelHasUnanchoredBasePart(model)
         end
     end
     return false
+end
+
+local function isInVehiclesFolder(instance)
+    if not vehiclesFolder then return false end
+    return instance:IsDescendantOf(vehiclesFolder)
 end
 
 -- VEHICLE HIGHLIGHTS (model-level)
@@ -244,7 +238,6 @@ local function connectPerPart(part)
     if partConns[part] then return end
     local lst = {}
     lst[#lst+1] = part:GetPropertyChangedSignal("Anchored"):Connect(function()
-        -- anchor flips instantly update
         trackPart(part)
         if isInVehiclesFolder(part) then
             local model = part:FindFirstAncestorOfClass("Model")
@@ -252,7 +245,6 @@ local function connectPerPart(part)
         end
     end)
     lst[#lst+1] = part.AncestryChanged:Connect(function()
-        -- spawn/despawn / reparent events
         trackPart(part)
         if isInVehiclesFolder(part) then
             local model = part:FindFirstAncestorOfClass("Model")
@@ -302,7 +294,7 @@ local function connectVehicleModel(model)
         if obj:IsA("BasePart") and enabled then
             refreshVehicleHighlight(model)
         end
-    end))
+    end)
     lst[#lst+1] = model.AncestryChanged:Connect(function(_, parent)
         if not parent then
             disconnectVehicleModel(model)
@@ -314,16 +306,22 @@ end
 
 local function initVehiclesFolder(folder)
     if not folder then return end
+    -- existing children
     for _, child in ipairs(folder:GetChildren()) do
         if child:IsA("Model") then
             connectVehicleModel(child)
         end
     end
+    -- live add/remove
     table.insert(connections, folder.ChildAdded:Connect(function(child)
-        if child:IsA("Model") then connectVehicleModel(child) end
+        if child:IsA("Model") then
+            connectVehicleModel(child)
+        end
     end))
     table.insert(connections, folder.ChildRemoved:Connect(function(child)
-        if child:IsA("Model") then disconnectVehicleModel(child) end
+        if child:IsA("Model") then
+            disconnectVehicleModel(child)
+        end
     end))
 end
 
@@ -338,6 +336,7 @@ table.insert(connections, workspace.ChildAdded:Connect(function(child)
 end))
 table.insert(connections, workspace.ChildRemoved:Connect(function(child)
     if vehiclesFolder and child == vehiclesFolder then
+        -- cleanup all vehicle state
         for model in pairs(vehicleModels) do
             disconnectVehicleModel(model)
         end
@@ -345,7 +344,7 @@ table.insert(connections, workspace.ChildRemoved:Connect(function(child)
     end
 end))
 
--- INITIAL per-part hookups (signals ready; highlights added only when enabled)
+-- INITIAL per-part hookup (highlights only while enabled)
 for _, obj in ipairs(workspace:GetDescendants()) do
     if obj:IsA("BasePart") then
         connectPerPart(obj)
@@ -494,7 +493,7 @@ strengthBox.Name = "StrengthP"
 strengthBox.Size = UDim2.new(0.5, -4, 1, 0)
 strengthBox.BackgroundColor3 = BG_SECOND
 strengthBox.Text = ""
-strengthBox.PlaceholderText = "Strength P (e.g. 350000)"
+strengthBox.PlaceholderText = "Strength P (e.g. 250000)"
 strengthBox.Font = Enum.Font.GothamBold
 strengthBox.TextColor3 = TEXT_WHITE
 strengthBox.PlaceholderColor3 = Color3.fromRGB(180,180,190)
@@ -512,7 +511,7 @@ dampingBox.Name = "DampingD"
 dampingBox.Size = UDim2.new(0.5, -4, 1, 0)
 dampingBox.BackgroundColor3 = BG_SECOND
 dampingBox.Text = ""
-dampingBox.PlaceholderText = "Damping D (e.g. 1200)"
+dampingBox.PlaceholderText = "Damping D (e.g. 900)"
 dampingBox.Font = Enum.Font.GothamBold
 dampingBox.TextColor3 = TEXT_WHITE
 dampingBox.PlaceholderColor3 = Color3.fromRGB(180,180,190)
@@ -574,6 +573,7 @@ local function destroyAll()
         partConns[part] = nil
     end
     clearForces()
+    -- clear highlights (parts + vehicles)
     for _, h in pairs(vehicleHighlights) do pcall(function() h:Destroy() end) end
     vehicleHighlights = {}
     for _, h in pairs(highlights) do pcall(function() h:Destroy() end) end
@@ -588,15 +588,26 @@ btnClose.MouseButton1Click:Connect(destroyAll)
 userBox:GetPropertyChangedSignal("Text"):Connect(function()
     targetName = userBox.Text
 end)
+
 local function parsePositiveNumber(txt)
     local n = tonumber(txt)
     if n and n > 0 then return n end
     return nil
 end
-local function applyStrengthFromBox() customP = parsePositiveNumber(strengthBox.Text) end
-local function applyDampingFromBox()  customD = parsePositiveNumber(dampingBox.Text)  end
-strengthBox.FocusLost:Connect(applyStrengthFromBox)
-dampingBox.FocusLost:Connect(applyDampingFromBox)
+
+local function applyStrengthFromBox()
+    customP = parsePositiveNumber(strengthBox.Text)
+end
+local function applyDampingFromBox()
+    customD = parsePositiveNumber(dampingBox.Text)
+end
+
+strengthBox.FocusLost:Connect(function()
+    applyStrengthFromBox()
+end)
+dampingBox.FocusLost:Connect(function()
+    applyDampingFromBox()
+end)
 
 -- ENABLE/DISABLE
 toggleBtn.MouseButton1Click:Connect(function()
@@ -632,52 +643,16 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- HEARTBEAT: apply forces + periodic full rescans for belt-and-suspenders reliability
-heartbeatConn = RunService.Heartbeat:Connect(function(dt)
+-- HEARTBEAT: apply forces (intense, with special vehicle tuning)
+heartbeatConn = RunService.Heartbeat:Connect(function()
     if not enabled then return end
 
     ensureHighlightFolder()
 
-    -- Periodic aggressive rescan to catch any missed objects (streaming, rapid spawns, etc.)
-    rescanAccum = rescanAccum + dt
-    if rescanAccum >= RESCAN_INTERVAL then
-        rescanAccum = 0
-        local desc = workspace:GetDescendants()
-        for i = 1, #desc do
-            local obj = desc[i]
-            if obj:IsA("BasePart") then
-                -- ensure signals and candidate/highlight state are correct
-                connectPerPart(obj)
-                if shouldConsider(obj) then
-                    if not candidateParts[obj] then
-                        candidateParts[obj] = true
-                    end
-                    if not highlights[obj] then
-                        addPartHighlight(obj)
-                    end
-                else
-                    if candidateParts[obj] then
-                        removeCandidate(obj)
-                    end
-                end
-            end
-        end
-        -- keep vehicle model highlights synced during rescan
-        if vehiclesFolder then
-            for _, model in ipairs(vehiclesFolder:GetChildren()) do
-                if model:IsA("Model") then
-                    connectVehicleModel(model)
-                    refreshVehicleHighlight(model)
-                end
-            end
-        end
-    end
-
-    -- Compute target
     local target = resolveTarget(targetName)
     local head = target and target.Character and target.Character:FindFirstChild("Head")
     if not head then
-        -- maintain highlights only
+        -- maintain only highlights while no target
         for part in pairs(candidateParts) do
             if not shouldConsider(part) then
                 removeCandidate(part)
@@ -685,6 +660,7 @@ heartbeatConn = RunService.Heartbeat:Connect(function(dt)
                 if not highlights[part] then addPartHighlight(part) end
             end
         end
+        -- keep vehicle highlights synced
         if vehiclesFolder then
             for model in pairs(vehicleModels) do
                 refreshVehicleHighlight(model)
@@ -699,6 +675,7 @@ heartbeatConn = RunService.Heartbeat:Connect(function(dt)
         if not shouldConsider(part) then
             removeCandidate(part)
         else
+            -- highlight upkeep
             if not highlights[part] then addPartHighlight(part) end
 
             local isVehicle = isInVehiclesFolder(part)
@@ -713,18 +690,20 @@ heartbeatConn = RunService.Heartbeat:Connect(function(dt)
                 bp.Parent = part
                 createdForces[part] = bp
             else
+                -- continuously reflect current tuning and target
                 bp.MaxForce = MAXFORCE_ALL
                 bp.D = getD(isVehicle)
                 bp.P = getP(isVehicle)
                 bp.Position = headPos
             end
 
-            -- Optional ultra-snap: uncomment to kill residual drift
+            -- Optional: kill drift for ultra-snap
             -- pcall(function() part.AssemblyLinearVelocity = Vector3.zero end)
             -- pcall(function() part.AssemblyAngularVelocity = Vector3.zero end)
         end
     end
 
+    -- keep vehicle model highlights synced
     if vehiclesFolder then
         for model in pairs(vehicleModels) do
             refreshVehicleHighlight(model)
@@ -740,6 +719,7 @@ local function bindDeath(char)
         enabled = false
         setToggleVisuals(toggleBtn)
         clearForces()
+        -- clear visuals
         for _, h in pairs(vehicleHighlights) do pcall(function() h:Destroy() end) end
         vehicleHighlights = {}
         for _, h in pairs(highlights) do pcall(function() h:Destroy() end) end
