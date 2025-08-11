@@ -1,204 +1,209 @@
---[[ ESP Executor Script (respawn-robust, red+transparent fill, long-range names)
-  - Collapsible "ESP +" bar, draggable (min + restore)
-  - X fully deletes UI and script
-  - ESP toggle + team whitelist filter (comma separated)
-  - Respawn-safe: retries until Humanoid/parts exist
-  - Fill is RED and more transparent; name tags visible from farther away
+--[[ ESP Executor Script (full UI + logic, respawn-robust)
+   - Compact, draggable, minimisable UI
+   - ESP toggle + team whitelist filter
+   - Red, transparent fill; health-based outline
+   - Long‑range names
+   - Retries until Humanoid/Head exist after spawn
 ]]
 
--- Tunables
-local FILL_COLOR = Color3.fromRGB(255, 0, 0)  -- red fill
-local FILL_TRANSPARENCY = 0.85                -- more transparent (0=solid, 1=invisible)
-local NAME_MAX_DISTANCE = 2000                -- farther name visibility (if property exists)
+--====== CONFIG ======--
+local FILL_COLOR = Color3.fromRGB(255, 0, 0)
+local FILL_TRANSPARENCY = 0.85
+local NAME_MAX_DISTANCE = 2000
 
--- Services
+--====== SERVICES ======--
 local Players   = game:GetService("Players")
 local UserInput = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer
 local playerGui   = localPlayer:WaitForChild("PlayerGui")
 
--- State
 local espEnabled  = false
 local teamFilters = {}
-local highlights  = {} -- [Player] = {hl=Highlight, bb=BillboardGui, conns={...}}
+local highlights  = {}
 
---========== UI CREATION ==========
--- ...[UI creation code identical to your last working version]...
--- (Omitted here for brevity — keep your existing GUI setup)
+--====== UI CREATION ======--
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ESPExecutorUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 999999
+screenGui.Parent = playerGui
 
---========== UTILS ==========
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 260, 0, 120)
+mainFrame.Position = UDim2.new(0.35, 0, 0.35, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 26)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.BackgroundTransparency = 1
+titleLabel.Size = UDim2.new(1, -60, 1, 0)
+titleLabel.Position = UDim2.new(0, 8, 0, 0)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 14
+titleLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+titleLabel.Text = "ESP Admin"
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+local btnMin = Instance.new("TextButton")
+btnMin.Size = UDim2.new(0, 26, 0, 26)
+btnMin.Position = UDim2.new(1, -52, 0, 0)
+btnMin.Font = Enum.Font.GothamBold
+btnMin.TextSize = 18
+btnMin.Text = "-"
+btnMin.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+btnMin.TextColor3 = Color3.fromRGB(240, 240, 240)
+btnMin.Parent = titleBar
+
+local btnClose = Instance.new("TextButton")
+btnClose.Size = UDim2.new(0, 26, 0, 26)
+btnClose.Position = UDim2.new(1, -26, 0, 0)
+btnClose.Font = Enum.Font.GothamBold
+btnClose.TextSize = 18
+btnClose.Text = "X"
+btnClose.BackgroundColor3 = Color3.fromRGB(80, 20, 20)
+btnClose.TextColor3 = Color3.fromRGB(255, 200, 200)
+btnClose.Parent = titleBar
+
+local btnToggle = Instance.new("TextButton")
+btnToggle.Size = UDim2.new(1, -16, 0, 30)
+btnToggle.Position = UDim2.new(0, 8, 0, 36)
+btnToggle.Font = Enum.Font.GothamBold
+btnToggle.TextSize = 14
+btnToggle.Text = "ESP: OFF"
+btnToggle.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
+btnToggle.TextColor3 = Color3.fromRGB(240, 240, 240)
+btnToggle.Parent = mainFrame
+
+local txtFilter = Instance.new("TextBox")
+txtFilter.Size = UDim2.new(1, -16, 0, 24)
+txtFilter.Position = UDim2.new(0, 8, 0, 76)
+txtFilter.Font = Enum.Font.Gotham
+txtFilter.TextSize = 14
+txtFilter.PlaceholderText = "Teams (comma separated)"
+txtFilter.ClearTextOnFocus = false
+txtFilter.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+txtFilter.TextColor3 = Color3.fromRGB(240, 240, 240)
+txtFilter.Parent = mainFrame
+
+local minBar = Instance.new("TextButton")
+minBar.Size = UDim2.new(0, 100, 0, 26)
+minBar.Font = Enum.Font.GothamBold
+minBar.TextSize = 14
+minBar.Text = "ESP +"
+minBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+minBar.TextColor3 = Color3.fromRGB(235, 235, 235)
+minBar.Visible = false
+minBar.Parent = screenGui
+
+-- Dragging
+local function makeDraggable(frame, handle)
+  local dragging, dragInput, dragStart, startPos
+  local function update(input)
+    local delta = input.Position - dragStart
+    frame.Position = UDim2.new(
+      startPos.X.Scale, startPos.X.Offset + delta.X,
+      startPos.Y.Scale, startPos.Y.Offset + delta.Y
+    )
+  end
+  handle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+      dragging = true
+      dragStart = input.Position
+      startPos = frame.Position
+      input.Changed:Connect(function()
+        if input.UserInputState == Enum.UserInputState.End then dragging = false end
+      end)
+    end
+  end)
+  handle.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+      dragInput = input
+    end
+  end)
+  UserInput.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then update(input) end
+  end)
+end
+makeDraggable(mainFrame, titleBar)
+makeDraggable(minBar, minBar)
+
+btnMin.MouseButton1Click:Connect(function()
+  minBar.Position = mainFrame.Position
+  mainFrame.Visible = false
+  minBar.Visible = true
+end)
+minBar.MouseButton1Click:Connect(function()
+  mainFrame.Position = minBar.Position
+  mainFrame.Visible = true
+  minBar.Visible = false
+end)
+
+--====== LOGIC ======--
 local function trim(s) return (s:match("^%s*(.-)%s*$")) end
 local function updateFilters(text)
-    teamFilters = {}
-    for name in (text or ""):lower():gmatch("([^,]+)") do
-        name = trim(name)
-        if name ~= "" then table.insert(teamFilters, name) end
-    end
+  teamFilters = {}
+  for name in (text or ""):lower():gmatch("([^,]+)") do
+    name = trim(name)
+    if name ~= "" then table.insert(teamFilters, name) end
+  end
 end
+txtFilter:GetPropertyChangedSignal("Text"):Connect(function()
+  updateFilters(txtFilter.Text)
+end)
 updateFilters("")
 
 local function healthToColor(hp, maxHp)
-    local frac = 0
-    if maxHp and maxHp > 0 then frac = math.clamp(hp/maxHp, 0, 1) end
-    return Color3.fromHSV(frac * 0.33, 1, 1)
+  local frac = maxHp > 0 and math.clamp(hp/maxHp, 0, 1) or 0
+  return Color3.fromHSV(frac * 0.33, 1, 1)
 end
 
-local function getAdorneePart(character)
-    if not character then return nil end
-    return character:FindFirstChild("Head")
-        or character:FindFirstChild("HumanoidRootPart")
-        or character:FindFirstChildWhichIsA("BasePart")
+local function getAdorneePart(char)
+  return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
 end
 
--- Retry-wrapped character readiness
 local function waitForCharacterReady(plr, timeout)
-    local t0 = os.clock()
-    timeout = timeout or 10
-    local char = plr.Character or plr.CharacterAdded:Wait()
-    if not char then return nil end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    while not humanoid and os.clock() - t0 < timeout do
-        humanoid = char:FindFirstChildOfClass("Humanoid")
-        task.wait(0.1)
-    end
-    if not humanoid then return nil end
-    local adornee = getAdorneePart(char)
-    while not adornee and os.clock() - t0 < timeout do
-        adornee = getAdorneePart(char)
-        task.wait(0.1)
-    end
-    return char, humanoid, adornee
+  local t0 = os.clock()
+  local char = plr.Character or plr.CharacterAdded:Wait()
+  local humanoid = char:FindFirstChildOfClass("Humanoid")
+  while not humanoid and os.clock() - t0 < timeout do
+    humanoid = char:FindFirstChildOfClass("Humanoid")
+    task.wait(0.1)
+  end
+  local adornee = getAdorneePart(char)
+  while not adornee and os.clock() - t0 < timeout do
+    adornee = getAdorneePart(char)
+    task.wait(0.1)
+  end
+  return char, humanoid, adornee
 end
 
 local function destroyESP(plr)
-    local data = highlights[plr]
-    if not data then return end
-    if data.conns then for _, c in ipairs(data.conns) do pcall(function() c:Disconnect() end) end end
-    if data.bb then pcall(function() data.bb:Destroy() end) end
-    if data.hl then pcall(function() data.hl:Destroy() end) end
-    highlights[plr] = nil
+  local data = highlights[plr]
+  if not data then return end
+  for _, c in ipairs(data.conns) do pcall(function() c:Disconnect() end) end
+  if data.bb then data.bb:Destroy() end
+  if data.hl then data.hl:Destroy() end
+  highlights[plr] = nil
 end
 
--- Apply ESP to a single player
 local function applyESP(plr)
-    destroyESP(plr)
-    local char, humanoid, adornee = waitForCharacterReady(plr, 8)
-    if not char or not humanoid then return false end
+  destroyESP(plr)
+  local char, humanoid, adornee = waitForCharacterReady(plr, 8)
+  if not char or not humanoid then return false end
 
-    -- Highlight
-    local hl = Instance.new("Highlight")
-    hl.Name = "ESP_Highlight"
-    hl.Parent = char
-    hl.FillColor = FILL_COLOR
-    hl.FillTransparency = FILL_TRANSPARENCY
-    hl.OutlineTransparency = 0
-    hl.OutlineColor = healthToColor(humanoid.Health, humanoid.MaxHealth)
-    hl.Enabled = false
-
-    -- Name tag
-    local bb = Instance.new("BillboardGui")
-    bb.Name = "ESP_Name"
-    bb.Size = UDim2.new(0, 80, 0, 16)
-    bb.StudsOffset = Vector3.new(0, 3, 0)
-    bb.AlwaysOnTop = true
-    bb.Enabled = false
-    pcall(function() bb.MaxDistance = NAME_MAX_DISTANCE end)
-    if adornee then
-        bb.Adornee = adornee
-        bb.Parent = adornee
-    else
-        bb.Parent = char
-    end
-    local lbl = Instance.new("TextLabel")
-    lbl.BackgroundTransparency = 1
-    lbl.Size = UDim2.new(1, 0, 1, 0)
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 12
-    lbl.Text = plr.DisplayName
-    lbl.TextColor3 = Color3.fromRGB(255,255,255)
-    lbl.TextStrokeTransparency = 0.5
-    lbl.Parent = bb
-
-    -- Connections
-    local conns = {}
-    table.insert(conns, humanoid.HealthChanged:Connect(function(hp)
-        hl.OutlineColor = healthToColor(hp, humanoid.MaxHealth)
-    end))
-    table.insert(conns, humanoid.Died:Connect(function() destroyESP(plr) end))
-    table.insert(conns, plr.CharacterRemoving:Connect(function() destroyESP(plr) end))
-
-    highlights[plr] = { hl = hl, bb = bb, conns = conns }
-
-    -- Show/hide based on filters
-    local teamName = (plr.Team and plr.Team.Name:lower()) or ""
-    local pass = (#teamFilters == 0) or table.find(teamFilters, teamName)
-    hl.Enabled = espEnabled and pass
-    bb.Enabled = espEnabled and pass
-
-    return true
-end
-
---========== RESPAWN BINDER (HARDENED) ==========
-local function bindPlayer(plr)
-    -- On spawn
-    plr.CharacterAdded:Connect(function()
-        task.spawn(function()
-            local deadline = os.clock() + 8
-            while os.clock() < deadline do
-                if applyESP(plr) then break end
-                task.wait(0.25)
-            end
-        end)
-    end)
-    -- On appearance loaded
-    plr.CharacterAppearanceLoaded:Connect(function()
-        task.spawn(function()
-            local deadline = os.clock() + 5
-            while os.clock() < deadline do
-                if applyESP(plr) then break end
-                task.wait(0.25)
-            end
-        end)
-    end)
-    -- On team change
-    plr:GetPropertyChangedSignal("Team"):Connect(function()
-        if highlights[plr] then
-            local data = highlights[plr]
-            local teamName = (plr.Team and plr.Team.Name:lower()) or ""
-            local pass = (#teamFilters == 0) or table.find(teamFilters, teamName)
-            if data.hl then data.hl.Enabled = espEnabled and pass end
-            if data.bb then data.bb.Enabled = espEnabled and pass end
-        elseif espEnabled then
-            task.spawn(function()
-                local deadline = os.clock() + 5
-                while os.clock() < deadline do
-                    if applyESP(plr) then break end
-                    task.wait(0.25)
-                end
-            end)
-        end
-    end)
-    -- If already spawned
-    if plr.Character then
-        task.spawn(function()
-            local deadline = os.clock() + 5
-            while os.clock() < deadline do
-                if applyESP(plr) then break end
-                task.wait(0.25)
-            end
-        end)
-    end
-end
-
---========== PLAYER HOOKUP ==========
-Players.PlayerAdded:Connect(function(plr)
-    if plr ~= localPlayer then bindPlayer(plr) end
-end)
-Players.PlayerRemoving:Connect(destroyESP)
-for _,plr in ipairs(Players:GetPlayers()) do
-    if plr ~= localPlayer then bindPlayer(plr) end
-end
-
---========== TOGGLE LOGIC / UI HOOKS ==========
--- Keep your existing btnToggle, btnClose, txtFilter logic from before, no change needed
+  local hl = Instance.new("Highlight")
+  hl.Parent = char
+  hl.FillColor = FILL_COLOR
+  hl.FillTransparency = FILL_TRANSPARENCY
+  hl.OutlineTransparency = 0
+  hl.OutlineColor = healthToColor
