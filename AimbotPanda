@@ -1,38 +1,56 @@
 --// Services
-local Players        = game:GetService("Players")
-local RunService     = game:GetService("RunService")
-local UserInput      = game:GetService("UserInputService")
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local UserInputService   = game:GetService("UserInputService")
+local ContextAction      = game:GetService("ContextActionService")
 
---// Variables
-local localPlayer    = Players.LocalPlayer
-local camera         = workspace.CurrentCamera
-local aimbotEnabled  = false
-local targetPlayer   = nil
-local aimConnection  = nil
+--// Locals
+local localPlayer        = Players.LocalPlayer
+local camera             = workspace.CurrentCamera
 
---// Create ScreenGui
+-- State
+local aimbotEnabled      = false
+local targetPlayer       = nil
+local targetQuery        = ""      -- what the user typed
+local isMinimized        = false
+
+-- Input capture (to restore later)
+local origMouseBehavior  = UserInputService.MouseBehavior
+local origMouseIcon      = UserInputService.MouseIconEnabled
+
+--// UI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AdminAimbotGUI"
 screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
 screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 
---// Main Frame
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 300, 0, 100)
-mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.Size = UDim2.fromOffset(360, 110)
+mainFrame.Position = UDim2.new(0.35, 0, 0.35, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 
---// Title Bar for Drag, Minimize, Close
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
-titleBar.Size = UDim2.new(1, 0, 0, 24)
-titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.Size = UDim2.new(1, 0, 0, 26)
+titleBar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 titleBar.Parent = mainFrame
 
--- Drag logic
+local titleLabel = Instance.new("TextLabel")
+titleLabel.BackgroundTransparency = 1
+titleLabel.Size = UDim2.new(1, -70, 1, 0)
+titleLabel.Position = UDim2.new(0, 8, 0, 0)
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 14
+titleLabel.TextColor3 = Color3.fromRGB(220, 220, 230)
+titleLabel.Text = "Admin Aimbot"
+titleLabel.Parent = titleBar
+
+-- Drag
 do
     local dragging, dragInput, dragStart, startPos
     local function update(input)
@@ -59,74 +77,86 @@ do
             dragInput = input
         end
     end)
-    UserInput.InputChanged:Connect(function(input)
+    UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             update(input)
         end
     end)
 end
 
--- Minimize Button
+-- Minimize button
 local btnMinimize = Instance.new("TextButton")
 btnMinimize.Name = "BtnMinimize"
 btnMinimize.Text = "-"
-btnMinimize.Font = Enum.Font.SourceSansBold
-btnMinimize.TextSize = 20
-btnMinimize.Size = UDim2.new(0, 24, 0, 24)
-btnMinimize.Position = UDim2.new(1, -48, 0, 0)
-btnMinimize.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnMinimize.Font = Enum.Font.GothamBold
+btnMinimize.TextSize = 18
+btnMinimize.Size = UDim2.fromOffset(26, 26)
+btnMinimize.Position = UDim2.new(1, -52, 0, 0)
+btnMinimize.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+btnMinimize.TextColor3 = Color3.fromRGB(235, 235, 240)
+btnMinimize.AutoButtonColor = true
 btnMinimize.Parent = titleBar
 
-local minimized = false
 btnMinimize.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    mainFrame.Size = minimized and UDim2.new(0, 300, 0, 24) or UDim2.new(0, 300, 0, 100)
+    isMinimized = not isMinimized
+    mainFrame.Size = isMinimized and UDim2.fromOffset(360, 26) or UDim2.fromOffset(360, 110)
 end)
 
--- Close Button
+-- Close button
 local btnClose = Instance.new("TextButton")
 btnClose.Name = "BtnClose"
 btnClose.Text = "X"
-btnClose.Font = Enum.Font.SourceSansBold
-btnClose.TextSize = 20
-btnClose.Size = UDim2.new(0, 24, 0, 24)
-btnClose.Position = UDim2.new(1, -24, 0, 0)
-btnClose.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnClose.Font = Enum.Font.GothamBold
+btnClose.TextSize = 18
+btnClose.Size = UDim2.fromOffset(26, 26)
+btnClose.Position = UDim2.new(1, -26, 0, 0)
+btnClose.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+btnClose.TextColor3 = Color3.fromRGB(255, 240, 240)
+btnClose.AutoButtonColor = true
 btnClose.Parent = titleBar
 
-btnClose.MouseButton1Click:Connect(function()
-    if aimConnection then aimConnection:Disconnect() end
-    screenGui:Destroy()
-end)
-
--- Username TextBox
+-- Row: username + toggle
 local txtUser = Instance.new("TextBox")
 txtUser.Name = "TxtUser"
-txtUser.PlaceholderText = "Type username..."
-txtUser.Font = Enum.Font.SourceSans
-txtUser.TextSize = 16
+txtUser.PlaceholderText = "Type partial username..."
+txtUser.Font = Enum.Font.Gotham
+txtUser.TextSize = 14
 txtUser.ClearTextOnFocus = false
-txtUser.Size = UDim2.new(1, -10, 0, 30)
-txtUser.Position = UDim2.new(0, 5, 0, 34)
-txtUser.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+txtUser.Size = UDim2.new(1, -120, 0, 34)
+txtUser.Position = UDim2.new(0, 8, 0, 36)
+txtUser.BackgroundColor3 = Color3.fromRGB(38, 38, 44)
 txtUser.TextColor3 = Color3.fromRGB(255, 255, 255)
 txtUser.Parent = mainFrame
 
--- Aimbot Toggle Button
 local btnToggle = Instance.new("TextButton")
 btnToggle.Name = "BtnToggle"
-btnToggle.Text = "Aimbot: OFF"
-btnToggle.Font = Enum.Font.SourceSansBold
-btnToggle.TextSize = 16
-btnToggle.Size = UDim2.new(0, 100, 0, 30)
-btnToggle.Position = UDim2.new(1, -105, 0, 34)
-btnToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+btnToggle.Text = "Aimbot: OFF (E)"
+btnToggle.Font = Enum.Font.GothamBold
+btnToggle.TextSize = 14
+btnToggle.Size = UDim2.new(0, 104, 0, 34)
+btnToggle.Position = UDim2.new(1, -112, 0, 36)
+btnToggle.BackgroundColor3 = Color3.fromRGB(80, 25, 25)
 btnToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnToggle.AutoButtonColor = true
 btnToggle.Parent = mainFrame
 
--- Helper: Find player by partial name
+-- Utility: find player by partial
 local function findPlayerByPartial(partial)
     partial = partial:lower()
+    if partial == "" then return nil end
+    -- exact match first
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Name:lower() == partial then
+            return plr
+        end
+    end
+    -- then "starts with"
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Name:lower():sub(1, #partial) == partial then
+            return plr
+        end
+    end
+    -- then "contains"
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr.Name:lower():find(partial, 1, true) then
             return plr
@@ -135,41 +165,128 @@ local function findPlayerByPartial(partial)
     return nil
 end
 
--- Update target whenever text changes
+-- Feedback color
+local function setUserBoxStatus(ok)
+    txtUser.BackgroundColor3 = ok and Color3.fromRGB(24, 60, 32) or Color3.fromRGB(60, 24, 28)
+end
+
+local function refreshTarget()
+    targetPlayer = findPlayerByPartial(targetQuery)
+    setUserBoxStatus(targetPlayer ~= nil)
+end
+
 txtUser.FocusLost:Connect(function()
-    local input = txtUser.Text
-    targetPlayer = findPlayerByPartial(input)
-    if targetPlayer then
-        txtUser.BackgroundColor3 = Color3.fromRGB(25, 50, 25)
-    else
-        txtUser.BackgroundColor3 = Color3.fromRGB(50, 25, 25)
-    end
+    targetQuery = txtUser.Text
+    refreshTarget()
 end)
 
--- Aimbot loop
-local function startAimbot()
-    if aimConnection then return end
-    aimConnection = RunService.RenderStepped:Connect(function()
-        if aimbotEnabled and targetPlayer and targetPlayer.Character then
-            local hrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                camera.CFrame = CFrame.new(camera.CFrame.Position, hrp.Position)
-            end
+txtUser:GetPropertyChangedSignal("Text"):Connect(function()
+    targetQuery = txtUser.Text
+    refreshTarget()
+end)
+
+Players.PlayerAdded:Connect(function()
+    if targetQuery ~= "" then refreshTarget() end
+end)
+Players.PlayerRemoving:Connect(function(plr)
+    if targetPlayer == plr then refreshTarget() end
+end)
+
+-- Aim target resolver
+local function getAimPart(char)
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart")
+        or char:FindFirstChild("UpperTorso")
+        or char:FindFirstChild("Torso")
+        or char:FindFirstChild("Head")
+end
+
+-- Strong lock: bind post-camera so it overrides anything else
+local BIND_NAME = "AdminAimbot_Bind"
+local function bindAimbot()
+    RunService:BindToRenderStep(BIND_NAME, Enum.RenderPriority.Camera.Value + 1, function()
+        if not aimbotEnabled then return end
+
+        -- Enforce mouse lock center every frame so it stays put, including with shiftlock
+        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+        end
+        if UserInputService.MouseIconEnabled then
+            UserInputService.MouseIconEnabled = false
+        end
+
+        -- Validate or reacquire target
+        if (not targetPlayer) or (not targetPlayer.Character) then
+            refreshTarget()
+        end
+        local char = targetPlayer and targetPlayer.Character
+        local part = getAimPart(char)
+        if part then
+            -- Reorient camera to keep target under crosshair center
+            local camPos = camera.CFrame.Position
+            local targetPos = part.Position
+            camera.CFrame = CFrame.new(camPos, targetPos)
         end
     end)
 end
 
--- Toggle button handler
+local function unbindAimbot()
+    pcall(function() RunService:UnbindFromRenderStep(BIND_NAME) end)
+end
+
+-- Toggle visuals/state
+local function setToggleVisuals(on)
+    btnToggle.Text = on and "Aimbot: ON (E)" or "Aimbot: OFF (E)"
+    btnToggle.BackgroundColor3 = on and Color3.fromRGB(25, 80, 35) or Color3.fromRGB(80, 25, 25)
+end
+
+-- Enable/disable
+local function enableAimbot()
+    if aimbotEnabled then return end
+    aimbotEnabled = true
+    -- capture current mouse state once on enable
+    origMouseBehavior = UserInputService.MouseBehavior
+    origMouseIcon = UserInputService.MouseIconEnabled
+    setToggleVisuals(true)
+    bindAimbot()
+end
+
+local function disableAimbot()
+    if not aimbotEnabled then return end
+    aimbotEnabled = false
+    setToggleVisuals(false)
+    unbindAimbot()
+    -- restore user mouse state
+    UserInputService.MouseBehavior = origMouseBehavior
+    UserInputService.MouseIconEnabled = origMouseIcon
+end
+
+-- Button click
 btnToggle.MouseButton1Click:Connect(function()
-    aimbotEnabled = not aimbotEnabled
-    btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
-    btnToggle.BackgroundColor3 = aimbotEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
-    if aimbotEnabled then
-        startAimbot()
-    else
-        if aimConnection then
-            aimConnection:Disconnect()
-            aimConnection = nil
-        end
-    end
+    if aimbotEnabled then disableAimbot() else enableAimbot() end
 end)
+
+-- E hotkey (won't toggle while typing)
+local function toggleAction(_name, state, input)
+    if state ~= Enum.UserInputState.Begin then return Enum.ContextActionResult.Pass end
+    if UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
+    if aimbotEnabled then disableAimbot() else enableAimbot() end
+    return Enum.ContextActionResult.Sink
+end
+ContextAction:BindAction("ToggleAimbot", toggleAction, false, Enum.KeyCode.E)
+
+-- Close cleanup
+btnClose.MouseButton1Click:Connect(function()
+    disableAimbot()
+    ContextAction:UnbindAction("ToggleAimbot")
+    screenGui:Destroy()
+    -- optional: also destroy this LocalScript if it’s a child of the GUI
+    local ok, _ = pcall(function()
+        if script and script.Parent == screenGui then
+            script:Destroy()
+        end
+    end)
+end)
+
+-- Sensible defaults
+setToggleVisuals(false)
