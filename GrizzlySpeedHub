@@ -1,0 +1,343 @@
+-- Services
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService") -- Added RunService
+
+local lp = Players.LocalPlayer
+repeat task.wait() until lp
+
+local character = lp.Character or lp.CharacterAdded:Wait()
+repeat task.wait() until character:FindFirstChild("Humanoid")
+local humanoid = character:WaitForChild("Humanoid")
+
+local rootPart = character:WaitForChild("HumanoidRootPart") -- STEALTH BYPASS: needed for velocity method
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CMDM_Speed_GUI_" .. tostring(math.random(1000,9999))
+screenGui.Parent = CoreGui
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 302, 0, 162) -- increased height to fit warning label
+frame.Position = UDim2.new(0.5, -151, 0.4, -71)
+frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+frame.BorderSizePixel = 1
+frame.BorderColor3 = Color3.fromRGB(255, 50, 50)
+frame.Active = true
+frame.Draggable = true
+frame.Parent = screenGui
+frame.ClipsDescendants = true
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 28)
+titleBar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = frame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -70, 1, 0)
+titleLabel.Position = UDim2.new(0, 14, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "CMDM Speed 😎 V2.5"
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 18
+titleLabel.TextColor3 = Color3.fromRGB(210, 210, 210)
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -1, 0, 1)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+closeBtn.AutoButtonColor = false
+closeBtn.Text = ""
+closeBtn.Parent = titleBar
+closeBtn.Modal = true
+closeBtn.AnchorPoint = Vector2.new(1, 0)
+closeBtn.BorderSizePixel = 0
+closeBtn.ClipsDescendants = true
+closeBtn.Active = true
+
+local closeX = Instance.new("TextLabel")
+closeX.Parent = closeBtn
+closeX.Size = UDim2.new(1, 0, 1, 0)
+closeX.BackgroundTransparency = 1
+closeX.Text = "✕"
+closeX.Font = Enum.Font.GothamBold
+closeX.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeX.TextScaled = true
+closeX.TextSize = 22
+closeX.TextWrapped = false
+closeX.AnchorPoint = Vector2.new(0.5, 0.5)
+closeX.Position = UDim2.new(0.5, 0, 0.5, 0)
+
+local stroke = Instance.new("UIStroke")
+stroke.Parent = closeX
+stroke.Color = Color3.fromRGB(255, 255, 255)
+stroke.Thickness = 1
+stroke.Transparency = 0
+
+closeBtn.MouseEnter:Connect(function()
+    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+end)
+closeBtn.MouseLeave:Connect(function()
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 26, 0, 26)
+minBtn.Position = UDim2.new(1, -30, 0, 1)
+minBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+minBtn.AutoButtonColor = false
+minBtn.Text = ""
+minBtn.Parent = titleBar
+minBtn.Modal = true
+minBtn.AnchorPoint = Vector2.new(1, 0)
+minBtn.BorderSizePixel = 0
+minBtn.ClipsDescendants = true
+minBtn.Active = true
+
+local minLabel = Instance.new("TextLabel")
+minLabel.Parent = minBtn
+minLabel.Size = UDim2.new(0.6, 0, 0.15, 0)
+minLabel.Position = UDim2.new(0.2, 0, 0.425, 0)
+minLabel.BackgroundTransparency = 1
+minLabel.Text = "─"
+minLabel.Font = Enum.Font.GothamBold
+minLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
+minLabel.TextScaled = true
+minLabel.TextSize = 18
+minLabel.TextWrapped = false
+
+local minStroke = Instance.new("UIStroke")
+minStroke.Parent = minLabel
+minStroke.Color = Color3.fromRGB(190, 190, 190)
+minStroke.Thickness = 1
+minStroke.Transparency = 0
+
+minBtn.MouseEnter:Connect(function()
+    minBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+end)
+minBtn.MouseLeave:Connect(function()
+    minBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+end)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        frame.Size = UDim2.new(0, 302, 0, 28)
+        for _, v in pairs(frame:GetChildren()) do
+            if v ~= titleBar then
+                v.Visible = false
+            end
+        end
+    else
+        frame.Size = UDim2.new(0, 302, 0, 162)
+        for _, v in pairs(frame:GetChildren()) do
+            v.Visible = true
+        end
+    end
+end)
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(1, -24, 0, 32)
+speedLabel.Position = UDim2.new(0, 16, 0, 40)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Speed Value:"
+speedLabel.Font = Enum.Font.Gotham
+speedLabel.TextSize = 17
+speedLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = frame
+
+local speedInput = Instance.new("TextBox")
+speedInput.Size = UDim2.new(0, 190, 0, 34)
+speedInput.Position = UDim2.new(0, 110, 0, 38)
+speedInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+speedInput.TextColor3 = Color3.fromRGB(240, 240, 240)
+speedInput.Text = "30"
+speedInput.Font = Enum.Font.Gotham
+speedInput.TextSize = 20
+speedInput.ClearTextOnFocus = false
+speedInput.BorderSizePixel = 0
+speedInput.Parent = frame
+speedInput.PlaceholderText = "16 to 250"
+
+-- *** Added red outline (UIStroke), starts hidden ***
+local inputOutline = Instance.new("UIStroke")
+inputOutline.Parent = speedInput
+inputOutline.Color = Color3.fromRGB(255, 0, 0)
+inputOutline.Thickness = 3
+inputOutline.Transparency = 1
+
+local applyBtn = Instance.new("TextButton")
+applyBtn.Size = UDim2.new(0, 85, 0, 36)
+applyBtn.Position = UDim2.new(0, 110, 0, 82)
+applyBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+applyBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+applyBtn.Text = "Apply"
+applyBtn.Font = Enum.Font.GothamBold
+applyBtn.TextSize = 18
+applyBtn.BorderSizePixel = 0
+applyBtn.Parent = frame
+
+applyBtn.MouseEnter:Connect(function()
+    applyBtn.BackgroundColor3 = Color3.fromRGB(90, 90, 90)
+end)
+applyBtn.MouseLeave:Connect(function()
+    applyBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+end)
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 85, 0, 36)
+toggleBtn.Position = UDim2.new(0, 205, 0, 82)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(90, 90, 90)
+toggleBtn.TextColor3 = Color3.fromRGB(230, 230, 230)
+toggleBtn.Text = "Toggle Off"
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 18
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = frame
+
+toggleBtn.MouseEnter:Connect(function()
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(110, 110, 110)
+end)
+toggleBtn.MouseLeave:Connect(function()
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(90, 90, 90)
+end)
+
+local speedEnabled = false
+local customSpeed = 30
+
+-- STEALTH BYPASS: BodyVelocity for speed manipulation
+local bodyVelocity = Instance.new("BodyVelocity")
+bodyVelocity.MaxForce = Vector3.new(1e5, 0, 1e5)
+bodyVelocity.P = 1250
+bodyVelocity.Velocity = Vector3.new(0,0,0)
+
+local function applySpeed(speed)
+    if humanoid and humanoid.Parent and rootPart and rootPart.Parent then
+        if speedEnabled then
+            local moveDir = humanoid.MoveDirection
+            if moveDir.Magnitude > 0 then
+                bodyVelocity.Velocity = moveDir.Unit * speed + Vector3.new(
+                    math.random(-5,5)*0.1,
+                    0,
+                    math.random(-5,5)*0.1
+                ) -- jitter to evade detection
+                bodyVelocity.Parent = rootPart
+            else
+                if bodyVelocity.Parent then
+                    bodyVelocity.Parent = nil
+                end
+            end
+        else
+            if bodyVelocity.Parent then
+                bodyVelocity.Parent = nil
+            end
+        end
+    end
+end
+
+local function removeSpeed()
+    if bodyVelocity.Parent then
+        bodyVelocity.Parent = nil
+    end
+end
+
+applyBtn.MouseButton1Click:Connect(function()
+    local val = tonumber(speedInput.Text)
+    if val and val >= 16 and val <= 250 then
+        customSpeed = val
+        if speedEnabled then
+            applySpeed(customSpeed)
+        end
+
+        -- Show red outline briefly on valid speed change
+        inputOutline.Transparency = 0
+        task.delay(1, function()
+            for i = 0, 1, 0.1 do
+                inputOutline.Transparency = i
+                task.wait(0.05)
+            end
+            inputOutline.Transparency = 1
+        end)
+    else
+        speedInput.Text = tostring(customSpeed)
+    end
+end)
+
+toggleBtn.MouseButton1Click:Connect(function()
+    speedEnabled = not speedEnabled
+    if speedEnabled then
+        toggleBtn.Text = "Toggle On"
+        applySpeed(customSpeed)
+    else
+        toggleBtn.Text = "Toggle Off"
+        removeSpeed()
+    end
+end)
+
+lp.CharacterAdded:Connect(function(char)
+    humanoid = char:WaitForChild("Humanoid")
+    rootPart = char:WaitForChild("HumanoidRootPart")
+    if speedEnabled then
+        task.wait(1)
+        applySpeed(customSpeed)
+    else
+        removeSpeed()
+    end
+    testWalkSpeed() -- run test on respawn too
+end)
+
+-- CONTINUOUS SPEED APPLICATION LOOP (crucial for bypass)
+RunService.Heartbeat:Connect(function()
+    if speedEnabled then
+        applySpeed(customSpeed)
+    else
+        removeSpeed()
+    end
+end)
+
+screenGui.Destroying:Connect(function()
+    removeSpeed()
+end)
+
+-- *** Added warning label to display WalkSpeed reset status ***
+local warningLabel = Instance.new("TextLabel")
+warningLabel.Size = UDim2.new(1, -24, 0, 20)
+warningLabel.Position = UDim2.new(0, 16, 0, 125) -- below speedInput and buttons
+warningLabel.BackgroundTransparency = 1
+warningLabel.Text = ""
+warningLabel.Font = Enum.Font.Gotham
+warningLabel.TextSize = 14
+warningLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+warningLabel.TextXAlignment = Enum.TextXAlignment.Left
+warningLabel.Parent = frame
+
+-- Function to test if WalkSpeed changes are respected
+function testWalkSpeed()
+    local testSpeed = 50
+    local originalSpeed = humanoid.WalkSpeed
+
+    humanoid.WalkSpeed = testSpeed
+    task.wait(0.5) -- wait half a second
+
+    if humanoid.WalkSpeed ~= testSpeed then
+        warningLabel.Text = "⚠️ Warning: WalkSpeed changes are reset by server in this game!"
+    else
+        warningLabel.Text = ""
+    end
+
+    humanoid.WalkSpeed = originalSpeed
+end
+
+-- Run the test initially
+testWalkSpeed()
