@@ -1,1 +1,279 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 
+local localPlayer = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- ESP Settings
+_G.WRDESPEnabled = _G.WRDESPEnabled or false
+_G.WRDESPBoxes = _G.WRDESPBoxes or false
+_G.WRDESPNames = _G.WRDESPNames or false
+_G.WRDESPTracers = _G.WRDESPTracers or false
+_G.WRDESPTeamColors = _G.WRDESPTeamColors or false
+
+-- Drawing helper
+local function createDrawing(type_, props)
+    local d = Drawing.new(type_)
+    for k,v in pairs(props or {}) do
+        d[k] = v
+    end
+    return d
+end
+
+-- Store ESP boxes
+local ESPBoxes = {}
+
+-- Remove ESP for a player
+local function removeESP(player)
+    local boxData = ESPBoxes[player]
+    if boxData then
+        for _, drawingObj in pairs(boxData) do
+            drawingObj.Visible = false
+            drawingObj:Remove()
+        end
+        ESPBoxes[player] = nil
+    end
+end
+
+-- Create ESP for a player
+local function createESP(player)
+    local box = createDrawing("Quad", {
+        Thickness = 2,
+        Color = Color3.new(1,1,1),
+        Visible = false,
+        Filled = false
+    })
+    local nameText = createDrawing("Text", {
+        Text = player.Name,
+        Size = 16,
+        Center = true,
+        Outline = true,
+        Color = Color3.new(1,1,1),
+        Visible = false,
+        Font = Drawing.Fonts.Plex
+    })
+    local tracer = createDrawing("Line", {
+        Thickness = 1,
+        Color = Color3.new(1,1,1),
+        Visible = false
+    })
+
+    ESPBoxes[player] = {Box=box, Name=nameText, Tracer=tracer}
+end
+
+-- Update ESP each frame
+RunService.RenderStepped:Connect(function()
+    if not _G.WRDESPEnabled then
+        -- Remove all ESP when disabled
+        for player, _ in pairs(ESPBoxes) do
+            removeESP(player)
+        end
+        return
+    end
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            if not ESPBoxes[player] then
+                createESP(player)
+            end
+
+            local boxData = ESPBoxes[player]
+            local hrp = player.Character.HumanoidRootPart
+            local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+
+            if onScreen then
+                -- Box corners calculation
+                local sizeX, sizeY = 40, 80
+
+                local topLeft = Vector2.new(screenPos.X - sizeX/2, screenPos.Y - sizeY/2)
+                local topRight = Vector2.new(screenPos.X + sizeX/2, screenPos.Y - sizeY/2)
+                local bottomLeft = Vector2.new(screenPos.X - sizeX/2, screenPos.Y + sizeY/2)
+                local bottomRight = Vector2.new(screenPos.X + sizeX/2, screenPos.Y + sizeY/2)
+
+                -- Set color by team if enabled
+                local color = Color3.new(1,1,1)
+                if _G.WRDESPTeamColors and player.Team and player.Team.TeamColor then
+                    color = player.Team.TeamColor.Color
+                end
+
+                -- Update box
+                if _G.WRDESPBoxes then
+                    boxData.Box.PointA = topRight
+                    boxData.Box.PointB = topLeft
+                    boxData.Box.PointC = bottomLeft
+                    boxData.Box.PointD = bottomRight
+                    boxData.Box.Color = color
+                    boxData.Box.Visible = true
+                else
+                    boxData.Box.Visible = false
+                end
+
+                -- Update name
+                if _G.WRDESPNames then
+                    boxData.Name.Position = Vector2.new(screenPos.X, screenPos.Y - sizeY/2 - 15)
+                    boxData.Name.Text = player.Name
+                    boxData.Name.Color = color
+                    boxData.Name.Visible = true
+                else
+                    boxData.Name.Visible = false
+                end
+
+                -- Update tracer
+                if _G.WRDESPTracers then
+                    boxData.Tracer.From = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y)
+                    boxData.Tracer.To = Vector2.new(screenPos.X, screenPos.Y + sizeY/2)
+                    boxData.Tracer.Color = color
+                    boxData.Tracer.Visible = true
+                else
+                    boxData.Tracer.Visible = false
+                end
+            else
+                -- Not on screen, hide ESP
+                boxData.Box.Visible = false
+                boxData.Name.Visible = false
+                boxData.Tracer.Visible = false
+            end
+        else
+            -- Remove ESP if no character or local player
+            removeESP(player)
+        end
+    end
+end)
+
+-- GUI Creation (simplified)
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
+
+local Frame = Instance.new("Frame", ScreenGui)
+Frame.Size = UDim2.new(0, 230, 0, 270)
+Frame.Position = UDim2.new(0.05, 0, 0.2, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Draggable = true
+Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+
+-- Rainbow Outline for Frame
+local outline = Instance.new("Frame", Frame)
+outline.Size = UDim2.new(1, 0, 1, 0)
+outline.Position = UDim2.new(0, 0, 0, 0)
+outline.ZIndex = 0
+outline.BackgroundTransparency = 1
+outline.BorderSizePixel = 0
+
+local rainbow = Instance.new("UIStroke", outline)
+rainbow.Thickness = 3
+rainbow.Color = Color3.fromHSV(0, 1, 1)
+rainbow.Transparency = 0
+rainbow.LineJoinMode = Enum.LineJoinMode.Round
+rainbow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+-- Animate rainbow color
+spawn(function()
+    local hue = 0
+    while Frame.Parent do
+        hue = (hue + 0.005) % 1
+        rainbow.Color = Color3.fromHSV(hue, 1, 1)
+        task.wait(0.03)
+    end
+end)
+
+local TitleBar = Instance.new("Frame", Frame)
+TitleBar.Size = UDim2.new(1, 0, 0, 35)
+TitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+TitleBar.BorderSizePixel = 0
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
+
+-- Emoji label 👨‍💻
+local EmojiLabel = Instance.new("TextLabel", TitleBar)
+EmojiLabel.Size = UDim2.new(0, 30, 1, 0)
+EmojiLabel.Position = UDim2.new(0, 5, 0, 0)
+EmojiLabel.BackgroundTransparency = 1
+EmojiLabel.Text = "👨‍💻"
+EmojiLabel.TextSize = 24
+EmojiLabel.Font = Enum.Font.GothamBold
+EmojiLabel.TextColor3 = Color3.new(1,1,1)
+EmojiLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local TitleText = Instance.new("TextLabel", TitleBar)
+TitleText.Size = UDim2.new(1, -70, 1, 0)
+TitleText.Position = UDim2.new(0, 40, 0, 0) -- shifted right to make room for emoji
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "ESP Settings"
+TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleText.TextSize = 18
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+
+local CloseBtn = Instance.new("TextButton", TitleBar)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0.1, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 18
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+    _G.WRDESPEnabled = false
+end)
+
+-- Minimize Button
+local MinBtn = Instance.new("TextButton", TitleBar)
+MinBtn.Size = UDim2.new(0, 30, 0, 30)
+MinBtn.Position = UDim2.new(1, -70, 0.1, 0)
+MinBtn.BackgroundColor3 = Color3.fromRGB(90, 90, 0)
+MinBtn.Text = "-"
+MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 18
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
+
+local Holder = Instance.new("Frame", Frame)
+Holder.Size = UDim2.new(1, -20, 1, -45)
+Holder.Position = UDim2.new(0, 10, 0, 40)
+Holder.BackgroundTransparency = 1
+
+local UIListLayout = Instance.new("UIListLayout", Holder)
+UIListLayout.FillDirection = Enum.FillDirection.Vertical
+UIListLayout.Padding = UDim.new(0, 6)
+
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    Holder.Visible = not minimized
+    Frame.Size = minimized and UDim2.new(0, 230, 0, 35) or UDim2.new(0, 230, 0, 270)
+end)
+
+-- Toggle button creator
+local function createToggle(name, var)
+    local btn = Instance.new("TextButton", Holder)
+    btn.Size = UDim2.new(1, 0, 0, 35)
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 16
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = name .. ": " .. tostring(_G[var])
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    btn.MouseEnter:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    end)
+
+    btn.MouseButton1Click:Connect(function()
+        _G[var] = not _G[var]
+        btn.Text = name .. ": " .. tostring(_G[var])
+    end)
+end
+
+-- Create toggles
+createToggle("ESP Enabled", "WRDESPEnabled")
+createToggle("Boxes", "WRDESPBoxes")
+createToggle("Names", "WRDESPNames")
+createToggle("Tracers", "WRDESPTracers")
+createToggle("Team Colors", "WRDESPTeamColors")
