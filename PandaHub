@@ -1,4 +1,5 @@
 -- TPUA v6 - Intense Teleport + Live Strength/Damping + Brookhaven Vehicles Addon
+-- Proximity Gating: Only parts near the sender are teleported
 -- LocalScript (StarterPlayerScripts)
 
 -- Services
@@ -44,6 +45,9 @@ local BG_SECOND   = Color3.fromRGB(36, 36, 42)
 local TEXT_WHITE  = Color3.new(1, 1, 1)
 local CORNER      = UDim.new(0, 8)
 local BTN_CORNER  = UDim.new(0, 6)
+
+-- Proximity gating (studs)
+local PROXIMITY_RADIUS = 50
 
 -- Intensity defaults (v5 baseline)
 local P_NORMAL_DEFAULT  = 250000
@@ -261,6 +265,7 @@ table.insert(connections, workspace.DescendantAdded:Connect(function(obj)
         trackPart(obj)
     end
 end))
+
 table.insert(connections, workspace.DescendantRemoving:Connect(function(obj)
     if obj:IsA("BasePart") then
         removeCandidate(obj)
@@ -294,7 +299,7 @@ local function connectVehicleModel(model)
         if obj:IsA("BasePart") and enabled then
             refreshVehicleHighlight(model)
         end
-    end)
+    end))
     lst[#lst+1] = model.AncestryChanged:Connect(function(_, parent)
         if not parent then
             disconnectVehicleModel(model)
@@ -643,16 +648,17 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- HEARTBEAT: apply forces (intense, with special vehicle tuning)
+-- HEARTBEAT: apply forces with proximity gating
 heartbeatConn = RunService.Heartbeat:Connect(function()
     if not enabled then return end
 
     ensureHighlightFolder()
 
     local target = resolveTarget(targetName)
-    local head = target and target.Character and target.Character:FindFirstChild("Head")
-    if not head then
-        -- maintain only highlights while no target
+    local targetHead = target and target.Character and target.Character:FindFirstChild("Head")
+    local headPos = targetHead and targetHead.Position
+    if not headPos then
+        -- maintain only highlights while no valid target head
         for part in pairs(candidateParts) do
             if not shouldConsider(part) then
                 removeCandidate(part)
@@ -669,7 +675,17 @@ heartbeatConn = RunService.Heartbeat:Connect(function()
         return
     end
 
-    local headPos = head.Position
+    -- Sender logic:
+    -- - If sending to someone else: they are the "sender" (their proximity gates which parts move).
+    -- - If sending to yourself: you are the sender.
+    local senderHead
+    if target and target ~= LP then
+        senderHead = targetHead
+    else
+        senderHead = LP.Character and LP.Character:FindFirstChild("Head")
+    end
+    if not senderHead then return end
+    local senderPos = senderHead.Position
 
     for part in pairs(candidateParts) do
         if not shouldConsider(part) then
@@ -678,23 +694,31 @@ heartbeatConn = RunService.Heartbeat:Connect(function()
             -- highlight upkeep
             if not highlights[part] then addPartHighlight(part) end
 
+            -- Proximity gating
+            local inRange = (part.Position - senderPos).Magnitude <= PROXIMITY_RADIUS
+
             local isVehicle = isInVehiclesFolder(part)
             local bp = createdForces[part]
-            if not bp or not bp.Parent then
-                bp = Instance.new("BodyPosition")
-                bp.Name = "tpuaBP"
-                bp.MaxForce = MAXFORCE_ALL
-                bp.D = getD(isVehicle)
-                bp.P = getP(isVehicle)
-                bp.Position = headPos
-                bp.Parent = part
-                createdForces[part] = bp
-            else
+
+            if inRange then
+                if not bp or not bp.Parent then
+                    bp = Instance.new("BodyPosition")
+                    bp.Name = "tpuaBP"
+                    bp.MaxForce = MAXFORCE_ALL
+                    bp.Parent = part
+                    createdForces[part] = bp
+                end
                 -- continuously reflect current tuning and target
                 bp.MaxForce = MAXFORCE_ALL
                 bp.D = getD(isVehicle)
                 bp.P = getP(isVehicle)
                 bp.Position = headPos
+            else
+                -- Out of range: release this part if we were pulling it
+                if bp then
+                    createdForces[part] = nil
+                    pcall(function() if bp.Parent then bp:Destroy() end end)
+                end
             end
 
             -- Optional: kill drift for ultra-snap
