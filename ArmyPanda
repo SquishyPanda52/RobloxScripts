@@ -1,41 +1,58 @@
 --[[
-  Hilton Executor UI — Follow + Attack (Client-Only)
-  - No server/chat hooks. Pure runtime local logic.
+  Panda Alts 🐼 — Follow + Attack + Auto-Click (Client-Only)
+  - No server/chat hooks. Pure local logic.
   - Follow and Attack are mutually exclusive.
   - Follow auto-disables on death (you or target). Attack does not auto-disable.
   - Draggable, compact UI with minimize (—/+) and hard close (X).
-  - Buttons show On/Off and color (green/red). Partial name matching supported.
+  - Buttons show On/Off and swap green/red.
+  - Attack can auto-press exactly one input: either Mouse1 (left), Mouse2 (right), or a KeyCode you press.
+    Set it via the "AutoPress" textbox: focus it, then press a key or click a mouse button once.
 
-  Paste into your executor. Re-running replaces any previous instance cleanly.
+  Re-inject safe: re-running replaces any previous instance cleanly.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
 if _G.HiltonExec and _G.HiltonExec.Cleanup then
     pcall(_G.HiltonExec.Cleanup)
 end
-_G.HiltonExec = { }
+_G.HiltonExec = {}
 
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
+-- Locals
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 
--- State
-local gui, mainFrame, titleBar, minBtn, closeBtn
-local content, followRow, followBtn, followBox
-local attackRow, attackBtn, attackBox
-local isMinimized = false
+-- Config
+local FOLLOW_FAR = 8      -- start moving if farther than this
+local FOLLOW_NEAR = 5     -- stop/idle if nearer than this
+local AUTOPRESS_HZ = 10   -- clicks/presses per second while Attack is ON
 
+-- UI State
+local gui, mainFrame, titleBar, minBtn, closeBtn
+local content
+local followBtn, followBox
+local attackBtn, attackBox
+local autoRow, autoLabel, autoBox
+
+-- Logic State
+local isMinimized = false
 local followEnabled = false
-local followTargetName = ""
 local followTargetPlayer = nil
+
 local attackEnabled = false
 local attackNames = {}
 
-local followConn, attackConn
+-- Auto-press binding: exactly one input
+-- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
+local binding = { kind = "mouse", button = 1 } -- default to Mouse1 (left click)
+
+-- Connections
+local followConn, attackConn, autoPressConn
 local connections = {}
 
 -- Utils
@@ -53,11 +70,9 @@ local function findClosestPlayer(fragment)
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl ~= localPlayer then
             local nm = pl.Name:lower()
-            -- Prefer substring match
             if nm:find(fragment, 1, true) then
                 return pl
             end
-            -- Fallback: length difference heuristic
             local score = math.abs(#nm - #fragment)
             if not bestScore or score < bestScore then
                 bestScore, best = score, pl
@@ -100,26 +115,22 @@ local function startFollow()
     followConn = RunService.Heartbeat:Connect(function()
         if not followEnabled or not followTargetPlayer then return end
 
-        local myChar = localPlayer.Character
-        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        local theirChar = followTargetPlayer.Character
-        local theirHum = theirChar and theirChar:FindFirstChildOfClass("Humanoid")
-        local theirRoot = theirChar and theirChar:FindFirstChild("HumanoidRootPart")
+        local myHum = getHumanoid(localPlayer)
+        local myRoot = getHRP(localPlayer)
+        local thHum = getHumanoid(followTargetPlayer)
+        local thRoot = getHRP(followTargetPlayer)
 
-        -- Auto-disable if either dies or parts missing
-        if not (myHum and myRoot and theirHum and theirRoot) or myHum.Health <= 0 or theirHum.Health <= 0 then
+        if not (myHum and myRoot and thHum and thRoot) or myHum.Health <= 0 or thHum.Health <= 0 then
             stopFollow()
             return
         end
 
-        local dist = (theirRoot.Position - myRoot.Position).Magnitude
-        -- Aim slightly behind target to give space
-        if dist > 8 then
-            local dir = (theirRoot.Position - myRoot.Position).Unit
-            local targetPos = theirRoot.Position - dir * 2
-            myHum:MoveTo(targetPos)
-        elseif dist < 5 then
+        local dist = (thRoot.Position - myRoot.Position).Magnitude
+        if dist > FOLLOW_FAR then
+            -- Keep a little buffer (2 studs) so we don't crowd
+            local dir = (thRoot.Position - myRoot.Position).Unit
+            myHum:MoveTo(thRoot.Position - dir * 2)
+        elseif dist < FOLLOW_NEAR then
             myHum:Move(Vector3.new())
         end
     end)
@@ -130,7 +141,36 @@ end
 local function stopAttack()
     attackEnabled = false
     if attackConn then attackConn:Disconnect() attackConn = nil end
+    if autoPressConn then autoPressConn:Disconnect() autoPressConn = nil end
     setBtnState(attackBtn, false, "Attack")
+end
+
+local function doAutoPress()
+    -- Press either the bound mouse button or key once
+    if binding.kind == "mouse" then
+        local mousePos = UserInputService:GetMouseLocation()
+        local btnIndex = (binding.button == 2) and 1 or 0 -- 0=left(Mouse1), 1=right(Mouse2)
+        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, true, game, 0)
+        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, false, game, 0)
+    elseif binding.kind == "key" and binding.keyCode then
+        VirtualInputManager:SendKeyEvent(true, binding.keyCode, false, game)
+        VirtualInputManager:SendKeyEvent(false, binding.keyCode, false, game)
+    end
+end
+
+local function startAutoPress()
+    if autoPressConn then autoPressConn:Disconnect() autoPressConn = nil end
+    local last = 0
+    autoPressConn = RunService.RenderStepped:Connect(function()
+        if not attackEnabled then return end
+        local now = time()
+        local interval = 1 / AUTOPRESS_HZ
+        if now - last >= interval then
+            doAutoPress()
+            last = now
+        end
+    end)
+    table.insert(connections, autoPressConn)
 end
 
 local function startAttack()
@@ -138,11 +178,10 @@ local function startAttack()
     attackConn = RunService.Heartbeat:Connect(function()
         if not attackEnabled or #attackNames == 0 then return end
 
-        local myChar = localPlayer.Character
-        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local myHum = getHumanoid(localPlayer)
+        local myRoot = getHRP(localPlayer)
         if not (myHum and myRoot) or myHum.Health <= 0 then
-            -- Do NOT auto-disable attack per spec; just wait for respawn/parts
+            -- Attack stays enabled; resumes when respawned/parts ready
             return
         end
 
@@ -164,6 +203,9 @@ local function startAttack()
         end
     end)
     table.insert(connections, attackConn)
+
+    -- Auto-press loop (mouse or key), only one binding is used
+    startAutoPress()
 end
 
 -- UI build
@@ -177,7 +219,7 @@ local function buildUI()
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "Main"
-    mainFrame.Size = UDim2.new(0, 280, 0, 160)
+    mainFrame.Size = UDim2.new(0, 300, 0, 220)
     mainFrame.Position = UDim2.new(0, 40, 0, 120)
     mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
     mainFrame.BorderSizePixel = 0
@@ -197,7 +239,7 @@ local function buildUI()
     titleLabel.Size = UDim2.new(1, -80, 1, 0)
     titleLabel.Position = UDim2.new(0, 10, 0, 0)
     titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "Admin Executor"
+    titleLabel.Text = "Panda Alts 🐼"
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 14
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -208,7 +250,7 @@ local function buildUI()
     minBtn.Size = UDim2.new(0, 26, 0, 22)
     minBtn.Position = UDim2.new(1, -62, 0.5, -11)
     minBtn.BackgroundColor3 = Color3.fromRGB(90, 100, 130)
-    minBtn.Text = "-"
+    minBtn.Text = "—"
     minBtn.Font = Enum.Font.GothamBold
     minBtn.TextSize = 14
     minBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -238,18 +280,16 @@ local function buildUI()
     vlist.Padding = UDim.new(0, 8)
 
     -- Follow row
-    followRow = Instance.new("Frame")
+    local followRow = Instance.new("Frame")
     followRow.Size = UDim2.new(1, 0, 0, 30)
     followRow.BackgroundTransparency = 1
     followRow.Parent = content
-
-    local fhlist = Instance.new("UIListLayout", followRow)
-    fhlist.FillDirection = Enum.FillDirection.Horizontal
-    fhlist.SortOrder = Enum.SortOrder.LayoutOrder
-    fhlist.Padding = UDim.new(0, 6)
+    local fh = Instance.new("UIListLayout", followRow)
+    fh.FillDirection = Enum.FillDirection.Horizontal
+    fh.Padding = UDim.new(0, 6)
 
     followBtn = Instance.new("TextButton")
-    followBtn.Size = UDim2.new(0, 110, 1, 0)
+    followBtn.Size = UDim2.new(0, 120, 1, 0)
     followBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
     followBtn.TextColor3 = Color3.new(1, 1, 1)
     followBtn.Font = Enum.Font.GothamBold
@@ -259,7 +299,7 @@ local function buildUI()
     Instance.new("UICorner", followBtn).CornerRadius = UDim.new(0, 6)
 
     followBox = Instance.new("TextBox")
-    followBox.Size = UDim2.new(1, -116, 1, 0)
+    followBox.Size = UDim2.new(1, -126, 1, 0)
     followBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
     followBox.PlaceholderText = "Username (partial ok)"
     followBox.Text = ""
@@ -271,18 +311,16 @@ local function buildUI()
     Instance.new("UICorner", followBox).CornerRadius = UDim.new(0, 6)
 
     -- Attack row
-    attackRow = Instance.new("Frame")
+    local attackRow = Instance.new("Frame")
     attackRow.Size = UDim2.new(1, 0, 0, 30)
     attackRow.BackgroundTransparency = 1
     attackRow.Parent = content
-
-    local ahlist = Instance.new("UIListLayout", attackRow)
-    ahlist.FillDirection = Enum.FillDirection.Horizontal
-    ahlist.SortOrder = Enum.SortOrder.LayoutOrder
-    ahlist.Padding = UDim.new(0, 6)
+    local ah = Instance.new("UIListLayout", attackRow)
+    ah.FillDirection = Enum.FillDirection.Horizontal
+    ah.Padding = UDim.new(0, 6)
 
     attackBtn = Instance.new("TextButton")
-    attackBtn.Size = UDim2.new(0, 110, 1, 0)
+    attackBtn.Size = UDim2.new(0, 120, 1, 0)
     attackBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
     attackBtn.TextColor3 = Color3.new(1, 1, 1)
     attackBtn.Font = Enum.Font.GothamBold
@@ -292,7 +330,7 @@ local function buildUI()
     Instance.new("UICorner", attackBtn).CornerRadius = UDim.new(0, 6)
 
     attackBox = Instance.new("TextBox")
-    attackBox.Size = UDim2.new(1, -116, 1, 0)
+    attackBox.Size = UDim2.new(1, -126, 1, 0)
     attackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
     attackBox.PlaceholderText = "User1, User2 (partial ok)"
     attackBox.Text = ""
@@ -302,6 +340,37 @@ local function buildUI()
     attackBox.ClearTextOnFocus = false
     attackBox.Parent = attackRow
     Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
+
+    -- Auto-press row
+    autoRow = Instance.new("Frame")
+    autoRow.Size = UDim2.new(1, 0, 0, 30)
+    autoRow.BackgroundTransparency = 1
+    autoRow.Parent = content
+    local autol = Instance.new("UIListLayout", autoRow)
+    autol.FillDirection = Enum.FillDirection.Horizontal
+    autol.Padding = UDim.new(0, 6)
+
+    autoLabel = Instance.new("TextLabel")
+    autoLabel.Size = UDim2.new(0, 120, 1, 0)
+    autoLabel.BackgroundTransparency = 1
+    autoLabel.Font = Enum.Font.GothamBold
+    autoLabel.TextSize = 14
+    autoLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    autoLabel.TextXAlignment = Enum.TextXAlignment.Left
+    autoLabel.Text = "AutoPress:"
+    autoLabel.Parent = autoRow
+
+    autoBox = Instance.new("TextBox")
+    autoBox.Size = UDim2.new(1, -126, 1, 0)
+    autoBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    autoBox.PlaceholderText = "Click here, then press a key or mouse"
+    autoBox.Text = "Mouse1 (default)"
+    autoBox.TextColor3 = Color3.new(1, 1, 1)
+    autoBox.Font = Enum.Font.Gotham
+    autoBox.TextSize = 14
+    autoBox.ClearTextOnFocus = false
+    autoBox.Parent = autoRow
+    Instance.new("UICorner", autoBox).CornerRadius = UDim.new(0, 6)
 
     -- Dragging (title bar is the handle)
     local dragging, dragStart, startPos = false, nil, nil
@@ -326,8 +395,8 @@ local function buildUI()
     minBtn.MouseButton1Click:Connect(function()
         isMinimized = not isMinimized
         content.Visible = not isMinimized
-        mainFrame.Size = isMinimized and UDim2.new(0, 280, 0, 30) or UDim2.new(0, 280, 0, 160)
-        minBtn.Text = isMinimized and "+" or "-"
+        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 220)
+        minBtn.Text = isMinimized and "+" or "—"
     end)
 
     -- Close (hard cleanup)
@@ -341,20 +410,20 @@ end
 -- Button logic (mutually exclusive)
 local function onFollowToggle()
     local newState = not followEnabled
-
-    -- If enabling follow, disable attack first
     if newState then
         if attackEnabled then
+            -- disable attack first
+            attackEnabled = false
             stopAttack()
         end
-        followTargetName = followBox.Text
-        followTargetPlayer = findClosestPlayer(followTargetName)
-        if not followTargetPlayer then
-            -- No target found, keep off
+        local targetName = followBox.Text
+        local target = findClosestPlayer(targetName)
+        if not target then
             setBtnState(followBtn, false, "Follow")
             followEnabled = false
             return
         end
+        followTargetPlayer = target
         followEnabled = true
         setBtnState(followBtn, true, "Follow")
         startFollow()
@@ -365,10 +434,9 @@ end
 
 local function onAttackToggle()
     local newState = not attackEnabled
-
-    -- If enabling attack, disable follow first
     if newState then
         if followEnabled then
+            followEnabled = false
             stopFollow()
         end
         parseAttackNames(attackBox.Text)
@@ -385,33 +453,72 @@ local function onAttackToggle()
     end
 end
 
+-- AutoPress binding capture: exactly one input (mouse or key)
+local function describeBinding()
+    if binding.kind == "mouse" then
+        return (binding.button == 2) and "Mouse2" or "Mouse1"
+    else
+        return "Key:" .. tostring(binding.keyCode):gsub("Enum.KeyCode.", "")
+    end
+end
+
+local bindingCaptureConn
+local function beginBindingCapture()
+    if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
+    autoBox.Text = "Press a key or click..."
+    bindingCaptureConn = UserInputService.InputBegan:Connect(function(input: InputObject, gpe)
+        if not autoBox:IsFocused() then return end
+        -- Accept exactly one input: mouse or key, ignore TextBox typing as text
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            binding = { kind = "mouse", button = 1 }
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+            binding = { kind = "mouse", button = 2 }
+        elseif input.KeyCode and input.KeyCode ~= Enum.KeyCode.Unknown then
+            binding = { kind = "key", keyCode = input.KeyCode }
+        else
+            return
+        end
+        autoBox.Text = describeBinding()
+        autoBox:ReleaseFocus()
+        if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
+    end)
+    table.insert(connections, bindingCaptureConn)
+end
+
 -- Cleanup routine
 function _G.HiltonExec.Cleanup()
-    -- Disconnect all connections
     pcall(function()
         if followConn then followConn:Disconnect() end
         if attackConn then attackConn:Disconnect() end
+        if autoPressConn then autoPressConn:Disconnect() end
+        if bindingCaptureConn then bindingCaptureConn:Disconnect() end
         for _, c in ipairs(connections) do
             if c and c.Disconnect then c:Disconnect() end
         end
     end)
-    followConn, attackConn = nil, nil
-
-    -- Destroy UI
+    followConn, attackConn, autoPressConn, bindingCaptureConn = nil, nil, nil, nil
     if gui then pcall(function() gui:Destroy() end) end
-
-    -- Clear globals
     _G.HiltonExec = nil
 end
 
--- Build UI and wire
+-- Build and wire UI
 buildUI()
+
 table.insert(connections, followBtn.MouseButton1Click:Connect(onFollowToggle))
 table.insert(connections, attackBtn.MouseButton1Click:Connect(onAttackToggle))
-table.insert(connections, followBox.FocusLost:Connect(function() if followEnabled then onFollowToggle() onFollowToggle() end end))
-table.insert(connections, attackBox.FocusLost:Connect(function() if attackEnabled then parseAttackNames(attackBox.Text) end end))
-
--- Optional: re-run loops safely on respawn (they already handle nils)
-table.insert(connections, localPlayer.CharacterAdded:Connect(function()
-    -- Nothing special: loops reference current character every tick
+table.insert(connections, followBox.FocusLost:Connect(function()
+    if followEnabled then
+        -- If user changed name while following, reapply target
+        stopFollow()
+        onFollowToggle()
+    end
 end))
+table.insert(connections, attackBox.FocusLost:Connect(function()
+    if attackEnabled then
+        parseAttackNames(attackBox.Text)
+    end
+end))
+table.insert(connections, autoBox.Focused:Connect(beginBindingCapture))
+
+-- Character change safety (loops already check parts each tick)
+table.insert(connections, localPlayer.CharacterAdded:Connect(function() end))
