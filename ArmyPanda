@@ -1,298 +1,475 @@
--- Admin Executor UI
-local Players       = game:GetService("Players")
-local RunService    = game:GetService("RunService")
+--[[ 
+  Panda Assist — Follow + Attack (client-side)
+  - Compact, draggable UI with minimize
+  - Live button colors (green=on, red=off)
+  - "follow me" auto-enables follow on the speaker; "stay" auto-disables
+  - Attack accepts comma-separated usernames and chases the nearest valid target
+  - Chat scanning works even when follow is off
+  - Respawn-safe and UI persists across deaths
 
-local localPlayer   = Players.LocalPlayer
-local playerGui     = localPlayer:WaitForChild("PlayerGui")
+  Drop-in as a LocalScript (e.g., via your executor or PlayerGui). No assets required.
+]]
 
--- Cleanup existing UI if present
-if _G.AdminExecutorUI then
-    _G.AdminExecutorUI:Destroy()
-    _G.AdminExecutorConnections = nil
+--// Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TextChatService = game:GetService("TextChatService")
+
+--// Locals
+local LP = Players.LocalPlayer
+local PlayerGui = LP:WaitForChild("PlayerGui")
+
+--// Config
+local FOLLOW_MIN_DIST = 6           -- stop moving if closer than this
+local FOLLOW_REENGAGE_DIST = 10     -- resume moving if farther than this
+local ATTACK_RANGE = 9              -- distance to start activating tool
+local MOVE_POLL_HZ = 15             -- movement loop rate (times per second)
+local TOOL_ACTIVATE_COOLDOWN = 0.4  -- seconds between tool activations
+
+--// State
+local gui, frame, btnFollow, btnAttack, txtTargets, lblStatus, btnMin
+local isFollowing = false
+local isAttacking = false
+local minimized = false
+local followTarget: Player? = nil
+local targetList: {Player} = {}
+local lastActivateTime = 0
+local connHeartbeat, connCharAdded = nil, nil
+local chatConnections = {}
+
+--// Utilities
+local function getCharParts(p: Player)
+    local char = p.Character or p.CharacterAdded:Wait()
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    return char, hrp, hum
 end
 
--- State variables
-local followEnabled, followTargetName, followTargetPlayer
-local attackEnabled, attackNames = false, {}
-local followConn, attackConn
-local connections = {}
+local function getMyParts()
+    return getCharParts(LP)
+end
 
--- Utility: Find the player whose name best matches the given input
-local function findClosestPlayer(name)
-    name = name:lower()
-    local best, bestScore
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl ~= localPlayer then
-            local plName = pl.Name:lower()
-            if plName:find(name, 1, true) then
-                return pl
-            end
-            local score = math.abs(#plName - #name)
-            if not bestScore or score < bestScore then
-                bestScore, best = score, pl
-            end
+local function alive(p: Player)
+    local char, _, hum = getCharParts(p)
+    return char and hum and hum.Health > 0
+end
+
+local function distance(a: Vector3, b: Vector3)
+    return (a - b).Magnitude
+end
+
+local function colorize(button: TextButton, on: boolean)
+    button.BackgroundColor3 = on and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(231, 76, 60)
+end
+
+local function setStatus(text: string)
+    lblStatus.Text = text
+end
+
+local function safeEquipAnyTool()
+    local char, _, hum = getMyParts()
+    if not char or not hum then return end
+    local backpack = LP:FindFirstChildOfClass("Backpack")
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool and backpack then
+        tool = backpack:FindFirstChildOfClass("Tool")
+        if tool then
+            tool.Parent = char
         end
     end
-    return best
 end
 
--- Create ScreenGui
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AdminExecutorUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = playerGui
-_G.AdminExecutorUI = screenGui
-
--- Main frame
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 260, 0, 210)
-mainFrame.Position = UDim2.new(0.3, 0, 0.2, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
-
--- Title bar
-local titleBar = Instance.new("Frame", mainFrame)
-titleBar.Size = UDim2.new(1, 0, 0,  Thirty)
-titleBar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-titleBar.BorderSizePixel = 0
-Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 6)
-
-local titleLabel = Instance.new("TextLabel", titleBar)
-titleLabel.Size = UDim2.new(1, -70, 1, 0)
-titleLabel.Position = UDim2.new(0, 10, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Admin Executor"
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextSize = 16
-titleLabel.TextColor3 = Color3.new(1, 1, 1)
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- Close button
-local closeBtn = Instance.new("TextButton", titleBar)
-closeBtn.Size = UDim2.new(0, 24, 0, 24)
-closeBtn.Position = UDim2.new(1, -30, 0.5, -12)
-closeBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 18
-closeBtn.Text = "X"
-closeBtn.TextColor3 = Color3.new(1, 1, 1)
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
-
--- Minimize/Expand button
-local minBtn = Instance.new("TextButton", titleBar)
-minBtn.Size = UDim2.new(0, 24, 0, 24)
-minBtn.Position = UDim2.new(1, -60, 0.5, -12)
-minBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 20)
-minBtn.Font = Enum.Font.GothamBold
-minBtn.TextSize = 18
-minBtn.Text = "-"
-minBtn.TextColor3 = Color3.new(1, 1, 1)
-Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 6)
-
--- Content container
-local content = Instance.new("Frame", mainFrame)
-content.Size = UDim2.new(1, -10, 1, -40)
-content.Position = UDim2.new(0, 5, 0, 35)
-content.BackgroundTransparency = 1
-
-local listLayout = Instance.new("UIListLayout", content)
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Padding = UDim.new(0, 6)
-
--- Follow controls
-local followHolder = Instance.new("Frame", content)
-followHolder.Size = UDim2.new(1, 0, 0, 30)
-followHolder.BackgroundTransparency = 1
-
-local followLayout = Instance.new("UIListLayout", followHolder)
-followLayout.FillDirection = Enum.FillDirection.Horizontal
-followLayout.Padding = UDim.new(0, 6)
-followLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local followBtn = Instance.new("TextButton", followHolder)
-followBtn.Size = UDim2.new(0, 80, 1, 0)
-followBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-followBtn.Font = Enum.Font.GothamBold
-followBtn.TextSize = 14
-followBtn.Text = "Follow: Off"
-followBtn.TextColor3 = Color3.new(1, 1, 1)
-Instance.new("UICorner", followBtn).CornerRadius = UDim.new(0, 6)
-
-local followBox = Instance.new("TextBox", followHolder)
-followBox.Size = UDim2.new(1, -90, 1, 0)
-followBox.PlaceholderText = "Username"
-followBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-followBox.Font = Enum.Font.Gotham
-followBox.TextSize = 14
-followBox.TextColor3 = Color3.new(1, 1, 1)
-Instance.new("UICorner", followBox).CornerRadius = UDim.new(0, 6)
-
-local followHint = Instance.new("TextLabel", content)
-followHint.Size = UDim2.new(1, 0, 0, 20)
-followHint.BackgroundTransparency = 1
-followHint.Text = "Say 'follow me' / 'stay' to toggle"
-followHint.Font = Enum.Font.Gotham
-followHint.TextSize = 12
-followHint.TextColor3 = Color3.fromRGB(200, 200, 200)
-followHint.TextXAlignment = Enum.TextXAlignment.Left
-
--- Attack controls
-local attackHolder = Instance.new("Frame", content)
-attackHolder.Size = UDim2.new(1, 0, 0, 30)
-attackHolder.BackgroundTransparency = 1
-
-local attackLayout = Instance.new("UIListLayout", attackHolder)
-attackLayout.FillDirection = Enum.FillDirection.Horizontal
-attackLayout.Padding = UDim.new(0, 6)
-attackLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local attackBtn = Instance.new("TextButton", attackHolder)
-attackBtn.Size = UDim2.new(0, 80, 1, 0)
-attackBtn.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
-attackBtn.Font = Enum.Font.GothamBold
-attackBtn.TextSize = 14
-attackBtn.Text = "Attack: Off"
-attackBtn.TextColor3 = Color3.new(1, 1, 1)
-Instance.new("UICorner", attackBtn).CornerRadius = UDim.new(0, 6)
-
-local attackBox = Instance.new("TextBox", attackHolder)
-attackBox.Size = UDim2.new(1, -90, 1, 0)
-attackBox.PlaceholderText = "User1, User2"
-attackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-attackBox.Font = Enum.Font.Gotham
-attackBox.TextSize = 14
-attackBox.TextColor3 = Color3.new(1, 1, 1)
-Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
-
--- Follow routine
-local function startFollow()
-    if followConn then followConn:Disconnect() end
-    followConn = RunService.Heartbeat:Connect(function()
-        if not followEnabled or not followTargetPlayer then return end
-        local myChar = localPlayer.Character
-        local theirChar = followTargetPlayer.Character
-        if not (myChar and theirChar) then return end
-
-        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-        local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
-        if not (myRoot and theirRoot) then return end
-
-        local dist = (theirRoot.Position - myRoot.Position).Magnitude
-        if dist > 6 then
-            localPlayer.Character.Humanoid:MoveTo(theirRoot.Position)
-        end
-    end)
-    table.insert(connections, followConn)
+local function tryActivateTool()
+    local now = time()
+    if now - lastActivateTime < TOOL_ACTIVATE_COOLDOWN then return end
+    lastActivateTime = now
+    local char = LP.Character
+    if not char then return end
+    local tool = char:FindFirstChildOfClass("Tool")
+    if tool and tool.Activate then
+        pcall(function() tool:Activate() end)
+    end
 end
 
--- Attack routine
-local function startAttack()
-    if attackConn then attackConn:Disconnect() end
-    attackConn = RunService.Heartbeat:Connect(function()
-        if not attackEnabled or #attackNames == 0 then return end
-        local myChar = localPlayer.Character
-        if not myChar then return end
-        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-        if not myRoot then return end
-
-        local closestDist, targetPos
-        for _, uname in ipairs(attackNames) do
-            local pl = findClosestPlayer(uname)
-            if pl and pl.Character then
-                local hrp = pl.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local d = (hrp.Position - myRoot.Position).Magnitude
-                    if not closestDist or d < closestDist then
-                        closestDist, targetPos = d, hrp.Position
-                    end
+local function listToPlayers(input: string): {Player}
+    local out = {}
+    local seen = {}
+    for name in string.gmatch(input or "", "([^,%s]+)") do
+        local needle = name:lower()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if not seen[p] then
+                if p.Name:lower() == needle or (p.DisplayName and p.DisplayName:lower() == needle) then
+                    table.insert(out, p)
+                    seen[p] = true
                 end
             end
         end
-
-        if targetPos then
-            localPlayer.Character.Humanoid:MoveTo(targetPos)
-        end
-    end)
-    table.insert(connections, attackConn)
+    end
+    return out
 end
 
--- Button callbacks
-
-followBtn.MouseButton1Click:Connect(function()
-    followEnabled = not followEnabled
-    followBtn.Text = "Follow: " .. (followEnabled and "On" or "Off")
-    if followEnabled then
-        followTargetName = followBox.Text
-        followTargetPlayer = findClosestPlayer(followTargetName)
-        if followTargetPlayer then
-            startFollow()
-        end
-    end
-end)
-
-attackBtn.MouseButton1Click:Connect(function()
-    attackEnabled = not attackEnabled
-    attackBtn.Text = "Attack: " .. (attackEnabled and "On" or "Off")
-    if attackEnabled then
-        -- parse comma-separated usernames
-        attackNames = {}
-        for name in attackBox.Text:gmatch("([^,]+)") do
-            table.insert(attackNames, name:match("^%s*(.-)%s*$"))
-        end
-        startAttack()
-    end
-end)
-
--- Chat triggers for follow
-for _, pl in ipairs(Players:GetPlayers()) do
-    connections[#connections+1] = pl.Chatted:Connect(function(msg)
-        if not followEnabled and pl == followTargetPlayer then
-            local m = msg:lower()
-            if m:match("^follow me") then
-                followEnabled = true
-                followBtn.Text = "Follow: On"
-                startFollow()
-            elseif m:match("^stay") then
-                followEnabled = false
-                followBtn.Text = "Follow: Off"
+local function nearestOf(list: {Player}): Player?
+    local _, myHRP = getMyParts()
+    if not myHRP then return nil end
+    local bestP, bestD = nil, math.huge
+    for _, p in ipairs(list) do
+        if p ~= LP and alive(p) then
+            local _, hrp = getCharParts(p)
+            if hrp then
+                local d = distance(myHRP.Position, hrp.Position)
+                if d < bestD then
+                    bestD, bestP = d, p
+                end
             end
+        end
+    end
+    return bestP
+end
+
+--// Follow/Attack control
+local function setFollowTarget(p: Player?)
+    followTarget = p
+    isFollowing = p ~= nil
+    colorize(btnFollow, isFollowing)
+    if isFollowing and p then
+        setStatus("Following: @" .. p.Name)
+    else
+        setStatus("Idle")
+    end
+end
+
+local function setAttack(on: boolean)
+    isAttacking = on
+    colorize(btnAttack, isAttacking)
+    if isAttacking then
+        setStatus(#targetList > 0 and ("Attacking nearest of (" .. #targetList .. ")") or "Attacking (no targets set)")
+    elseif not isFollowing then
+        setStatus("Idle")
+    end
+end
+
+local function refreshTargets()
+    targetList = listToPlayers(txtTargets.Text)
+end
+
+--// Movement loop
+local function moveLoop(dt)
+    -- Follow logic
+    if isFollowing and followTarget and alive(followTarget) then
+        local myChar, myHRP, myHum = getMyParts()
+        local _, tHRP = getCharParts(followTarget)
+        if myChar and myHRP and myHum and tHRP then
+            local d = distance(myHRP.Position, tHRP.Position)
+            if d > FOLLOW_REENGAGE_DIST then
+                myHum:MoveTo(tHRP.Position)
+            elseif d < FOLLOW_MIN_DIST then
+                myHum:Move(Vector3.new())
+            end
+        end
+    end
+
+    -- Attack logic
+    if isAttacking then
+        if #targetList == 0 then
+            refreshTargets()
+        end
+        local target = nearestOf(targetList)
+        local myChar, myHRP, myHum = getMyParts()
+        if target and myChar and myHRP and myHum then
+            local _, tHRP = getCharParts(target)
+            if tHRP then
+                local d = distance(myHRP.Position, tHRP.Position)
+                myHum:MoveTo(tHRP.Position)
+                if d <= ATTACK_RANGE then
+                    safeEquipAnyTool()
+                    tryActivateTool()
+                end
+            end
+        end
+    end
+end
+
+--// UI: build compact, draggable panel
+local function makeUI()
+    gui = Instance.new("ScreenGui")
+    gui.Name = "PandaAssist"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = PlayerGui
+
+    frame = Instance.new("Frame")
+    frame.Name = "Panel"
+    frame.Size = UDim2.fromOffset(262, 128)
+    frame.Position = UDim2.new(0, 20, 0, 90)
+    frame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+    frame.BorderSizePixel = 0
+    frame.Parent = gui
+
+    local uic = Instance.new("UICorner")
+    uic.CornerRadius = UDim.new(0, 8)
+    uic.Parent = frame
+
+    local titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.Size = UDim2.new(1, 0, 0, 28)
+    titleBar.BackgroundColor3 = Color3.fromRGB(34, 34, 42)
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = frame
+
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, -60, 1, 0)
+    title.Position = UDim2.new(0, 10, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 14
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.TextColor3 = Color3.fromRGB(236, 240, 241)
+    title.Text = "🐼 Panda Assist"
+    title.Parent = titleBar
+
+    btnMin = Instance.new("TextButton")
+    btnMin.Name = "Minimize"
+    btnMin.Size = UDim2.fromOffset(28, 20)
+    btnMin.Position = UDim2.new(1, -34, 0.5, -10)
+    btnMin.BackgroundColor3 = Color3.fromRGB(52, 73, 94)
+    btnMin.AutoButtonColor = true
+    btnMin.TextColor3 = Color3.fromRGB(236, 240, 241)
+    btnMin.Font = Enum.Font.GothamBold
+    btnMin.TextSize = 12
+    btnMin.Text = "—"
+    btnMin.Parent = titleBar
+    local uicMin = Instance.new("UICorner", btnMin)
+    uicMin.CornerRadius = UDim.new(0, 6)
+
+    local body = Instance.new("Frame")
+    body.Name = "Body"
+    body.Size = UDim2.new(1, -16, 1, -44)
+    body.Position = UDim2.new(0, 8, 0, 36)
+    body.BackgroundTransparency = 1
+    body.Parent = frame
+
+    btnFollow = Instance.new("TextButton")
+    btnFollow.Name = "Follow"
+    btnFollow.Size = UDim2.fromOffset(120, 28)
+    btnFollow.Position = UDim2.new(0, 0, 0, 0)
+    btnFollow.BorderSizePixel = 0
+    btnFollow.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btnFollow.Font = Enum.Font.GothamBold
+    btnFollow.TextSize = 14
+    btnFollow.Text = "Follow"
+    btnFollow.Parent = body
+    colorize(btnFollow, false)
+    local uicF = Instance.new("UICorner", btnFollow)
+    uicF.CornerRadius = UDim.new(0, 6)
+
+    btnAttack = Instance.new("TextButton")
+    btnAttack.Name = "Attack"
+    btnAttack.Size = UDim2.fromOffset(120, 28)
+    btnAttack.Position = UDim2.new(0, 124, 0, 0)
+    btnAttack.BorderSizePixel = 0
+    btnAttack.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btnAttack.Font = Enum.Font.GothamBold
+    btnAttack.TextSize = 14
+    btnAttack.Text = "Attack"
+    btnAttack.Parent = body
+    colorize(btnAttack, false)
+    local uicA = Instance.new("UICorner", btnAttack)
+    uicA.CornerRadius = UDim.new(0, 6)
+
+    txtTargets = Instance.new("TextBox")
+    txtTargets.Name = "Targets"
+    txtTargets.Size = UDim2.new(1, 0, 0, 28)
+    txtTargets.Position = UDim2.new(0, 0, 0, 36)
+    txtTargets.BackgroundColor3 = Color3.fromRGB(44, 62, 80)
+    txtTargets.BorderSizePixel = 0
+    txtTargets.PlaceholderText = "Targets: username1, username2"
+    txtTargets.Text = ""
+    txtTargets.TextColor3 = Color3.fromRGB(236, 240, 241)
+    txtTargets.Font = Enum.Font.Gotham
+    txtTargets.TextSize = 14
+    txtTargets.ClearTextOnFocus = false
+    txtTargets.Parent = body
+    local uicT = Instance.new("UICorner", txtTargets)
+    uicT.CornerRadius = UDim.new(0, 6)
+
+    lblStatus = Instance.new("TextLabel")
+    lblStatus.Name = "Status"
+    lblStatus.Size = UDim2.new(1, 0, 0, 24)
+    lblStatus.Position = UDim2.new(0, 0, 0, 70)
+    lblStatus.BackgroundTransparency = 1
+    lblStatus.TextColor3 = Color3.fromRGB(189, 195, 199)
+    lblStatus.Font = Enum.Font.Gotham
+    lblStatus.TextSize = 13
+    lblStatus.TextXAlignment = Enum.TextXAlignment.Left
+    lblStatus.Text = "Idle"
+    lblStatus.Parent = body
+
+    -- Draggable via title bar
+    do
+        local dragging = false
+        local dragStart, startPos
+        titleBar.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dragStart = input.Position
+                startPos = frame.Position
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
+                    end
+                end)
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStart
+                frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end)
+    end
+
+    -- Minimize toggle
+    btnMin.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        btnMin.Text = minimized and "+" or "—"
+        for _, child in ipairs(frame:GetChildren()) do
+            if child.Name == "Body" then
+                child.Visible = not minimized
+            end
+        end
+        frame.Size = minimized and UDim2.fromOffset(262, 28) or UDim2.fromOffset(262, 128)
+    end)
+
+    -- Button logic
+    btnFollow.MouseButton1Click:Connect(function()
+        if isFollowing then
+            setFollowTarget(nil)
+        else
+            -- If a specific name is in the targets box, follow the first match; otherwise no-op until chat says "follow me"
+            local list = listToPlayers(txtTargets.Text)
+            setFollowTarget(list[1])
+        end
+    end)
+
+    btnAttack.MouseButton1Click:Connect(function()
+        if isAttacking then
+            setAttack(false)
+        else
+            refreshTargets()
+            setAttack(true)
+        end
+    end)
+
+    txtTargets.FocusLost:Connect(function()
+        refreshTargets()
+        if isAttacking then
+            setAttack(true) -- refresh status text count
         end
     end)
 end
-connections[#connections+1] = Players.PlayerAdded:Connect(function(pl)
-    connections[#connections+1] = pl.Chatted:Connect(function(msg)
-        if not followEnabled and pl == followTargetPlayer then
-            local m = msg:lower()
-            if m:match("^follow me") then
-                followEnabled = true
-                followBtn.Text = "Follow: On"
-                startFollow()
-            elseif m:match("^stay") then
-                followEnabled = false
-                followBtn.Text = "Follow: Off"
+
+--// Chat scanning: "follow me" -> follow speaker, "stay" -> stop following
+local function disconnectChats()
+    for _, c in ipairs(chatConnections) do
+        if c and c.Disconnect then pcall(function() c:Disconnect() end) end
+    end
+    chatConnections = {}
+end
+
+local function onChatMessage(speakerUserId: number?, text: string)
+    if not text then return end
+    local lower = text:lower()
+    if lower:find("follow me") then
+        if speakerUserId then
+            local p = Players:GetPlayerByUserId(speakerUserId)
+            if p and p ~= LP then
+                setFollowTarget(p)
             end
         end
-    end)
-end)
-
--- Minimize/expand logic
-local isMinimized = false
-minBtn.MouseButton1Click:Connect(function()
-    isMinimized = not isMinimized
-    content.Visible = not isMinimized
-    mainFrame.Size = isMinimized and UDim2.new(0, 260, 0, 30)
-                               or UDim2.new(0, 260, 0, 210)
-    minBtn.Text = isMinimized and "+" or "-"
-end)
-
--- Close logic
-closeBtn.MouseButton1Click:Connect(function()
-    for _, conn in ipairs(connections) do
-        if conn.Disconnect then conn:Disconnect() end
+    elseif lower:match("^%s*stay%s*$") or lower:find(" stay ") or lower:find(" stay!") then
+        setFollowTarget(nil)
     end
-    screenGui:Destroy()
-end)
+end
+
+local function connectChat()
+    disconnectChats()
+
+    -- TextChatService (new chat)
+    if TextChatService and (TextChatService.MessageReceived or TextChatService.OnIncomingMessage) then
+        local event = TextChatService.MessageReceived or TextChatService.OnIncomingMessage
+        table.insert(chatConnections, event:Connect(function(msg)
+            -- msg: TextChatMessage
+            local speakerUserId = nil
+            if msg and msg.TextSource and msg.TextSource.UserId then
+                speakerUserId = msg.TextSource.UserId
+            elseif msg and msg.PrefixText then
+                -- Fallback parse (rare)
+                local name = tostring(msg.PrefixText):gsub("%W","")
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p.Name == name or p.DisplayName == name then
+                        speakerUserId = p.UserId
+                        break
+                    end
+                end
+            end
+            onChatMessage(speakerUserId, msg and msg.Text or "")
+        end))
+    end
+
+    -- Legacy fallback: per-player Chatted (if available client-side)
+    for _, p in ipairs(Players:GetPlayers()) do
+        table.insert(chatConnections, p.Chatted:Connect(function(text)
+            onChatMessage(p.UserId, text)
+        end))
+    end
+    table.insert(chatConnections, Players.PlayerAdded:Connect(function(p)
+        table.insert(chatConnections, p.Chatted:Connect(function(text)
+            onChatMessage(p.UserId, text)
+        end))
+    end))
+end
+
+--// Character/loop wiring
+local function bindCharacter(char)
+    if connHeartbeat then connHeartbeat:Disconnect() connHeartbeat = nil end
+    -- small delay to ensure Humanoid exists
+    task.delay(0.15, function()
+        connHeartbeat = RunService.Heartbeat:Connect(function(dt)
+            -- throttle to MOVE_POLL_HZ
+            local step = 1 / MOVE_POLL_HZ
+            -- store accumulator on function to avoid upvalues
+            local acc = (bindCharacter._acc or 0) + dt
+            if acc >= step then
+                local n = math.floor(acc / step)
+                acc = acc - n * step
+                for _=1, n do
+                    moveLoop(step)
+                end
+            end
+            bindCharacter._acc = acc
+        end)
+    end)
+end
+
+local function init()
+    makeUI()
+    connectChat()
+
+    if LP.Character then bindCharacter(LP.Character) end
+    if connCharAdded then connCharAdded:Disconnect() end
+    connCharAdded = LP.CharacterAdded:Connect(bindCharacter)
+
+    -- Cleanup on leave
+    LP.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            disconnectChats()
+            if connHeartbeat then connHeartbeat:Disconnect() end
+            if connCharAdded then connCharAdded:Disconnect() end
+        end
+    end)
+end
+
+init()
