@@ -1,15 +1,14 @@
 --[[
-  Panda Assist — Follow + Attack (client-side) v2
-  - Singleton guard + hard cleanup (X) to prevent duplicate loops/prints
-  - Compact, draggable, minimizable UI
-  - Status line shows: "Follow: On/Off | Attack: On/Off"
-  - "follow me" and "stay" via legacy .Chatted (stable across experiences)
-  - Follow chooses first matching name in Targets, else last "follow me" speaker
-  - Attack chases nearest of comma-separated names and activates your tool in range
-  - Stall fallback if MoveTo is blocked; respawn-safe and UI persists
-  - Preflight checks essentials and warns if tool not found
+  Panda Assist — Follow + Attack (client-side) v3
+  - Runtime-only, no server permissions
+  - Follow and Attack are mutually exclusive
+  - Compact UI with Minimize (—) and Close (X) that fully kills the script
+  - Status shows: "Follow: On/Off | Attack: On/Off | Target: name/None"
+  - Reliable follow by Player Name or DisplayName; attack chases nearest of typed names
+  - Pathfinding fallback when MoveTo stalls or target is far
+  - Respawn-safe; no duplicate loops; no console spam
 
-  Use only in experiences you own or have permission for.
+  Use only where you have permission.
 ]]
 
 -- Singleton: clean any previous instance
@@ -22,6 +21,7 @@ end
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local PathfindingService = game:GetService("PathfindingService")
 
 --// Locals
 local LP = Players.LocalPlayer
@@ -32,27 +32,29 @@ local FOLLOW_MIN_DIST = 6
 local FOLLOW_REENGAGE_DIST = 10
 local ATTACK_RANGE = 9
 local MOVE_POLL_HZ = 15
-local TOOL_ACTIVATE_COOLDOWN = 0.4
+local TOOL_ACTIVATE_COOLDOWN = 0.35
 local PREFLIGHT_WAIT_SECS = 3
-local STALL_WINDOW = 1.2 -- seconds without closing distance -> switch to Move() fallback
+local STALL_WINDOW = 1.0          -- seconds with no progress before fallback
+local PATH_RECOMPUTE_SECS = 1.0    -- min seconds between path recompute
+local PATH_FAR_DIST = 28           -- distance at which we prefer pathing
 
 --// State
 local gui, frame, btnFollow, btnAttack, txtTargets, lblStatus, btnMin, btnClose
 local isFollowing = false
 local isAttacking = false
 local minimized = false
-local followTarget = nil           -- Player or nil
-local lastFollowSpeaker = nil      -- Player or nil (from "follow me")
+local followTarget = nil         -- Player or nil
 local targetList = {}
 local lastActivateTime = 0
 local connHeartbeat, connCharAdded = nil, nil
-local chatConnections = {}
-local preflightOk = false
-local dead = false -- set to true on hard close
+local dead = false
 
--- Stall tracking
+-- Stall/Pathing
 local lastDist = nil
 local lastDistTime = 0
+local lastPathCompute = 0
+local currentPathPoints = nil
+local currentPathIndex = 1
 
 --// Utilities
 local function getCharParts(p)
@@ -62,15 +64,27 @@ local function getCharParts(p)
     return char, hrp, hum
 end
 
-local function getMyParts()
-    return getCharParts(LP)
+local function myParts()
+    local char = LP.Character or LP.CharacterAdded:Wait()
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    return char, hrp, hum
 end
 
-local function alive(p)
+local function isAlive(p)
     local char = p.Character
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     return hum and hum.Health > 0
+end
+
+local function getPlayerPosition(p)
+    local char = p.Character
+    if not char then return nil end
+    local ok, cf = pcall(function() return char:GetPivot() end)
+    if ok and cf then return cf.Position end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    return hrp and hrp.Position or nil
 end
 
 local function distance(a, b)
@@ -81,22 +95,26 @@ local function colorize(button, on)
     button.BackgroundColor3 = on and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(231, 76, 60)
 end
 
-local function setStatusText()
+local function updateStatus()
     local f = isFollowing and "On" or "Off"
     local a = isAttacking and "On" or "Off"
-    lblStatus.Text = "Follow: " .. f .. " | Attack: " .. a
+    local targetName = "None"
+    if isFollowing and followTarget then
+        targetName = "@" .. followTarget.Name
+    elseif isAttacking and #targetList > 0 then
+        targetName = "Multi(" .. tostring(#targetList) .. ")"
+    end
+    lblStatus.Text = "Follow: " .. f .. " | Attack: " .. a .. " | Target: " .. targetName
 end
 
 local function safeEquipAnyTool()
-    local char, _, hum = getMyParts()
+    local char, _, hum = myParts()
     if not char or not hum then return end
     local backpack = LP:FindFirstChildOfClass("Backpack")
     local tool = char:FindFirstChildOfClass("Tool")
     if not tool and backpack then
         tool = backpack:FindFirstChildOfClass("Tool")
-        if tool then
-            tool.Parent = char
-        end
+        if tool then tool.Parent = char end
     end
 end
 
@@ -107,100 +125,171 @@ local function tryActivateTool()
     local char = LP.Character
     if not char then return end
     local tool = char:FindFirstChildOfClass("Tool")
-    if tool and tool.Activate then
-        pcall(function() tool:Activate() end)
-    end
+    if tool and tool.Activate then pcall(function() tool:Activate() end) end
 end
 
-local function listToPlayers(input)
-    local out = {}
+local function allPlayers()
+    local t = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then table.insert(t, p) end
+    end
+    return t
+end
+
+local function playersFromInput(text)
+    local targets = {}
     local seen = {}
-    for name in string.gmatch(input or "", "([^,%s]+)") do
-        local needle = name:lower()
-        for _, p in ipairs(Players:GetPlayers()) do
+    local raw = tostring(text or "")
+    for token in string.gmatch(raw, "([^,%s]+)") do
+        local needle = string.lower(token)
+        -- First: exact name/display name
+        for _, p in ipairs(allPlayers()) do
             if not seen[p] then
-                if p.Name:lower() == needle or (p.DisplayName and p.DisplayName:lower() == needle) then
-                    table.insert(out, p)
-                    seen[p] = true
+                if string.lower(p.Name) == needle or (p.DisplayName and string.lower(p.DisplayName) == needle) then
+                    table.insert(targets, p); seen[p] = true
                 end
             end
         end
+        -- Then: unique substring match (only if exactly one matches)
+        if not next(seen) then
+            local matches = {}
+            for _, p in ipairs(allPlayers()) do
+                if string.find(string.lower(p.Name), needle, 1, true) or (p.DisplayName and string.find(string.lower(p.DisplayName), needle, 1, true)) then
+                    table.insert(matches, p)
+                end
+            end
+            if #matches == 1 then
+                table.insert(targets, matches[1]); seen[matches[1]] = true
+            end
+        end
     end
-    return out
+    return targets
 end
 
-local function nearestOf(list)
-    local _, myHRP = getMyParts()
-    if not myHRP then return nil end
+local function nearestOf(list, fromPos)
     local bestP, bestD = nil, math.huge
     for _, p in ipairs(list) do
-        if p ~= LP and alive(p) then
-            local _, hrp = getCharParts(p)
-            if hrp then
-                local d = distance(myHRP.Position, hrp.Position)
-                if d < bestD then
-                    bestD, bestP = d, p
-                end
+        if p ~= LP and isAlive(p) then
+            local pos = getPlayerPosition(p)
+            if pos then
+                local d = distance(fromPos, pos)
+                if d < bestD then bestD, bestP = d, p end
             end
         end
     end
     return bestP
 end
 
---// Follow/Attack control
+-- Pathfinding (non-blocking)
+local function computePath(startPos, goalPos)
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true
+    })
+    local ok = pcall(function() path:ComputeAsync(startPos, goalPos) end)
+    if not ok or path.Status ~= Enum.PathStatus.Success then
+        return nil
+    end
+    local waypoints = path:GetWaypoints()
+    local points = {}
+    for _, w in ipairs(waypoints) do
+        table.insert(points, w.Position)
+    end
+    return points
+end
+
+local function maybePathTo(myHRP, goalPos)
+    local now = time()
+    if (now - lastPathCompute) < PATH_RECOMPUTE_SECS then return end
+    lastPathCompute = now
+    local pts = computePath(myHRP.Position, goalPos)
+    if pts and #pts >= 2 then
+        currentPathPoints = pts
+        currentPathIndex = 2 -- start after current position
+    else
+        currentPathPoints = nil
+        currentPathIndex = 1
+    end
+end
+
+-- Mode control (mutually exclusive)
 local function setFollowTarget(p)
     followTarget = p
     isFollowing = p ~= nil
+    if isFollowing and isAttacking then
+        isAttacking = false
+        colorize(btnAttack, false)
+    end
     colorize(btnFollow, isFollowing)
-    setStatusText()
+    currentPathPoints, currentPathIndex = nil, 1
+    updateStatus()
 end
 
 local function setAttack(on)
-    isAttacking = on
+    isAttacking = on and true or false
+    if isAttacking and isFollowing then
+        isFollowing = false
+        followTarget = nil
+        colorize(btnFollow, false)
+    end
     colorize(btnAttack, isAttacking)
-    setStatusText()
+    currentPathPoints, currentPathIndex = nil, 1
+    updateStatus()
 end
 
 local function refreshTargets()
-    targetList = listToPlayers(txtTargets.Text)
+    targetList = playersFromInput(txtTargets.Text)
+    updateStatus()
 end
 
---// Movement loop
+-- Movement loop
 local function moveLoop(dt)
-    if not preflightOk or dead then return end
+    if dead then return end
 
-    local myChar, myHRP, myHum = getMyParts()
+    local myChar, myHRP, myHum = myParts()
     if not (myChar and myHRP and myHum and myHum.Health > 0) then return end
 
+    local myPos = myHRP.Position
     local didMove = false
 
-    -- Follow
-    if isFollowing and followTarget and alive(followTarget) then
-        local _, tHRP = getCharParts(followTarget)
-        if tHRP then
-            local d = distance(myHRP.Position, tHRP.Position)
+    -- FOLLOW
+    if isFollowing and followTarget and isAlive(followTarget) then
+        local goalPos = getPlayerPosition(followTarget)
+        if goalPos then
+            local d = distance(myPos, goalPos)
             if d > FOLLOW_REENGAGE_DIST then
-                -- aim slightly behind to avoid bumping
-                local dir = (tHRP.Position - myHRP.Position).Unit
-                local targetPos = tHRP.Position - dir * math.min(2, d - FOLLOW_MIN_DIST)
-                myHum:MoveTo(targetPos)
+                -- prefer direct MoveTo when close/clear; path when far or stalled
+                if d > PATH_FAR_DIST or (lastDist and d >= lastDist - 0.05 and (time() - lastDistTime) > STALL_WINDOW) then
+                    maybePathTo(myHRP, goalPos)
+                end
+                if currentPathPoints then
+                    local nextPos = currentPathPoints[currentPathIndex]
+                    if nextPos then
+                        myHum:MoveTo(nextPos)
+                        if distance(myPos, nextPos) < 3 then
+                            currentPathIndex += 1
+                            if currentPathIndex > #currentPathPoints then
+                                currentPathPoints = nil
+                                currentPathIndex = 1
+                            end
+                        end
+                    end
+                else
+                    local dir = (goalPos - myPos)
+                    local targetPos = goalPos
+                    if dir.Magnitude > (FOLLOW_MIN_DIST + 2) then
+                        targetPos = goalPos - dir.Unit * 2
+                    end
+                    myHum:MoveTo(targetPos)
+                end
                 didMove = true
             elseif d < FOLLOW_MIN_DIST then
                 myHum:Move(Vector3.new())
             end
 
-            -- stall fallback
             if lastDist then
-                if d >= lastDist - 0.05 then
-                    if time() - lastDistTime > STALL_WINDOW then
-                        local dir = (tHRP.Position - myHRP.Position)
-                        if dir.Magnitude > 0.5 then
-                            myHum:Move(dir.Unit)
-                            didMove = true
-                            lastDistTime = time()
-                        end
-                    end
-                else
+                if d < lastDist - 0.05 then
                     lastDistTime = time()
                 end
             else
@@ -210,52 +299,65 @@ local function moveLoop(dt)
         end
     end
 
-    -- Attack
+    -- ATTACK
     if isAttacking then
-        if #targetList == 0 then
-            refreshTargets()
+        if #targetList == 0 then refreshTargets() end
+        local target = nil
+        local goalPos = nil
+        if #targetList > 0 then
+            local nearest = nearestOf(targetList, myPos)
+            if nearest then
+                target = nearest
+                goalPos = getPlayerPosition(nearest)
+            end
         end
-        local target = nearestOf(targetList)
-        if target and alive(target) then
-            local _, tHRP = getCharParts(target)
-            if tHRP then
-                local d = distance(myHRP.Position, tHRP.Position)
-                myHum:MoveTo(tHRP.Position)
-                didMove = true
-                if d <= ATTACK_RANGE then
-                    safeEquipAnyTool()
-                    tryActivateTool()
+        if target and goalPos then
+            local d = distance(myPos, goalPos)
+            if d > 2 then
+                if d > PATH_FAR_DIST or (lastDist and d >= lastDist - 0.05 and (time() - lastDistTime) > STALL_WINDOW) then
+                    maybePathTo(myHRP, goalPos)
                 end
-
-                -- stall fallback for attack chase
-                if lastDist then
-                    if d >= lastDist - 0.05 then
-                        if time() - lastDistTime > STALL_WINDOW then
-                            local dir = (tHRP.Position - myHRP.Position)
-                            if dir.Magnitude > 0.5 then
-                                myHum:Move(dir.Unit)
-                                didMove = true
-                                lastDistTime = time()
+                if currentPathPoints then
+                    local nextPos = currentPathPoints[currentPathIndex]
+                    if nextPos then
+                        myHum:MoveTo(nextPos)
+                        if distance(myPos, nextPos) < 3 then
+                            currentPathIndex += 1
+                            if currentPathIndex > #currentPathPoints then
+                                currentPathPoints = nil
+                                currentPathIndex = 1
                             end
                         end
-                    else
-                        lastDistTime = time()
                     end
                 else
+                    myHum:MoveTo(goalPos)
+                end
+                didMove = true
+            end
+            if d <= ATTACK_RANGE then
+                safeEquipAnyTool()
+                tryActivateTool()
+            end
+
+            if lastDist then
+                if d < lastDist - 0.05 then
                     lastDistTime = time()
                 end
-                lastDist = d
+            else
+                lastDistTime = time()
             end
+            lastDist = d
         end
     end
 
     if not didMove then
-        -- decay stall tracking when idle
+        -- reset pathing when idle
+        currentPathPoints, currentPathIndex = nil, 1
         lastDist = nil
     end
 end
 
---// UI
+-- UI
 local function makeUI()
     gui = Instance.new("ScreenGui")
     gui.Name = "PandaAssist"
@@ -266,7 +368,7 @@ local function makeUI()
 
     frame = Instance.new("Frame")
     frame.Name = "Panel"
-    frame.Size = UDim2.fromOffset(280, 138)
+    frame.Size = UDim2.fromOffset(300, 150)
     frame.Position = UDim2.new(0, 20, 0, 90)
     frame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
     frame.BorderSizePixel = 0
@@ -282,7 +384,7 @@ local function makeUI()
 
     local title = Instance.new("TextLabel")
     title.Name = "Title"
-    title.Size = UDim2.new(1, -70, 1, 0)
+    title.Size = UDim2.new(1, -80, 1, 0)
     title.Position = UDim2.new(0, 10, 0, 0)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBold
@@ -292,7 +394,6 @@ local function makeUI()
     title.Text = "🐼 Panda Assist"
     title.Parent = titleBar
 
-    -- Minimize
     btnMin = Instance.new("TextButton")
     btnMin.Name = "Minimize"
     btnMin.Size = UDim2.fromOffset(28, 20)
@@ -306,7 +407,6 @@ local function makeUI()
     btnMin.Parent = titleBar
     Instance.new("UICorner", btnMin).CornerRadius = UDim.new(0, 6)
 
-    -- Close (hard cleanup)
     btnClose = Instance.new("TextButton")
     btnClose.Name = "Close"
     btnClose.Size = UDim2.fromOffset(28, 20)
@@ -329,7 +429,7 @@ local function makeUI()
 
     btnFollow = Instance.new("TextButton")
     btnFollow.Name = "Follow"
-    btnFollow.Size = UDim2.fromOffset(130, 28)
+    btnFollow.Size = UDim2.fromOffset(140, 28)
     btnFollow.Position = UDim2.new(0, 0, 0, 0)
     btnFollow.BorderSizePixel = 0
     btnFollow.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -342,8 +442,8 @@ local function makeUI()
 
     btnAttack = Instance.new("TextButton")
     btnAttack.Name = "Attack"
-    btnAttack.Size = UDim2.fromOffset(130, 28)
-    btnAttack.Position = UDim2.new(0, 134, 0, 0)
+    btnAttack.Size = UDim2.fromOffset(140, 28)
+    btnAttack.Position = UDim2.new(0, 144, 0, 0)
     btnAttack.BorderSizePixel = 0
     btnAttack.TextColor3 = Color3.fromRGB(255, 255, 255)
     btnAttack.Font = Enum.Font.GothamBold
@@ -377,10 +477,10 @@ local function makeUI()
     lblStatus.Font = Enum.Font.Gotham
     lblStatus.TextSize = 13
     lblStatus.TextXAlignment = Enum.TextXAlignment.Left
-    lblStatus.Text = "Preflight running..."
+    lblStatus.Text = "Follow: Off | Attack: Off | Target: None"
     lblStatus.Parent = body
 
-    -- Draggable via title bar
+    -- Dragging (title bar only)
     local dragging, dragStart, startPos = false, nil, nil
     titleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -388,9 +488,7 @@ local function makeUI()
             dragStart = input.Position
             startPos = frame.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
@@ -406,99 +504,47 @@ local function makeUI()
         minimized = not minimized
         btnMin.Text = minimized and "+" or "—"
         for _, child in ipairs(frame:GetChildren()) do
-            if child.Name == "Body" then
-                child.Visible = not minimized
-            end
+            if child.Name == "Body" then child.Visible = not minimized end
         end
-        frame.Size = minimized and UDim2.fromOffset(280, 28) or UDim2.fromOffset(280, 138)
+        frame.Size = minimized and UDim2.fromOffset(300, 28) or UDim2.fromOffset(300, 150)
     end)
 end
 
---// Connections and chat
-local function disconnectChats()
-    for _, c in ipairs(chatConnections) do
-        if c and c.Disconnect then pcall(function() c:Disconnect() end) end
-    end
-    chatConnections = {}
+-- Cleanup
+local function cleanup()
+    if dead then return end
+    dead = true
+    if connHeartbeat then pcall(function() connHeartbeat:Disconnect() end) end
+    if connCharAdded then pcall(function() connCharAdded:Disconnect() end) end
+    if gui then pcall(function() gui:Destroy() end) end
+    _G.PandaAssistCleanup = nil
 end
 
-local function onChatMessage(speaker, text)
-    if not text then return end
-    local lower = string.lower(text)
-    if string.find(lower, "follow me", 1, true) then
-        if speaker and speaker ~= LP then
-            lastFollowSpeaker = speaker
-            setFollowTarget(speaker)
-        end
-    elseif string.match(lower, "^%s*stay%s*$") or string.find(lower, " stay ", 1, true) or string.find(lower, " stay!", 1, true) then
-        setFollowTarget(nil)
-    end
-end
-
-local function connectChat()
-    disconnectChats()
-    for _, p in ipairs(Players:GetPlayers()) do
-        table.insert(chatConnections, p.Chatted:Connect(function(text)
-            onChatMessage(p, text)
-        end))
-    end
-    table.insert(chatConnections, Players.PlayerAdded:Connect(function(p)
-        table.insert(chatConnections, p.Chatted:Connect(function(text)
-            onChatMessage(p, text)
-        end))
-    end))
-end
-
---// Preflight
+-- Preflight (silent)
 local function preflight()
-    local errors, warnings = {}, {}
-
-    -- Character & parts
     local deadline = time() + PREFLIGHT_WAIT_SECS
     local char = LP.Character
     while time() < deadline and not char do task.wait(0.05) char = LP.Character end
-    if not char then table.insert(errors, "Character not available.") end
-
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
     local end2 = time() + PREFLIGHT_WAIT_SECS
     while time() < end2 and (not hrp or not hum) do
         task.wait(0.05)
-        hrp = char and char:FindFirstChild("HumanoidRootPart")
-        hum = char and char:FindFirstChildOfClass("Humanoid")
+        hrp = char:FindFirstChild("HumanoidRootPart")
+        hum = char:FindFirstChildOfClass("Humanoid")
     end
-    if not hrp then table.insert(errors, "HumanoidRootPart not found.") end
-    if not hum then table.insert(errors, "Humanoid not found.") end
-
-    -- Movement availability
-    if hum and typeof(hum.MoveTo) ~= "function" then table.insert(errors, "Humanoid:MoveTo unavailable.") end
-    if hum and hum.WalkSpeed <= 0 then table.insert(warnings, "WalkSpeed is 0; movement may not occur.") end
-
-    -- UI mount
-    if not PlayerGui or not PlayerGui.Parent then table.insert(errors, "PlayerGui not available.") end
-
-    -- Tool presence (soft)
-    local hasTool = false
-    if char and char:FindFirstChildOfClass("Tool") then hasTool = true end
-    local backpack = LP:FindFirstChildOfClass("Backpack")
-    if backpack and backpack:FindFirstChildOfClass("Tool") then hasTool = true end
-    if not hasTool then table.insert(warnings, "No tool detected; Attack may not trigger damage/effects.") end
-
-    if #errors > 0 then
-        return false, errors[1], warnings
-    end
-    return true, nil, warnings
+    return (hrp ~= nil and hum ~= nil)
 end
 
---// Wiring
+-- Wiring
 local function bindCharacter(char)
-    if connHeartbeat then connHeartbeat:Disconnect() connHeartbeat = nil end
-    -- reset stall trackers on respawn
+    if connHeartbeat then pcall(function() connHeartbeat:Disconnect() end) end
     lastDist, lastDistTime = nil, 0
+    currentPathPoints, currentPathIndex = nil, 1
     task.delay(0.15, function()
         if dead then return end
         connHeartbeat = RunService.Heartbeat:Connect(function(dt)
-            -- throttle to MOVE_POLL_HZ
             local step = 1 / MOVE_POLL_HZ
             bindCharacter._acc = (bindCharacter._acc or 0) + dt
             while bindCharacter._acc >= step do
@@ -509,41 +555,32 @@ local function bindCharacter(char)
     end)
 end
 
-local function cleanup()
-    if dead then return end
-    dead = true
-    disconnectChats()
-    if connHeartbeat then pcall(function() connHeartbeat:Disconnect() end) end
-    if connCharAdded then pcall(function() connCharAdded:Disconnect() end) end
-    if gui then pcall(function() gui:Destroy() end) end
-    _G.PandaAssistCleanup = nil
-end
-
 local function init()
     makeUI()
-    -- Close button after UI exists
+
+    -- Close button
     btnClose.MouseButton1Click:Connect(cleanup)
 
-    -- Button logic
+    -- Button logic (mutually exclusive)
     btnFollow.MouseButton1Click:Connect(function()
-        if not preflightOk or dead then return end
+        if dead then return end
         if isFollowing then
             setFollowTarget(nil)
         else
-            -- Priority: explicit target in box -> last speaker -> none
-            local list = listToPlayers(txtTargets.Text)
-            if list[1] then
-                setFollowTarget(list[1])
-            elseif lastFollowSpeaker and lastFollowSpeaker.Parent then
-                setFollowTarget(lastFollowSpeaker)
+            -- Resolve target from text; pick nearest if multiple
+            local list = playersFromInput(txtTargets.Text)
+            local _, myHRP = myParts()
+            if #list > 1 and myHRP then
+                local nearest = nearestOf(list, myHRP.Position)
+                setFollowTarget(nearest)
             else
-                setFollowTarget(nil)
+                setFollowTarget(list[1])
             end
         end
     end)
 
     btnAttack.MouseButton1Click:Connect(function()
-        if not preflightOk or dead then return end
+        if dead then return end
         if isAttacking then
             setAttack(false)
         else
@@ -556,32 +593,22 @@ local function init()
         refreshTargets()
     end)
 
-    -- Preflight
-    local ok, reason, warns = preflight()
-    preflightOk = ok
-    if not ok then
-        colorize(btnFollow, false)
-        colorize(btnAttack, false)
-        btnFollow.AutoButtonColor = false; btnFollow.Active = false
-        btnAttack.AutoButtonColor = false; btnAttack.Active = false
-        lblStatus.Text = "Preflight failed: " .. (reason or "Unknown")
-        -- one-time print
-        warn("[PandaAssist] Preflight failed: " .. tostring(reason))
-    else
-        setStatusText()
-        if warns and #warns > 0 then
-            warn("[PandaAssist] Ready with warnings:")
-            for _, w in ipairs(warns) do warn(" - " .. w) end
-        else
-            print("[PandaAssist] Ready.")
-        end
-        connectChat()
+    -- Start
+    if preflight() then
+        updateStatus()
         if LP.Character then bindCharacter(LP.Character) end
         if connCharAdded then pcall(function() connCharAdded:Disconnect() end) end
         connCharAdded = LP.CharacterAdded:Connect(function(char)
             if dead then return end
             bindCharacter(char)
         end)
+    else
+        -- Disable buttons if essentials missing
+        colorize(btnFollow, false)
+        colorize(btnAttack, false)
+        btnFollow.AutoButtonColor = false; btnFollow.Active = false
+        btnAttack.AutoButtonColor = false; btnAttack.Active = false
+        lblStatus.Text = "Not ready: Character/Humanoid/HRP missing"
     end
 
     -- Auto-clean on leave
