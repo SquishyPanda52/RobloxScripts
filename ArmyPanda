@@ -1,14 +1,10 @@
 --[[
-  Panda Alts 🐼 — Follow + Attack + Auto-Click (Client-Only)
-  - No server/chat hooks. Pure local logic.
+  Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
   - Follow and Attack are mutually exclusive.
-  - Follow auto-disables on death (you or target). Attack does not auto-disable.
-  - Draggable, compact UI with minimize (—/+) and hard close (X).
-  - Buttons show On/Off and swap green/red.
-  - Attack can auto-press exactly one input: either Mouse1 (left), Mouse2 (right), or a KeyCode you press.
-    Set it via the "AutoPress" textbox: focus it, then press a key or click a mouse button once.
-
-  Re-inject safe: re-running replaces any previous instance cleanly.
+  - Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
+  - New: Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
+  - Draggable, compact UI with minimize and hard close.
+  - Re-inject safe: re-running replaces previous instance cleanly.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -28,9 +24,12 @@ local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 
 -- Config
-local FOLLOW_FAR = 8      -- start moving if farther than this
-local FOLLOW_NEAR = 5     -- stop/idle if nearer than this
-local AUTOPRESS_HZ = 10   -- clicks/presses per second while Attack is ON
+local FOLLOW_FAR = 8           -- start moving if farther than this
+local FOLLOW_NEAR = 5          -- stop/idle if nearer than this
+local AUTOPRESS_HZ = 10        -- default presses per second
+local AUTOPRESS_MIN_HZ = 5
+local AUTOPRESS_MAX_HZ = 15
+local AUTOPRESS_START_DELAY = 0.35 -- delay before auto-press starts after Attack toggled on
 
 -- UI State
 local gui, mainFrame, titleBar, minBtn, closeBtn
@@ -38,6 +37,7 @@ local content
 local followBtn, followBox
 local attackBtn, attackBox
 local autoRow, autoLabel, autoBox
+local rateMinusBtn, rateLabel, ratePlusBtn
 
 -- Logic State
 local isMinimized = false
@@ -49,10 +49,10 @@ local attackNames = {}
 
 -- Auto-press binding: exactly one input
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
-local binding = { kind = "mouse", button = 1 } -- default to Mouse1 (left click)
+local binding = { kind = "mouse", button = 1 } -- default Mouse1
 
 -- Connections
-local followConn, attackConn, autoPressConn
+local followConn, attackConn, autoPressConn, bindingCaptureConn
 local connections = {}
 
 -- Utils
@@ -127,7 +127,6 @@ local function startFollow()
 
         local dist = (thRoot.Position - myRoot.Position).Magnitude
         if dist > FOLLOW_FAR then
-            -- Keep a little buffer (2 studs) so we don't crowd
             local dir = (thRoot.Position - myRoot.Position).Unit
             myHum:MoveTo(thRoot.Position - dir * 2)
         elseif dist < FOLLOW_NEAR then
@@ -146,10 +145,9 @@ local function stopAttack()
 end
 
 local function doAutoPress()
-    -- Press either the bound mouse button or key once
     if binding.kind == "mouse" then
         local mousePos = UserInputService:GetMouseLocation()
-        local btnIndex = (binding.button == 2) and 1 or 0 -- 0=left(Mouse1), 1=right(Mouse2)
+        local btnIndex = (binding.button == 2) and 1 or 0 -- 0=left, 1=right
         VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, true, game, 0)
         VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, false, game, 0)
     elseif binding.kind == "key" and binding.keyCode then
@@ -161,9 +159,11 @@ end
 local function startAutoPress()
     if autoPressConn then autoPressConn:Disconnect() autoPressConn = nil end
     local last = 0
+    local blockUntil = time() + AUTOPRESS_START_DELAY -- safety delay to avoid re-clicking Attack button
     autoPressConn = RunService.RenderStepped:Connect(function()
         if not attackEnabled then return end
         local now = time()
+        if now < blockUntil then return end
         local interval = 1 / AUTOPRESS_HZ
         if now - last >= interval then
             doAutoPress()
@@ -181,11 +181,9 @@ local function startAttack()
         local myHum = getHumanoid(localPlayer)
         local myRoot = getHRP(localPlayer)
         if not (myHum and myRoot) or myHum.Health <= 0 then
-            -- Attack stays enabled; resumes when respawned/parts ready
             return
         end
 
-        -- Find nearest valid target among the comma list
         local closestDist, targetPos
         for _, uname in ipairs(attackNames) do
             local pl = findClosestPlayer(uname)
@@ -204,7 +202,6 @@ local function startAttack()
     end)
     table.insert(connections, attackConn)
 
-    -- Auto-press loop (mouse or key), only one binding is used
     startAutoPress()
 end
 
@@ -341,7 +338,7 @@ local function buildUI()
     attackBox.Parent = attackRow
     Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
 
-    -- Auto-press row
+    -- Auto-press row (compact: label + binding box + [-] rate [+])
     autoRow = Instance.new("Frame")
     autoRow.Size = UDim2.new(1, 0, 0, 30)
     autoRow.BackgroundTransparency = 1
@@ -351,7 +348,7 @@ local function buildUI()
     autol.Padding = UDim.new(0, 6)
 
     autoLabel = Instance.new("TextLabel")
-    autoLabel.Size = UDim2.new(0, 120, 1, 0)
+    autoLabel.Size = UDim2.new(0, 90, 1, 0)
     autoLabel.BackgroundTransparency = 1
     autoLabel.Font = Enum.Font.GothamBold
     autoLabel.TextSize = 14
@@ -361,16 +358,46 @@ local function buildUI()
     autoLabel.Parent = autoRow
 
     autoBox = Instance.new("TextBox")
-    autoBox.Size = UDim2.new(1, -126, 1, 0)
+    autoBox.Size = UDim2.new(0, 82, 1, 0)
     autoBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    autoBox.PlaceholderText = "Click here, then press a key or mouse"
-    autoBox.Text = "Mouse1 (default)"
+    autoBox.PlaceholderText = "Click then press"
+    autoBox.Text = "Mouse1"
     autoBox.TextColor3 = Color3.new(1, 1, 1)
     autoBox.Font = Enum.Font.Gotham
     autoBox.TextSize = 14
     autoBox.ClearTextOnFocus = false
     autoBox.Parent = autoRow
     Instance.new("UICorner", autoBox).CornerRadius = UDim.new(0, 6)
+
+    rateMinusBtn = Instance.new("TextButton")
+    rateMinusBtn.Size = UDim2.new(0, 22, 1, 0)
+    rateMinusBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+    rateMinusBtn.Text = "−"
+    rateMinusBtn.Font = Enum.Font.GothamBold
+    rateMinusBtn.TextSize = 14
+    rateMinusBtn.TextColor3 = Color3.new(1, 1, 1)
+    rateMinusBtn.Parent = autoRow
+    Instance.new("UICorner", rateMinusBtn).CornerRadius = UDim.new(0, 6)
+
+    rateLabel = Instance.new("TextLabel")
+    rateLabel.Size = UDim2.new(0, 48, 1, 0)
+    rateLabel.BackgroundTransparency = 1
+    rateLabel.Font = Enum.Font.GothamBold
+    rateLabel.TextSize = 14
+    rateLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    rateLabel.TextXAlignment = Enum.TextXAlignment.Center
+    rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
+    rateLabel.Parent = autoRow
+
+    ratePlusBtn = Instance.new("TextButton")
+    ratePlusBtn.Size = UDim2.new(0, 22, 1, 0)
+    ratePlusBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+    ratePlusBtn.Text = "+"
+    ratePlusBtn.Font = Enum.Font.GothamBold
+    ratePlusBtn.TextSize = 14
+    ratePlusBtn.TextColor3 = Color3.new(1, 1, 1)
+    ratePlusBtn.Parent = autoRow
+    Instance.new("UICorner", ratePlusBtn).CornerRadius = UDim.new(0, 6)
 
     -- Dragging (title bar is the handle)
     local dragging, dragStart, startPos = false, nil, nil
@@ -412,7 +439,6 @@ local function onFollowToggle()
     local newState = not followEnabled
     if newState then
         if attackEnabled then
-            -- disable attack first
             attackEnabled = false
             stopAttack()
         end
@@ -462,13 +488,11 @@ local function describeBinding()
     end
 end
 
-local bindingCaptureConn
 local function beginBindingCapture()
     if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
     autoBox.Text = "Press a key or click..."
     bindingCaptureConn = UserInputService.InputBegan:Connect(function(input: InputObject, gpe)
         if not autoBox:IsFocused() then return end
-        -- Accept exactly one input: mouse or key, ignore TextBox typing as text
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             binding = { kind = "mouse", button = 1 }
         elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
@@ -483,6 +507,20 @@ local function beginBindingCapture()
         if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
     end)
     table.insert(connections, bindingCaptureConn)
+end
+
+-- Rate helpers
+local function clampRate(v)
+    if v < AUTOPRESS_MIN_HZ then return AUTOPRESS_MIN_HZ end
+    if v > AUTOPRESS_MAX_HZ then return AUTOPRESS_MAX_HZ end
+    return math.floor(v + 0.5)
+end
+
+local function setRate(v)
+    AUTOPRESS_HZ = clampRate(v)
+    if rateLabel then
+        rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
+    end
 end
 
 -- Cleanup routine
@@ -504,21 +542,35 @@ end
 -- Build and wire UI
 buildUI()
 
+-- Default labels
+autoBox.Text = describeBinding()
+setRate(AUTOPRESS_HZ)
+
 table.insert(connections, followBtn.MouseButton1Click:Connect(onFollowToggle))
 table.insert(connections, attackBtn.MouseButton1Click:Connect(onAttackToggle))
+
 table.insert(connections, followBox.FocusLost:Connect(function()
     if followEnabled then
-        -- If user changed name while following, reapply target
         stopFollow()
         onFollowToggle()
     end
 end))
+
 table.insert(connections, attackBox.FocusLost:Connect(function()
     if attackEnabled then
         parseAttackNames(attackBox.Text)
     end
 end))
+
 table.insert(connections, autoBox.Focused:Connect(beginBindingCapture))
 
--- Character change safety (loops already check parts each tick)
+-- Rate controls
+table.insert(connections, rateMinusBtn.MouseButton1Click:Connect(function()
+    setRate(AUTOPRESS_HZ - 1)
+end))
+table.insert(connections, ratePlusBtn.MouseButton1Click:Connect(function()
+    setRate(AUTOPRESS_HZ + 1)
+end))
+
+-- Character change safety (loops self-check each tick)
 table.insert(connections, localPlayer.CharacterAdded:Connect(function() end))
