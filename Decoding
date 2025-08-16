@@ -1,0 +1,27 @@
+-- Capture the next loadstring payload in-executor
+local captured
+local old_loadstring = loadstring
+getgenv().loadstring = function(src, name)
+  captured = src
+  -- Optional: write if your executor supports it
+  if writefile then
+    writefile("decoded.lua", src)
+  end
+  -- Return a noop so execution doesn’t continue
+  return function() end
+end
+
+-- Block network calls so nothing external runs
+local oldHttpGet = (game and game.HttpGet)
+if oldHttpGet then
+  game.HttpGet = function(self, url)
+    error("Http blocked: " .. tostring(url))
+  end
+end
+
+-- Now run the obfuscated script source (paste it here or load from file)
+-- dofile("obf.lua") or loadstring([[
+--   ... your obfuscated text ...
+-- ]])()
+
+print("Captured:", captured and (#captured .. " bytes") or "none")
