@@ -1,17 +1,17 @@
--- Hilton | ArmLock B (Disable Animate + Hold Pose)
--- Client-only. Run once to lock, run again to restore Animate and unlock.
+-- Hilton | ArmLock C (Intercept Animations + Late Priority Pose)
+-- Client-only. Run once to lock, run again to unlock.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local G = getgenv and getgenv() or _G
-G.__ArmLockB = G.__ArmLockB or { active=false, conns={}, joints=nil, stepName="ArmLockB_Step", prevAnimateState=nil, animateRef=nil }
+G.__ArmLockC = G.__ArmLockC or { active=false, conns={}, joints=nil, stepName="ArmLockC_Step" }
 
 local CONFIG = {
     SHOULDER_DEG = 70,
     LOG = true,
 }
-local function log(...) if CONFIG.LOG then print("[ArmLockB]", ...) end end
+local function log(...) if CONFIG.LOG then print("[ArmLockC]", ...) end end
 
 local function getCharHum()
     local plr = Players.LocalPlayer
@@ -33,26 +33,17 @@ local function resolveShoulder(char)
     return nil
 end
 
-local function findAnimate(char)
-    return char:FindFirstChild("Animate")
-end
-
 local function cleanup()
-    pcall(function() RunService:UnbindFromRenderStep(G.__ArmLockB.stepName) end)
-    for i=#G.__ArmLockB.conns,1,-1 do pcall(function() G.__ArmLockB.conns[i]:Disconnect() end) ; G.__ArmLockB.conns[i]=nil end
-    if G.__ArmLockB.joints and G.__ArmLockB.joints.s then pcall(function() G.__ArmLockB.joints.s.Transform = CFrame.new() end) end
-    if G.__ArmLockB.animateRef and G.__ArmLockB.prevAnimateState ~= nil then
-        pcall(function() G.__ArmLockB.animateRef.Disabled = G.__ArmLockB.prevAnimateState end)
-    end
-    G.__ArmLockB.joints=nil
-    G.__ArmLockB.animateRef=nil
-    G.__ArmLockB.prevAnimateState=nil
-    G.__ArmLockB.active=false
-    log("Restored Animate and cleaned up.")
+    pcall(function() RunService:UnbindFromRenderStep(G.__ArmLockC.stepName) end)
+    for i=#G.__ArmLockC.conns,1,-1 do pcall(function() G.__ArmLockC.conns[i]:Disconnect() end) ; G.__ArmLockC.conns[i]=nil end
+    if G.__ArmLockC.joints and G.__ArmLockC.joints.s then pcall(function() G.__ArmLockC.joints.s.Transform = CFrame.new() end) end
+    G.__ArmLockC.joints=nil
+    G.__ArmLockC.active=false
+    log("Cleaned up.")
 end
 
-if G.__ArmLockB.active then cleanup() return end
-G.__ArmLockB.active=true
+if G.__ArmLockC.active then cleanup() return end
+G.__ArmLockC.active=true
 
 local char, hum = getCharHum()
 local joints = { s = resolveShoulder(char) }
@@ -60,25 +51,19 @@ if not joints.s then
     log("No shoulder joint found.")
     return cleanup()
 end
-G.__ArmLockB.joints = joints
+G.__ArmLockC.joints = joints
 
--- Disable Animate (store prior state)
-local animate = findAnimate(char)
-if animate then
-    G.__ArmLockB.animateRef = animate
-    G.__ArmLockB.prevAnimateState = animate.Disabled
-    animate.Disabled = true
-    -- Stop any already-playing tracks
-    for _,track in ipairs(hum:GetPlayingAnimationTracks()) do pcall(function() track:Stop(0) end) end
-    log("Animate disabled; tracks stopped.")
-else
-    log("No Animate script found in character (already disabled or custom rig).")
-end
+-- Stop current tracks (all), then intercept future ones immediately
+for _,track in ipairs(hum:GetPlayingAnimationTracks()) do pcall(function() track:Stop(0) end) end
+table.insert(G.__ArmLockC.conns, hum.AnimationPlayed:Connect(function(track)
+    -- Kill any new animation as soon as it starts (prevents reclaiming the limb)
+    pcall(function() track:Stop(0) end)
+end))
 
 local SHOULDER_ANG = CFrame.Angles(math.rad(-CONFIG.SHOULDER_DEG), 0, 0)
 local PRIORITY = (Enum.RenderPriority.Last.Value + 1)
 
-RunService:BindToRenderStep(G.__ArmLockB.stepName, PRIORITY, function()
+RunService:BindToRenderStep(G.__ArmLockC.stepName, PRIORITY, function()
     if not joints.s or not joints.s.Parent then
         local c = Players.LocalPlayer.Character
         if c then joints.s = resolveShoulder(c) end
@@ -87,16 +72,16 @@ RunService:BindToRenderStep(G.__ArmLockB.stepName, PRIORITY, function()
     joints.s.Transform = SHOULDER_ANG
 end)
 
--- Respawn handling: re-disable Animate and re-resolve joint
-table.insert(G.__ArmLockB.conns, Players.LocalPlayer.CharacterAdded:Connect(function(newChar)
+-- Respawn handling: re-hook and re-resolve
+table.insert(G.__ArmLockC.conns, Players.LocalPlayer.CharacterAdded:Connect(function(newChar)
     task.wait(0.1)
-    local newAnimate = findAnimate(newChar)
-    if newAnimate then
-        G.__ArmLockB.animateRef = newAnimate
-        G.__ArmLockB.prevAnimateState = newAnimate.Disabled
-        newAnimate.Disabled = true
-    end
+    char = newChar
+    hum = newChar:FindFirstChildOfClass("Humanoid") or newChar:WaitForChild("Humanoid")
     joints.s = resolveShoulder(newChar)
+    -- Rehook AnimationPlayed for the new humanoid
+    table.insert(G.__ArmLockC.conns, hum.AnimationPlayed:Connect(function(track)
+        pcall(function() track:Stop(0) end)
+    end))
 end))
 
-log("Locked right arm; Animate disabled.")
+log("Locked right arm with animation interception and late-priority transform.")
