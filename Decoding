@@ -1,60 +1,72 @@
---[[
-  Hilton | Locked Arm Pose (Animation Hijack + Transform)
-  Client-only, re-exec safe
-]]
-
+-- Hilton | Arm Lock (AnimationIntercept + Transform + FrameClamp)
+-- Run once to lock, run again to unlock
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local G = getgenv and getgenv() or _G
-G.__LockedArm = G.__LockedArm or { active=false, conns={}, joints={} }
+G.__ArmLock = G.__ArmLock or { active=false, conns={}, joints={} }
 
 local function cleanup()
-    for _,c in ipairs(G.__LockedArm.conns) do pcall(function() c:Disconnect() end) end
-    for _,m in pairs(G.__LockedArm.joints) do pcall(function() m.Transform = CFrame.new() end) end
-    table.clear(G.__LockedArm.conns)
-    table.clear(G.__LockedArm.joints)
-    G.__LockedArm.active=false
+    for _,c in ipairs(G.__ArmLock.conns) do pcall(function() c:Disconnect() end) end
+    for _,m in pairs(G.__ArmLock.joints) do pcall(function() m.Transform = CFrame.new() end) end
+    table.clear(G.__ArmLock.conns)
+    table.clear(G.__ArmLock.joints)
+    G.__ArmLock.active=false
 end
 
-if G.__LockedArm.active then
+if G.__ArmLock.active then
     cleanup()
-    print("[LockedArm] Cleanup complete.")
+    warn("[ArmLock] Released pose and cleaned up.")
     return
 end
 
-G.__LockedArm.active=true
+G.__ArmLock.active=true
 
 local char = Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
 
--- Kill animation tracks affecting the right arm
-for _, track in ipairs(char:FindFirstChildOfClass("Humanoid"):GetPlayingAnimationTracks()) do
-    if track.Priority ~= Enum.AnimationPriority.Idle then
-        track:Stop(0)
+-- Get shoulder joint (R15 or R6)
+local joints = {}
+do
+    local rua = char:FindFirstChild("RightUpperArm")
+    if rua then
+        local sh = rua:FindFirstChild("RightShoulder") or char:FindFirstChild("UpperTorso"):FindFirstChild("RightShoulder")
+        if sh then joints.s = sh end
+    else
+        local torso = char:FindFirstChild("Torso")
+        if torso then
+            local shR6 = torso:FindFirstChild("Right Shoulder")
+            if shR6 then joints.s = shR6 end
+        end
     end
 end
+G.__ArmLock.joints = joints
 
--- Grab joints (R15 shoulder/elbow or R6 shoulder)
-local joints = {}
-local rua = char:FindFirstChild("RightUpperArm")
-if rua then
-    local sh = rua:FindFirstChildWhichIsA("Motor6D") or char:FindFirstChild("UpperTorso"):FindFirstChild("RightShoulder")
-    if sh then joints.s = sh end
-end
-if not joints.s then
-    local torso = char:FindFirstChild("Torso")
-    local shR6 = torso and torso:FindFirstChild("Right Shoulder")
-    if shR6 then joints.s = shR6 end
+local SHOULDER_ANG = CFrame.Angles(math.rad(-70),0,0)
+
+-- Kill any current tracks on spawn
+for _,track in ipairs(hum:GetPlayingAnimationTracks()) do
+    track:Stop(0)
 end
 
-G.__LockedArm.joints = joints
+-- Stop *new* animations targeting the arm
+G.__ArmLock.conns[#G.__ArmLock.conns+1] = hum.AnimationPlayed:Connect(function(track)
+    -- Optional: inspect track.Animation.AnimationId here if you want to filter
+    pcall(function() track:Stop(0) end)
+end)
 
--- Fixed pose angles
-local SHOULDER_ANG = CFrame.Angles(math.rad(-70), 0, 0)
+-- Re‑apply transform every frame
+G.__ArmLock.conns[#G.__ArmLock.conns+1] = RunService.RenderStepped:Connect(function()
+    if joints.s then
+        joints.s.Transform = SHOULDER_ANG
+    end
+end)
 
-G.__LockedArm.conns[#G.__LockedArm.conns+1] =
-    RunService.RenderStepped:Connect(function()
-        if joints.s then joints.s.Transform = SHOULDER_ANG end
-    end)
+-- Re‑lock on respawn
+G.__ArmLock.conns[#G.__ArmLock.conns+1] = Players.LocalPlayer.CharacterAdded:Connect(function(newChar)
+    cleanup()
+    wait(0.5)
+    -- re‑exec the script here if you want persistence
+end)
 
-print("[LockedArm] Applied and locked pose.")
+warn("[ArmLock] Applied. Limb should now stay locked until script is re‑exec'ed to unlock.")
