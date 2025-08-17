@@ -1,16 +1,16 @@
 --[[ 
-Panda Pose Player — client-only, Animate-safe, button-triggered
-- Disables (not deletes) the default Animate locally while your CFrame pose runs.
-- After the set duration, restores Animate and clears Transform overrides.
-- Draggable UI button to re-trigger as many times as you want.
-- Singleton guarded: re-exec safe (cleans previous UI/loops).
+Dense CFrame Player — client-only
+- Plays your captured pose by writing ALL Motor6D.Transforms every frame.
+- Disables Animate only during playback; restores it afterward.
+- Draggable UI with duration field so you can re-trigger easily.
+- Re-exec safe (cleans previous UI/loop).
 ]]
 
 -- ======= CONFIG =======
-local DEFAULT_DURATION = 5.0 -- seconds (editable in the UI textbox each run)
-local GUI_NAME         = "PandaPoseUI_TransformPlayer"
+local DEFAULT_DURATION = 5.0 -- seconds
+local GUI_NAME         = "DenseCFramePlayer_UI"
 
--- ======= YOUR POSE DATA (sparse+base) =======
+-- ======= YOUR CAPTURED DATA (dense-ready: base + sparse updates) =======
 local POSE_DATA = {
     note   = "Sparse updates over one loop",
     schema = "sparse+base",
@@ -52,11 +52,9 @@ local POSE_DATA = {
 }
 
 -- ======= SINGLETON GUARD / CLEANUP =======
-getgenv().PANDA_POSE_SINGLETON = getgenv().PANDA_POSE_SINGLETON or {}
-local S = getgenv().PANDA_POSE_SINGLETON
-
--- Stop any existing runner/UI from a previous exec
-if S.stopRunner then pcall(S.stopRunner) end
+getgenv().DENSE_CFRAME_PLAYER = getgenv().DENSE_CFRAME_PLAYER or {}
+local S = getgenv().DENSE_CFRAME_PLAYER
+if S.stop then pcall(S.stop) end
 if S.gui and S.gui.Parent then S.gui:Destroy() end
 
 -- ======= SERVICES =======
@@ -83,7 +81,6 @@ local function mapMotors(char)
 end
 
 local function cfFromArray(a)
-    -- Assumes 12 numbers (CFrame matrix form)
     return CFrame.new(unpack(a))
 end
 
@@ -105,115 +102,111 @@ local function clearTransforms(motors)
 end
 
 local function getAnimate(char)
-    return char:FindFirstChildOfClass("LocalScript") and char:FindFirstChild("Animate") or char:FindFirstChild("Animate")
+    return char:FindFirstChild("Animate")
 end
 
--- (Optional) backup source to clone if Animate disappears
-local function getAnimateTemplate()
-    -- Try StarterPlayer template (may be nil in some experiences)
-    local StarterPlayer = game:FindFirstChild("StarterPlayer")
-    if StarterPlayer then
-        local SCS = StarterPlayer:FindFirstChild("StarterCharacterScripts")
-        if SCS then
-            local a = SCS:FindFirstChild("Animate")
-            if a and a:IsA("LocalScript") then
-                return a
-            end
-        end
-    end
-    return nil
-end
-
--- ======= POSE RUNNER =======
-local Runner = {
-    conn            = nil,
-    playing         = false,
-    deadline        = 0,
-    motors          = nil,
-    char            = nil,
-    animate         = nil,
-    animateWasEnabled = nil,
-    animateBackup   = nil,
-    totalFrames     = 1,
-    frameTime       = 1
-}
-
-function Runner:computeTiming()
+-- Build dense frames: a full pose for every frame index, using base + sparse updates (carry-forward)
+local function buildDenseFrames(data)
+    local fps = data.fps > 0 and data.fps or 30
     local maxI = 1
-    for _, u in ipairs(POSE_DATA.updates) do
+    for _, u in ipairs(data.updates or {}) do
         if u.i > maxI then maxI = u.i end
     end
-    self.totalFrames = math.max(1, maxI)
-    self.frameTime   = 1 / (POSE_DATA.fps > 0 and POSE_DATA.fps or 30)
+    -- Ensure at least one frame
+    local totalFrames = math.max(1, maxI)
+
+    -- Sort updates by i
+    local updates = {}
+    for _, u in ipairs(data.updates or {}) do
+        updates[u.i] = updates[u.i] or {}
+        table.insert(updates[u.i], u)
+    end
+
+    -- Carry-forward pose
+    local current = {}
+    for j, arr in pairs(data.base or {}) do current[j] = arr end
+
+    local dense = {}
+    for f = 1, totalFrames do
+        -- Apply any updates scheduled for this frame
+        if updates[f] then
+            for _, u in ipairs(updates[f]) do
+                for j, arr in pairs(u.joints or {}) do
+                    current[j] = arr
+                end
+            end
+        end
+        -- Snapshot full pose for this frame (shallow copy of arrays is fine: immutable)
+        local framePose = {}
+        for j, arr in pairs(current) do framePose[j] = arr end
+        dense[f] = framePose
+    end
+
+    return dense, totalFrames, (1 / fps)
 end
+
+-- ======= PLAYER RUNNER =======
+local Runner = {
+    conn = nil,
+    playing = false,
+    deadline = 0,
+    motors = nil,
+    char = nil,
+    animate = nil,
+    animateWasDisabled = nil,
+    dense = nil,
+    totalFrames = 1,
+    frameTime = 1/30,
+    startClock = 0,
+}
 
 function Runner:disableAnimate()
     self.animate = getAnimate(self.char)
     if self.animate and self.animate:IsA("LocalScript") then
-        self.animateWasEnabled = (self.animate.Disabled == false)
-        -- tiny backup clone in case something replaces it mid-run
-        self.animateBackup = self.animate:Clone()
+        self.animateWasDisabled = self.animate.Disabled
         self.animate.Disabled = true
-    else
-        self.animate = nil
-        self.animateWasEnabled = nil
     end
 end
 
 function Runner:restoreAnimate()
-    -- Clear Transform overrides first so default anims have a clean slate
     if self.motors then clearTransforms(self.motors) end
-
     if self.animate and self.animate.Parent then
-        -- Put it back to original state if we changed it
-        if self.animateWasEnabled ~= nil then
-            self.animate.Disabled = not self.animateWasEnabled and true or false
-            self.animate.Disabled = false -- ensure normal resumes
+        -- restore original state; then ensure enabled
+        if self.animateWasDisabled ~= nil then
+            self.animate.Disabled = self.animateWasDisabled
         end
-    else
-        -- Try to re-add from backup or StarterPlayer template
-        local parentChar = self.char and self.char.Parent and self.char or waitForCharacter(lp)
-        local source = self.animateBackup or getAnimateTemplate()
-        if source and parentChar and parentChar.Parent then
-            local clone = source:Clone()
-            clone.Name = "Animate"
-            clone.Disabled = false
-            clone.Parent = parentChar
-        end
+        self.animate.Disabled = false
     end
 end
 
 function Runner:start(duration)
-    -- Stop any existing run cleanly
+    -- Stop existing
     if self.playing then self:stop(true) end
 
-    self.char   = waitForCharacter(lp)
+    self.char = waitForCharacter(lp)
     self.motors = mapMotors(self.char)
-    self:computeTiming()
+    self.dense, self.totalFrames, self.frameTime = buildDenseFrames(POSE_DATA)
     self:disableAnimate()
 
-    local startT = os.clock()
-    self.deadline = startT + (tonumber(duration) or DEFAULT_DURATION)
+    self.startClock = os.clock()
+    self.deadline = self.startClock + (tonumber(duration) or DEFAULT_DURATION)
     self.playing = true
 
-    -- Apply base once immediately to snap-in
-    applyPose(self.motors, POSE_DATA.base)
+    -- Start: apply first frame immediately
+    applyPose(self.motors, self.dense[1])
 
     self.conn = RunService.RenderStepped:Connect(function()
         if not self.playing then return end
-        -- Keep base locked so Animate can't creep back while disabled
-        applyPose(self.motors, POSE_DATA.base)
 
-        -- Sparse update on matching frame
-        local loopLen = self.totalFrames * self.frameTime
-        local loopT   = (os.clock() - startT) % loopLen
-        local currentFrame = math.floor(loopT / self.frameTime) + 1
+        -- Compute current frame by time
+        local loopLen  = self.totalFrames * self.frameTime
+        local loopT    = (os.clock() - self.startClock) % loopLen
+        local frameIdx = math.floor(loopT / self.frameTime) + 1
+        if frameIdx < 1 then frameIdx = 1 end
+        if frameIdx > self.totalFrames then frameIdx = self.totalFrames end
 
-        for _, upd in ipairs(POSE_DATA.updates) do
-            if upd.i == currentFrame then
-                applyPose(self.motors, upd.joints)
-            end
-        end
+        -- APPLY FULL POSE FOR THIS FRAME (writes ALL joints from your CFrames)
+        applyPose(self.motors, self.dense[frameIdx])
 
         -- End condition
         if os.clock() >= self.deadline then
@@ -223,34 +216,25 @@ function Runner:start(duration)
 end
 
 function Runner:stop(isInterrupt)
-    if self.conn then
-        self.conn:Disconnect()
-        self.conn = nil
-    end
+    if self.conn then self.conn:Disconnect() self.conn = nil end
     self.playing = false
-    -- Restore Animate (even on interrupt) so user gets control back
     self:restoreAnimate()
 end
 
-S.stopRunner = function()
+S.stop = function()
     if Runner.playing then Runner:stop(true) end
 end
 
--- Auto-clean on respawn (ensures no stuck disabled Animate after death)
-lp.CharacterAdded:Connect(function()
-    if Runner.playing then
-        -- Fresh map and keep running seamlessly on new rig
-        Runner.char = waitForCharacter(lp)
-        Runner.motors = mapMotors(Runner.char)
-    else
-        -- Ensure default Animate is normal on new spawn
-        local a = getAnimate(waitForCharacter(lp))
+-- Ensure Animate re-enables on new spawn if not playing
+Players.LocalPlayer.CharacterAdded:Connect(function(ch)
+    if not Runner.playing then
+        local a = getAnimate(ch)
         if a then a.Disabled = false end
     end
 end)
 
--- ======= UI (draggable, minimal, re-exec safe) =======
-local pg = lp:WaitForChild("PlayerGui")
+-- ======= UI =======
+local pg  = lp:WaitForChild("PlayerGui")
 local gui = Instance.new("ScreenGui")
 gui.Name = GUI_NAME
 gui.ResetOnSpawn = false
@@ -260,20 +244,19 @@ S.gui = gui
 
 local frame = Instance.new("Frame")
 frame.Name = "Panel"
-frame.Size = UDim2.new(0, 220, 0, 80)
-frame.Position = UDim2.new(1, -240, 1, -120)
+frame.Size = UDim2.new(0, 220, 0, 90)
+frame.Position = UDim2.new(1, -240, 1, -140)
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
 frame.BorderSizePixel = 0
 frame.Parent = gui
-
-local corner = Instance.new("UICorner", frame) corner.CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
-title.Text = "Panda Pose Player"
+title.Text = "Dense CFrame Player"
 title.Font = Enum.Font.GothamBold
 title.TextSize = 14
-title.TextColor3 = Color3.fromRGB(255, 90, 200)
+title.TextColor3 = Color3.fromRGB(255, 200, 80)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Size = UDim2.new(1, -10, 0, 20)
 title.Position = UDim2.new(0, 10, 0, 6)
@@ -303,49 +286,40 @@ durBox.Parent = frame
 Instance.new("UICorner", durBox).CornerRadius = UDim.new(0, 6)
 
 local btn = Instance.new("TextButton")
-btn.Size = UDim2.new(0, 200, 0, 24)
-btn.Position = UDim2.new(0, 10, 0, 52)
-btn.Text = "Run custom pose"
+btn.Size = UDim2.new(0, 200, 0, 28)
+btn.Position = UDim2.new(0, 10, 0, 56)
+btn.Text = "Run custom CFrame pose"
 btn.Font = Enum.Font.GothamBold
 btn.TextSize = 13
 btn.TextColor3 = Color3.fromRGB(12, 12, 14)
-btn.BackgroundColor3 = Color3.fromRGB(255, 90, 200)
+btn.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
 btn.AutoButtonColor = true
 btn.Parent = frame
 Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
--- Draggable behavior
+-- Dragging
 do
     local UIS = game:GetService("UserInputService")
     local dragging, dragStart, startPos
-
     frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or
-           input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = frame.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
-
     UIS.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
-                         input.UserInputType == Enum.UserInputType.Touch) then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
-            frame.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
 end
 
--- Button logic
+-- Button action
 btn.MouseButton1Click:Connect(function()
     local dur = tonumber(durBox.Text)
     if not dur or dur <= 0 then
@@ -353,7 +327,7 @@ btn.MouseButton1Click:Connect(function()
         durBox.Text = tostring(dur)
         pcall(function()
             StarterGui:SetCore("SendNotification", {
-                Title = "Panda Pose",
+                Title = "CFrame Player",
                 Text  = "Invalid duration. Using default: " .. tostring(dur) .. "s",
                 Duration = 2
             })
@@ -362,7 +336,7 @@ btn.MouseButton1Click:Connect(function()
     Runner:start(dur)
 end)
 
--- Safety: ensure Animate is enabled if UI is manually destroyed
+-- Safety: ensure Animate is enabled if UI is removed
 gui.AncestryChanged:Connect(function(_, parent)
     if not parent then
         if Runner.playing then Runner:stop(true) end
