@@ -1,5 +1,16 @@
--- === Idle Animation Playback (runtime local, sparse player) ===
+--[[ 
+Panda Pose Player — client-only, Animate-safe, button-triggered
+- Disables (not deletes) the default Animate locally while your CFrame pose runs.
+- After the set duration, restores Animate and clears Transform overrides.
+- Draggable UI button to re-trigger as many times as you want.
+- Singleton guarded: re-exec safe (cleans previous UI/loops).
+]]
 
+-- ======= CONFIG =======
+local DEFAULT_DURATION = 5.0 -- seconds (editable in the UI textbox each run)
+local GUI_NAME         = "PandaPoseUI_TransformPlayer"
+
+-- ======= YOUR POSE DATA (sparse+base) =======
 local POSE_DATA = {
     note   = "Sparse updates over one loop",
     schema = "sparse+base",
@@ -40,26 +51,43 @@ local POSE_DATA = {
     }
 }
 
--- === Player ===
-local Players    = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local lp         = Players.LocalPlayer
+-- ======= SINGLETON GUARD / CLEANUP =======
+getgenv().PANDA_POSE_SINGLETON = getgenv().PANDA_POSE_SINGLETON or {}
+local S = getgenv().PANDA_POSE_SINGLETON
 
-local char = lp.Character or lp.CharacterAdded:Wait()
+-- Stop any existing runner/UI from a previous exec
+if S.stopRunner then pcall(S.stopRunner) end
+if S.gui and S.gui.Parent then S.gui:Destroy() end
 
--- Map Motor6Ds for the joints we care about
-local motors = {}
-for _, m in ipairs(char:GetDescendants()) do
-    if m:IsA("Motor6D") then
-        motors[m.Name] = m
+-- ======= SERVICES =======
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local StarterGui  = game:GetService("StarterGui")
+local lp          = Players.LocalPlayer
+
+-- ======= UTIL =======
+local function waitForCharacter(plr)
+    local ch = plr.Character
+    if ch and ch.Parent then return ch end
+    return plr.CharacterAdded:Wait()
+end
+
+local function mapMotors(char)
+    local t = {}
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("Motor6D") then
+            t[d.Name] = d
+        end
     end
+    return t
 end
 
 local function cfFromArray(a)
+    -- Assumes 12 numbers (CFrame matrix form)
     return CFrame.new(unpack(a))
 end
 
-local function applyPose(pose)
+local function applyPose(motors, pose)
     for joint, arr in pairs(pose) do
         local m = motors[joint]
         if m and arr then
@@ -68,27 +96,278 @@ local function applyPose(pose)
     end
 end
 
--- Apply base immediately
-applyPose(POSE_DATA.base)
-
--- Determine loop length from max update index (fallback 1 if empty)
-local totalFrames = 1
-if #POSE_DATA.updates > 0 then
-    for _, u in ipairs(POSE_DATA.updates) do
-        if u.i > totalFrames then totalFrames = u.i end
+local function clearTransforms(motors)
+    for _, m in pairs(motors) do
+        if m.Transform ~= CFrame.identity then
+            m.Transform = CFrame.identity
+        end
     end
 end
 
-local frameTime = 1 / POSE_DATA.fps
+local function getAnimate(char)
+    return char:FindFirstChildOfClass("LocalScript") and char:FindFirstChild("Animate") or char:FindFirstChild("Animate")
+end
 
-RunService.RenderStepped:Connect(function()
-    -- Which frame index are we on in the loop?
-    local loopT       = tick() % (totalFrames * frameTime)
-    local currentFrame = math.floor(loopT / frameTime) + 1
-    -- Apply any updates scheduled for this frame
-    for _, upd in ipairs(POSE_DATA.updates) do
-        if upd.i == currentFrame then
-            applyPose(upd.joints)
+-- (Optional) backup source to clone if Animate disappears
+local function getAnimateTemplate()
+    -- Try StarterPlayer template (may be nil in some experiences)
+    local StarterPlayer = game:FindFirstChild("StarterPlayer")
+    if StarterPlayer then
+        local SCS = StarterPlayer:FindFirstChild("StarterCharacterScripts")
+        if SCS then
+            local a = SCS:FindFirstChild("Animate")
+            if a and a:IsA("LocalScript") then
+                return a
+            end
         end
+    end
+    return nil
+end
+
+-- ======= POSE RUNNER =======
+local Runner = {
+    conn            = nil,
+    playing         = false,
+    deadline        = 0,
+    motors          = nil,
+    char            = nil,
+    animate         = nil,
+    animateWasEnabled = nil,
+    animateBackup   = nil,
+    totalFrames     = 1,
+    frameTime       = 1
+}
+
+function Runner:computeTiming()
+    local maxI = 1
+    for _, u in ipairs(POSE_DATA.updates) do
+        if u.i > maxI then maxI = u.i end
+    end
+    self.totalFrames = math.max(1, maxI)
+    self.frameTime   = 1 / (POSE_DATA.fps > 0 and POSE_DATA.fps or 30)
+end
+
+function Runner:disableAnimate()
+    self.animate = getAnimate(self.char)
+    if self.animate and self.animate:IsA("LocalScript") then
+        self.animateWasEnabled = (self.animate.Disabled == false)
+        -- tiny backup clone in case something replaces it mid-run
+        self.animateBackup = self.animate:Clone()
+        self.animate.Disabled = true
+    else
+        self.animate = nil
+        self.animateWasEnabled = nil
+    end
+end
+
+function Runner:restoreAnimate()
+    -- Clear Transform overrides first so default anims have a clean slate
+    if self.motors then clearTransforms(self.motors) end
+
+    if self.animate and self.animate.Parent then
+        -- Put it back to original state if we changed it
+        if self.animateWasEnabled ~= nil then
+            self.animate.Disabled = not self.animateWasEnabled and true or false
+            self.animate.Disabled = false -- ensure normal resumes
+        end
+    else
+        -- Try to re-add from backup or StarterPlayer template
+        local parentChar = self.char and self.char.Parent and self.char or waitForCharacter(lp)
+        local source = self.animateBackup or getAnimateTemplate()
+        if source and parentChar and parentChar.Parent then
+            local clone = source:Clone()
+            clone.Name = "Animate"
+            clone.Disabled = false
+            clone.Parent = parentChar
+        end
+    end
+end
+
+function Runner:start(duration)
+    -- Stop any existing run cleanly
+    if self.playing then self:stop(true) end
+
+    self.char   = waitForCharacter(lp)
+    self.motors = mapMotors(self.char)
+    self:computeTiming()
+    self:disableAnimate()
+
+    local startT = os.clock()
+    self.deadline = startT + (tonumber(duration) or DEFAULT_DURATION)
+    self.playing = true
+
+    -- Apply base once immediately to snap-in
+    applyPose(self.motors, POSE_DATA.base)
+
+    self.conn = RunService.RenderStepped:Connect(function()
+        if not self.playing then return end
+        -- Keep base locked so Animate can't creep back while disabled
+        applyPose(self.motors, POSE_DATA.base)
+
+        -- Sparse update on matching frame
+        local loopLen = self.totalFrames * self.frameTime
+        local loopT   = (os.clock() - startT) % loopLen
+        local currentFrame = math.floor(loopT / self.frameTime) + 1
+
+        for _, upd in ipairs(POSE_DATA.updates) do
+            if upd.i == currentFrame then
+                applyPose(self.motors, upd.joints)
+            end
+        end
+
+        -- End condition
+        if os.clock() >= self.deadline then
+            self:stop(false)
+        end
+    end)
+end
+
+function Runner:stop(isInterrupt)
+    if self.conn then
+        self.conn:Disconnect()
+        self.conn = nil
+    end
+    self.playing = false
+    -- Restore Animate (even on interrupt) so user gets control back
+    self:restoreAnimate()
+end
+
+S.stopRunner = function()
+    if Runner.playing then Runner:stop(true) end
+end
+
+-- Auto-clean on respawn (ensures no stuck disabled Animate after death)
+lp.CharacterAdded:Connect(function()
+    if Runner.playing then
+        -- Fresh map and keep running seamlessly on new rig
+        Runner.char = waitForCharacter(lp)
+        Runner.motors = mapMotors(Runner.char)
+    else
+        -- Ensure default Animate is normal on new spawn
+        local a = getAnimate(waitForCharacter(lp))
+        if a then a.Disabled = false end
+    end
+end)
+
+-- ======= UI (draggable, minimal, re-exec safe) =======
+local pg = lp:WaitForChild("PlayerGui")
+local gui = Instance.new("ScreenGui")
+gui.Name = GUI_NAME
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = pg
+S.gui = gui
+
+local frame = Instance.new("Frame")
+frame.Name = "Panel"
+frame.Size = UDim2.new(0, 220, 0, 80)
+frame.Position = UDim2.new(1, -240, 1, -120)
+frame.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local corner = Instance.new("UICorner", frame) corner.CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Text = "Panda Pose Player"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextColor3 = Color3.fromRGB(255, 90, 200)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Size = UDim2.new(1, -10, 0, 20)
+title.Position = UDim2.new(0, 10, 0, 6)
+title.Parent = frame
+
+local durLabel = Instance.new("TextLabel")
+durLabel.BackgroundTransparency = 1
+durLabel.Text = "Duration (s):"
+durLabel.Font = Enum.Font.Gotham
+durLabel.TextSize = 12
+durLabel.TextColor3 = Color3.fromRGB(210, 210, 220)
+durLabel.TextXAlignment = Enum.TextXAlignment.Left
+durLabel.Size = UDim2.new(0, 90, 0, 20)
+durLabel.Position = UDim2.new(0, 10, 0, 28)
+durLabel.Parent = frame
+
+local durBox = Instance.new("TextBox")
+durBox.Size = UDim2.new(0, 60, 0, 20)
+durBox.Position = UDim2.new(0, 100, 0, 28)
+durBox.Text = tostring(DEFAULT_DURATION)
+durBox.ClearTextOnFocus = false
+durBox.Font = Enum.Font.Gotham
+durBox.TextSize = 12
+durBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+durBox.BackgroundColor3 = Color3.fromRGB(36, 36, 42)
+durBox.Parent = frame
+Instance.new("UICorner", durBox).CornerRadius = UDim.new(0, 6)
+
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(0, 200, 0, 24)
+btn.Position = UDim2.new(0, 10, 0, 52)
+btn.Text = "Run custom pose"
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 13
+btn.TextColor3 = Color3.fromRGB(12, 12, 14)
+btn.BackgroundColor3 = Color3.fromRGB(255, 90, 200)
+btn.AutoButtonColor = true
+btn.Parent = frame
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+-- Draggable behavior
+do
+    local UIS = game:GetService("UserInputService")
+    local dragging, dragStart, startPos
+
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
+                         input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- Button logic
+btn.MouseButton1Click:Connect(function()
+    local dur = tonumber(durBox.Text)
+    if not dur or dur <= 0 then
+        dur = DEFAULT_DURATION
+        durBox.Text = tostring(dur)
+        pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = "Panda Pose",
+                Text  = "Invalid duration. Using default: " .. tostring(dur) .. "s",
+                Duration = 2
+            })
+        end)
+    end
+    Runner:start(dur)
+end)
+
+-- Safety: ensure Animate is enabled if UI is manually destroyed
+gui.AncestryChanged:Connect(function(_, parent)
+    if not parent then
+        if Runner.playing then Runner:stop(true) end
+        local ch = lp.Character or lp.CharacterAdded:Wait()
+        local a = getAnimate(ch)
+        if a then a.Disabled = false end
     end
 end)
