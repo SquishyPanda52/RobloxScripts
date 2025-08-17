@@ -1,527 +1,68 @@
---[[
-Dense CFrame Player — robust client-only CFrame writer (with Close button)
-- Applies Motor6D.Transform every frame AFTER animations (BindToRenderStep, high priority).
-- Disables Animate, stops all running AnimationTracks locally, and restores cleanly.
-- Joint alias resolver (R15/R6) so names always match.
-- Verbose logging + per-second frame tick.
-- "X" button fully destroys UI and stops everything for clean re-execution.
-]]
+-- CONFIG
+local EMOTE_ID = "71302743123422"
+local EMOTE_DURATION = 5 -- seconds
 
--- ======= CONFIG =======
-local DEFAULT_DURATION = 5.0
-local GUI_NAME         = "DenseCFramePlayer_UI"
-local DEBUG_LOG        = true
-local TRACE_FRAMES_S   = 1.0
-local SHOW_NOTIFS      = true
-local BIND_NAME        = "DenseCFramePlayer_Bind"
-local BIND_PRIORITY    = 201 -- after Enum.RenderPriority.Last (commonly 200)
-
--- ======= YOUR CAPTURED DATA (edit here) =======
-local POSE_DATA = {
-    note   = "Sparse updates over one loop",
-    schema = "sparse+base",
-    fps    = 30,
-    rig    = "R15",
-    joints = {
-        "LeftAnkle","LeftElbow","LeftHip","LeftKnee","LeftShoulder","LeftWrist",
-        "Neck","RightAnkle","RightElbow","RightHip","RightKnee",
-        "RightShoulder","RightWrist","Root","Waist"
-    },
-    base = {
-        Waist          = {0,0,0,1,0,0,0,1,0,0,0,1},
-        LeftShoulder   = {0,0,0,0.25882,0.96593,0,-0.96593,0.25882,0,0,0,1},
-        Root           = {0,0,0,1,0,0,0,1,0,0,0,1},
-        Neck           = {0,0,0,1,0,0,0,0.25882,0.96593,0,-0.96593,0.25882},
-        RightWrist     = {0,0,0,1,0,0,0,1,0,0,0,1},
-        RightElbow     = {0,0,0,1,0,0,0,1,0,0,0,1},
-        RightHip       = {0,0,0,1,0,0,0,1,0,0,0,1},
-        RightKnee      = {0,0,0,1,0,0,0,1,0,0,0,1},
-        LeftKnee       = {0,0,0,1,0,0,0,1,0,0,0,1},
-        RightAnkle     = {0,0,0,1,0,0,0,1,0,0,0,1},
-        RightShoulder  = {0,0,0,0.21757,-0.95979,-0.17736,0.17736,0.21757,-0.9598,0.9598,0.17736,0.21757},
-        LeftWrist      = {0,0,0,1,0,0,0,1,0,0,0,1},
-        LeftElbow      = {0,0,0,1,0,0,0,1,0,0,0,1},
-        LeftHip        = {0,0,0,1,0,0,0,1,0,0,0,1},
-        LeftAnkle      = {0,0,0,1,0,0,0,1,0,0,0,1}
-    },
-    updates = {
-        {
-            i = 1,
-            t = 0.075,
-            joints = {
-                Neck          = {0,0,0,1,0,0,0,0,1,0,-1,0},
-                LeftShoulder  = {0,0,0,0,1,0,-1,0,0,0,0,1},
-                RightShoulder = {0,0,0,0,-1,0,0,0,-1,1,0,0}
-            }
-        }
-    }
-}
-
--- ======= SINGLETON GUARD =======
-getgenv().DENSE_CFRAME_PLAYER = getgenv().DENSE_CFRAME_PLAYER or {}
-local S = getgenv().DENSE_CFRAME_PLAYER
-if S.stop then pcall(S.stop) end
-if S.gui and S.gui.Parent then S.gui:Destroy() end
-
--- ======= SERVICES =======
-local Players     = game:GetService("Players")
-local RunService  = game:GetService("RunService")
-local StarterGui  = game:GetService("StarterGui")
-local lp          = Players.LocalPlayer
-
--- ======= LOGGING =======
-local function log(...) if DEBUG_LOG then print("[DenseCFrame]", ...) end end
-local function wlog(...) warn("[DenseCFrame]", ...) end
-local function notify(title, text, dur)
-    if not SHOW_NOTIFS then return end
-    pcall(function()
-        StarterGui:SetCore("SendNotification", { Title = title, Text = text, Duration = dur or 2 })
-    end)
+-- CLEANUP if rerun
+if getgenv().DanceUI then
+    getgenv().DanceUI:Destroy()
+    getgenv().DanceUI = nil
+end
+if getgenv().DanceButtonConn then
+    getgenv().DanceButtonConn:Disconnect()
+    getgenv().DanceButtonConn = nil
+end
+if getgenv().CloseButtonConn then
+    getgenv().CloseButtonConn:Disconnect()
+    getgenv().CloseButtonConn = nil
 end
 
--- ======= JOINT ALIASES (R15 + R6 fallback) =======
-local JOINT_ALIASES = {
-    RightShoulder = {"RightShoulder","Right Shoulder"},
-    LeftShoulder  = {"LeftShoulder","Left Shoulder"},
-    RightElbow    = {"RightElbow","Right Elbow"},
-    LeftElbow     = {"LeftElbow","Left Elbow"},
-    RightWrist    = {"RightWrist","Right Wrist"},
-    LeftWrist     = {"LeftWrist","Left Wrist"},
-    Neck          = {"Neck"},
-    Waist         = {"Waist"},
-    Root          = {"Root","RootJoint","Root Joint"},
-    RightHip      = {"RightHip","Right Hip"},
-    LeftHip       = {"LeftHip","Left Hip"},
-    RightKnee     = {"RightKnee","Right Knee"},
-    LeftKnee      = {"LeftKnee","Left Knee"},
-    RightAnkle    = {"RightAnkle","Right Ankle"},
-    LeftAnkle     = {"LeftAnkle","Left Ankle"},
-}
+-- CREATE UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.ResetOnSpawn = false
+screenGui.Name = "DanceUI"
+screenGui.Parent = game:GetService("CoreGui")
 
--- ======= UTIL =======
-local function waitForCharacter(plr)
-    local ch = plr.Character
-    if ch and ch.Parent then return ch end
-    log("Waiting for Character...")
-    return plr.CharacterAdded:Wait()
-end
+local button = Instance.new("TextButton")
+button.Size = UDim2.new(0, 120, 0, 40)
+button.Position = UDim2.new(0.5, -60, 0.5, -20)
+button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.Text = "Play Emote"
+button.Parent = screenGui
 
-local function cfFromArray(a)
-    if type(a) ~= "table" or #a ~= 12 then return CFrame.identity end
-    return CFrame.new(unpack(a))
-end
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.AnchorPoint = Vector2.new(1, 0)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Text = "X"
+closeButton.Parent = screenGui
 
-local function getAnimate(char) return char:FindFirstChild("Animate") end
-
-local function mapMotors(char)
-    local byName = {}
-    for _, d in ipairs(char:GetDescendants()) do
-        if d:IsA("Motor6D") then
-            byName[d.Name] = d
-        end
-    end
-    log("Motors mapped:", (#(function(t)local c=0;for _ in pairs(t) do c+=1 end;return {c} end)(byName))[1])
-    for n,_ in pairs(byName) do log("  -", n) end
-    return byName
-end
-
-local function buildResolver(motorsByName)
-    local cache = {}
-    return function(jointKey)
-        if cache[jointKey] ~= nil then return cache[jointKey] end
-        local aliases = JOINT_ALIASES[jointKey] or {jointKey}
-        for _, name in ipairs(aliases) do
-            local m = motorsByName[name]
-            if m then
-                cache[jointKey] = m
-                return m
+-- FUNCTION to play emote
+local function playEmote()
+    local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+    if humanoid then
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. EMOTE_ID
+        local track = humanoid:LoadAnimation(anim)
+        track.Looped = false
+        track:Play()
+        task.delay(EMOTE_DURATION, function()
+            if track.IsPlaying then
+                track:Stop()
             end
-        end
-        cache[jointKey] = false
-        return nil
-    end
-end
-
-local function applyPose(resolve, pose)
-    local applied, missing = 0, 0
-    for jointKey, arr in pairs(pose) do
-        local m = resolve(jointKey)
-        if m then
-            local ok, err = pcall(function() m.Transform = cfFromArray(arr) end)
-            if ok then applied += 1 else wlog("Transform write failed:", jointKey, err) end
-        else
-            missing += 1
-        end
-    end
-    return applied, missing
-end
-
-local function clearTransforms(motorsByName)
-    local cleared = 0
-    for _, m in pairs(motorsByName) do
-        if m.Transform ~= CFrame.identity then
-            m.Transform = CFrame.identity
-            cleared += 1
-        end
-    end
-    log("Cleared transforms on", cleared, "motors.")
-end
-
-local function stopAllTracks(humanoid)
-    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
-    if not animator then return end
-    local ok, tracks = pcall(function() return animator:GetPlayingAnimationTracks() end)
-    if ok and tracks then
-        for _, tr in ipairs(tracks) do pcall(function() tr:Stop(0) end) end
-        log("Stopped", #tracks, "AnimationTrack(s).")
-    end
-end
-
--- Build dense frames from base + updates; supports either frame indices (i) or times (t)
-local function buildDenseFrames(data)
-    local fps = (data.fps and data.fps > 0) and data.fps or 30
-    local frameTime = 1 / fps
-
-    -- Determine timeline from t if present; else from i
-    local useTime = false
-    local maxTime, maxI = 0, 1
-    for _, u in ipairs(data.updates or {}) do
-        if u.t then useTime = true; if u.t > maxTime then maxTime = u.t end end
-        if u.i and u.i > maxI then maxI = u.i end
-    end
-
-    local totalFrames, timeAtFrame
-    local buckets = {}
-
-    if useTime then
-        totalFrames = math.max(1, math.floor(maxTime / frameTime + 0.5))
-        timeAtFrame = function(f) return (f - 1) * frameTime end
-        for _, u in ipairs(data.updates or {}) do
-            local f = math.max(1, math.floor((u.t or 0) / frameTime + 0.5) + 1)
-            buckets[f] = buckets[f] or {}
-            table.insert(buckets[f], u)
-        end
-    else
-        totalFrames = math.max(1, maxI)
-        timeAtFrame = function(f) return (f - 1) * frameTime end
-        for _, u in ipairs(data.updates or {}) do
-            local f = math.max(1, u.i or 1)
-            buckets[f] = buckets[f] or {}
-            table.insert(buckets[f], u)
-        end
-    end
-
-    local current = {}
-    for j, arr in pairs(data.base or {}) do current[j] = arr end
-
-    local dense = {}
-    for f = 1, totalFrames do
-        if buckets[f] then
-            for _, u in ipairs(buckets[f]) do
-                for j, arr in pairs(u.joints or {}) do
-                    current[j] = arr
-                end
-            end
-        end
-        local pose = {}
-        for j, arr in pairs(current) do pose[j] = arr end
-        dense[f] = pose
-    end
-
-    log(("Built dense frames: fps=%d frames=%d duration≈%.3fs"):format(fps, totalFrames, timeAtFrame(totalFrames) + frameTime))
-    return dense, totalFrames, frameTime
-end
-
--- ======= RUNNER =======
-local Runner = {
-    playing = false,
-    connBound = false,
-    motors = nil,
-    resolve = nil,
-    char = nil,
-    humanoid = nil,
-    animate = nil,
-    animateWasDisabled = nil,
-    dense = nil,
-    totalFrames = 1,
-    frameTime = 1/30,
-    startClock = 0,
-    deadline = 0,
-    lastTickLog = 0,
-}
-
-function Runner:disableAnimate()
-    self.animate = getAnimate(self.char)
-    if self.animate and self.animate:IsA("LocalScript") then
-        self.animateWasDisabled = self.animate.Disabled
-        self.animate.Disabled = true
-        log("Animate disabled.")
-    else
-        log("Animate not found; nothing to disable.")
-    end
-end
-
-function Runner:restoreAnimate()
-    if self.motors then clearTransforms(self.motors) end
-    if self.animate and self.animate.Parent then
-        if self.animateWasDisabled ~= nil then self.animate.Disabled = self.animateWasDisabled end
-        self.animate.Disabled = false
-        log("Animate restored.")
-    end
-    if self.humanoid then pcall(function() self.humanoid.AutoRotate = true end) end
-end
-
-function Runner:bindLoop()
-    if self.connBound then return end
-    RunService:BindToRenderStep(BIND_NAME, BIND_PRIORITY, function()
-        if not self.playing then return end
-        local now = os.clock()
-        local loopLen  = self.totalFrames * self.frameTime
-        local loopT    = (now - self.startClock) % math.max(loopLen, self.frameTime)
-        local frameIdx = math.floor(loopT / self.frameTime) + 1
-        if frameIdx < 1 then frameIdx = 1 end
-        if frameIdx > self.totalFrames then frameIdx = self.totalFrames end
-
-        local a, m = applyPose(self.resolve, self.dense[frameIdx])
-        if TRACE_FRAMES_S > 0 and (now - self.lastTickLog) >= TRACE_FRAMES_S then
-            self.lastTickLog = now
-            log(("Frame %d/%d applied. jointsApplied=%d missing=%d"):format(frameIdx, self.totalFrames, a, m))
-        end
-
-        if now >= self.deadline then self:stop(false) end
-    end)
-    self.connBound = true
-    log("Render loop bound @ priority", BIND_PRIORITY)
-end
-
-function Runner:unbindLoop()
-    if self.connBound then
-        pcall(function() RunService:UnbindFromRenderStep(BIND_NAME) end)
-        self.connBound = false
-        log("Render loop unbound.")
-    end
-end
-
-function Runner:start(duration)
-    if self.playing then self:stop(true) end
-
-    self.char = waitForCharacter(lp)
-    self.humanoid = self.char:FindFirstChildOfClass("Humanoid")
-    self.motors = mapMotors(self.char)
-    self.resolve = buildResolver(self.motors)
-    self.dense, self.totalFrames, self.frameTime = buildDenseFrames(POSE_DATA)
-
-    self:disableAnimate()
-    if self.humanoid then
-        pcall(function()
-            self.humanoid.AutoRotate = false
-            stopAllTracks(self.humanoid) -- kill any local tracks that might keep posing
         end)
     end
-
-    self.startClock = os.clock()
-    self.deadline = self.startClock + (tonumber(duration) or DEFAULT_DURATION)
-    self.lastTickLog = self.startClock
-    self.playing = true
-
-    local a, m = applyPose(self.resolve, self.dense[1])
-    log("=== START PLAYBACK === duration =", duration or DEFAULT_DURATION, "frames =", self.totalFrames, "frameTime =", self.frameTime)
-    log("Applied first frame. jointsApplied =", a, "missing =", m)
-    if m > 0 then wlog("Some joints were not found; check names above or alias mapping.") end
-
-    self:bindLoop()
-    notify("CFrame Player", "Playback started", 1.2)
 end
 
-function Runner:stop(isInterrupt)
-    self.playing = false
-    self:unbindLoop()
-    self:restoreAnimate()
-    log("=== STOP PLAYBACK === interrupt =", isInterrupt == true)
-    notify("CFrame Player", "Playback stopped", 1.2)
-end
-
-S.stop = function()
-    if Runner.playing then Runner:stop(true) else Runner:unbindLoop() end
-end
-
-Players.LocalPlayer.CharacterAdded:Connect(function(ch)
-    if not Runner.playing then
-        local a = getAnimate(ch); if a then a.Disabled = false end
-    end
+-- BIND buttons
+getgenv().DanceButtonConn = button.MouseButton1Click:Connect(playEmote)
+getgenv().CloseButtonConn = closeButton.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+    getgenv().DanceUI = nil
+    if getgenv().DanceButtonConn then getgenv().DanceButtonConn:Disconnect() end
+    if getgenv().CloseButtonConn then getgenv().CloseButtonConn:Disconnect() end
 end)
 
--- ======= UI =======
-local pg  = lp:WaitForChild("PlayerGui")
-local gui = Instance.new("ScreenGui")
-gui.Name = GUI_NAME
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.Parent = pg
-S.gui = gui
-
-local frame = Instance.new("Frame")
-frame.Name = "Panel"
-frame.Size = UDim2.new(0, 260, 0, 140)
-frame.Position = UDim2.new(1, -280, 1, -200)
-frame.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
-frame.BorderSizePixel = 0
-frame.Parent = gui
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
-
-local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 26)
-titleBar.BackgroundColor3 = Color3.fromRGB(26, 26, 32)
-titleBar.BorderSizePixel = 0
-titleBar.Parent = frame
-Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 8)
-
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Text = "Dense CFrame Player (Client)"
-title.Font = Enum.Font.GothamBold
-title.TextSize = 14
-title.TextColor3 = Color3.fromRGB(255, 200, 80)
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Size = UDim2.new(1, -30, 1, 0)
-title.Position = UDim2.new(0, 10, 0, 0)
-title.Parent = titleBar
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.BackgroundTransparency = 1
-closeBtn.Text = "✕"
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 16
-closeBtn.TextColor3 = Color3.fromRGB(220, 90, 90)
-closeBtn.Size = UDim2.new(0, 26, 0, 26)
-closeBtn.Position = UDim2.new(1, -26, 0, 0)
-closeBtn.Parent = titleBar
-
-local durLabel = Instance.new("TextLabel")
-durLabel.BackgroundTransparency = 1
-durLabel.Text = "Duration (s):"
-durLabel.Font = Enum.Font.Gotham
-durLabel.TextSize = 12
-durLabel.TextColor3 = Color3.fromRGB(210, 210, 220)
-durLabel.TextXAlignment = Enum.TextXAlignment.Left
-durLabel.Size = UDim2.new(0, 90, 0, 20)
-durLabel.Position = UDim2.new(0, 10, 0, 34)
-durLabel.Parent = frame
-
-local durBox = Instance.new("TextBox")
-durBox.Size = UDim2.new(0, 60, 0, 20)
-durBox.Position = UDim2.new(0, 100, 0, 34)
-durBox.Text = tostring(DEFAULT_DURATION)
-durBox.ClearTextOnFocus = false
-durBox.Font = Enum.Font.Gotham
-durBox.TextSize = 12
-durBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-durBox.BackgroundColor3 = Color3.fromRGB(36, 36, 42)
-durBox.Parent = frame
-Instance.new("UICorner", durBox).CornerRadius = UDim.new(0, 6)
-
-local runBtn = Instance.new("TextButton")
-runBtn.Size = UDim2.new(0, 240, 0, 28)
-runBtn.Position = UDim2.new(0, 10, 0, 64)
-runBtn.Text = "Run custom CFrame pose"
-runBtn.Font = Enum.Font.GothamBold
-runBtn.TextSize = 13
-runBtn.TextColor3 = Color3.fromRGB(12, 12, 14)
-runBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
-runBtn.AutoButtonColor = true
-runBtn.Parent = frame
-Instance.new("UICorner", runBtn).CornerRadius = UDim.new(0, 6)
-
-local testBtn = Instance.new("TextButton")
-testBtn.Size = UDim2.new(0, 240, 0, 28)
-testBtn.Position = UDim2.new(0, 10, 0, 98)
-testBtn.Text = "1s sanity test (RightShoulder swing)"
-testBtn.Font = Enum.Font.GothamBold
-testBtn.TextSize = 13
-testBtn.TextColor3 = Color3.fromRGB(230, 230, 235)
-testBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 255)
-testBtn.AutoButtonColor = true
-testBtn.Parent = frame
-Instance.new("UICorner", testBtn).CornerRadius = UDim.new(0, 6)
-
--- Dragging
-do
-    local UIS = game:GetService("UserInputService")
-    local dragging, dragStart, startPos
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
-        end
-    end)
-    UIS.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-end
-
--- Buttons
-runBtn.MouseButton1Click:Connect(function()
-    local dur = tonumber(durBox.Text)
-    if not dur or dur <= 0 then
-        dur = DEFAULT_DURATION
-        durBox.Text = tostring(dur)
-        notify("CFrame Player", "Invalid duration. Using default: " .. tostring(dur) .. "s", 2)
-        wlog("Invalid duration in box; defaulting to", dur)
-    end
-    log("Run pressed. duration =", dur)
-    Runner:start(dur)
-end)
-
-testBtn.MouseButton1Click:Connect(function()
-    log("Sanity Test: swing RightShoulder for 1s.")
-    local ch = waitForCharacter(lp)
-    local motors = mapMotors(ch)
-    local resolve = buildResolver(motors)
-    local rs = resolve("RightShoulder")
-    if not rs then
-        wlog("Sanity Test FAILED: RightShoulder motor not found.")
-        notify("Sanity Test", "RightShoulder not found", 2)
-        return
-    end
-    local original = rs.Transform
-    local start = os.clock()
-    RunService:BindToRenderStep("DenseCFrame_Sanity", BIND_PRIORITY, function()
-        local t = os.clock() - start
-        local ang = math.rad(30) * math.sin(t * math.pi * 2)
-        pcall(function() rs.Transform = CFrame.Angles(0, 0, ang) end)
-        if t >= 1.0 then
-            RunService:UnbindFromRenderStep("DenseCFrame_Sanity")
-            rs.Transform = original
-            log("Sanity Test complete; restored RightShoulder transform.")
-            notify("Sanity Test", "Completed", 1.2)
-        end
-    end)
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-    log("Close pressed. Cleaning up.")
-    S.stop()
-    if S.gui and S.gui.Parent then S.gui:Destroy() end
-    -- wipe globals for clean re-exec
-    getgenv().DENSE_CFRAME_PLAYER = { }
-    notify("CFrame Player", "Closed", 1)
-end)
-
--- Safety: ensure Animate is enabled if UI is removed
-gui.AncestryChanged:Connect(function(_, parent)
-    if not parent then
-        S.stop()
-        local ch = lp.Character or lp.CharacterAdded:Wait()
-        local a = getAnimate(ch); if a then a.Disabled = false end
-        log("UI removed; ensured Animate enabled.")
-    end
-end)
-
-log("Dense CFrame Player loaded. Use Run or Sanity Test. Close (✕) to fully remove.")
+getgenv().DanceUI = screenGui
