@@ -1,20 +1,22 @@
 --[[
-Dense CFrame Player — client-only, verbose logging
-- Writes ALL Motor6D.Transforms from your captured CFrames every frame (no server needed).
-- Disables Animate during playback; restores afterward.
-- Loud console logging at each critical step + per-second frame ticker.
-- Lists mapped motors, missing joints, and any write errors.
-- Includes a 1s "Sanity Test" to confirm Transform writes visibly affect a limb.
+Dense CFrame Player — robust client-only CFrame writer (with Close button)
+- Applies Motor6D.Transform every frame AFTER animations (BindToRenderStep, high priority).
+- Disables Animate, stops all running AnimationTracks locally, and restores cleanly.
+- Joint alias resolver (R15/R6) so names always match.
+- Verbose logging + per-second frame tick.
+- "X" button fully destroys UI and stops everything for clean re-execution.
 ]]
 
 -- ======= CONFIG =======
-local DEFAULT_DURATION = 5.0 -- seconds
+local DEFAULT_DURATION = 5.0
 local GUI_NAME         = "DenseCFramePlayer_UI"
-local DEBUG_LOG        = true      -- master toggle for prints
-local TRACE_FRAMES_S   = 1.0       -- print one frame line each N seconds; set to 0 to silence
+local DEBUG_LOG        = true
+local TRACE_FRAMES_S   = 1.0
 local SHOW_NOTIFS      = true
+local BIND_NAME        = "DenseCFramePlayer_Bind"
+local BIND_PRIORITY    = 201 -- after Enum.RenderPriority.Last (commonly 200)
 
--- ======= YOUR CAPTURED DATA =======
+-- ======= YOUR CAPTURED DATA (edit here) =======
 local POSE_DATA = {
     note   = "Sparse updates over one loop",
     schema = "sparse+base",
@@ -27,16 +29,16 @@ local POSE_DATA = {
     },
     base = {
         Waist          = {0,0,0,1,0,0,0,1,0,0,0,1},
-        LeftShoulder   = {0,0,0,0.25882,0.96593,-0,-0.96593,0.25882,-0,-0,0,1},
+        LeftShoulder   = {0,0,0,0.25882,0.96593,0,-0.96593,0.25882,0,0,0,1},
         Root           = {0,0,0,1,0,0,0,1,0,0,0,1},
-        Neck           = {0,0,0,1,-0,-0,0,0.25882,0.96593,-0,-0.96593,0.25882},
+        Neck           = {0,0,0,1,0,0,0,0.25882,0.96593,0,-0.96593,0.25882},
         RightWrist     = {0,0,0,1,0,0,0,1,0,0,0,1},
         RightElbow     = {0,0,0,1,0,0,0,1,0,0,0,1},
         RightHip       = {0,0,0,1,0,0,0,1,0,0,0,1},
         RightKnee      = {0,0,0,1,0,0,0,1,0,0,0,1},
         LeftKnee       = {0,0,0,1,0,0,0,1,0,0,0,1},
         RightAnkle     = {0,0,0,1,0,0,0,1,0,0,0,1},
-        RightShoulder  = {0,0,0.00001,0.21757,-0.95979,-0.17736,0.17736,0.21757,-0.9598,0.9598,0.17736,0.21757},
+        RightShoulder  = {0,0,0,0.21757,-0.95979,-0.17736,0.17736,0.21757,-0.9598,0.9598,0.17736,0.21757},
         LeftWrist      = {0,0,0,1,0,0,0,1,0,0,0,1},
         LeftElbow      = {0,0,0,1,0,0,0,1,0,0,0,1},
         LeftHip        = {0,0,0,1,0,0,0,1,0,0,0,1},
@@ -47,15 +49,15 @@ local POSE_DATA = {
             i = 1,
             t = 0.075,
             joints = {
-                Neck          = {0,0,0,1,-0,-0,0,0,1,-0,-1,0},
-                LeftShoulder  = {0,0,0,0,1,-0,-1,0,-0,-0,0,1},
-                RightShoulder = {0,0,0.00001,0,-1,-0,-0,0,-1,1,0,-0}
+                Neck          = {0,0,0,1,0,0,0,0,1,0,-1,0},
+                LeftShoulder  = {0,0,0,0,1,0,-1,0,0,0,0,1},
+                RightShoulder = {0,0,0,0,-1,0,0,0,-1,1,0,0}
             }
         }
     }
 }
 
--- ======= SINGLETON GUARD / CLEANUP =======
+-- ======= SINGLETON GUARD =======
 getgenv().DENSE_CFRAME_PLAYER = getgenv().DENSE_CFRAME_PLAYER or {}
 local S = getgenv().DENSE_CFRAME_PLAYER
 if S.stop then pcall(S.stop) end
@@ -68,22 +70,33 @@ local StarterGui  = game:GetService("StarterGui")
 local lp          = Players.LocalPlayer
 
 -- ======= LOGGING =======
-local function log(...)
-    if DEBUG_LOG then
-        print("[DenseCFrame]", ...)
-    end
-end
-local function wlog(...)
-    warn("[DenseCFrame]", ...)
-end
+local function log(...) if DEBUG_LOG then print("[DenseCFrame]", ...) end end
+local function wlog(...) warn("[DenseCFrame]", ...) end
 local function notify(title, text, dur)
     if not SHOW_NOTIFS then return end
     pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = title, Text = text, Duration = dur or 2
-        })
+        StarterGui:SetCore("SendNotification", { Title = title, Text = text, Duration = dur or 2 })
     end)
 end
+
+-- ======= JOINT ALIASES (R15 + R6 fallback) =======
+local JOINT_ALIASES = {
+    RightShoulder = {"RightShoulder","Right Shoulder"},
+    LeftShoulder  = {"LeftShoulder","Left Shoulder"},
+    RightElbow    = {"RightElbow","Right Elbow"},
+    LeftElbow     = {"LeftElbow","Left Elbow"},
+    RightWrist    = {"RightWrist","Right Wrist"},
+    LeftWrist     = {"LeftWrist","Left Wrist"},
+    Neck          = {"Neck"},
+    Waist         = {"Waist"},
+    Root          = {"Root","RootJoint","Root Joint"},
+    RightHip      = {"RightHip","Right Hip"},
+    LeftHip       = {"LeftHip","Left Hip"},
+    RightKnee     = {"RightKnee","Right Knee"},
+    LeftKnee      = {"LeftKnee","Left Knee"},
+    RightAnkle    = {"RightAnkle","Right Ankle"},
+    LeftAnkle     = {"LeftAnkle","Left Ankle"},
+}
 
 -- ======= UTIL =======
 local function waitForCharacter(plr)
@@ -94,44 +107,48 @@ local function waitForCharacter(plr)
 end
 
 local function cfFromArray(a)
-    -- a must be 12 numbers: pos(3) + rotation matrix(9)
-    if type(a) ~= "table" or #a ~= 12 then
-        return CFrame.identity
-    end
+    if type(a) ~= "table" or #a ~= 12 then return CFrame.identity end
     return CFrame.new(unpack(a))
 end
 
-local function trySetTransform(m, cf)
-    local ok, err = pcall(function() m.Transform = cf end)
-    if not ok then
-        wlog("Set Transform FAILED for", m.Name, "error:", err)
-        return false, err
-    end
-    return true
-end
+local function getAnimate(char) return char:FindFirstChild("Animate") end
 
 local function mapMotors(char)
-    local t, count = {}, 0
+    local byName = {}
     for _, d in ipairs(char:GetDescendants()) do
         if d:IsA("Motor6D") then
-            t[d.Name] = d
-            count += 1
+            byName[d.Name] = d
         end
     end
-    log("Mapped", count, "Motor6D(s):")
-    for name, _ in pairs(t) do
-        log("  -", name)
-    end
-    return t
+    log("Motors mapped:", (#(function(t)local c=0;for _ in pairs(t) do c+=1 end;return {c} end)(byName))[1])
+    for n,_ in pairs(byName) do log("  -", n) end
+    return byName
 end
 
-local function applyPose(motors, pose)
+local function buildResolver(motorsByName)
+    local cache = {}
+    return function(jointKey)
+        if cache[jointKey] ~= nil then return cache[jointKey] end
+        local aliases = JOINT_ALIASES[jointKey] or {jointKey}
+        for _, name in ipairs(aliases) do
+            local m = motorsByName[name]
+            if m then
+                cache[jointKey] = m
+                return m
+            end
+        end
+        cache[jointKey] = false
+        return nil
+    end
+end
+
+local function applyPose(resolve, pose)
     local applied, missing = 0, 0
-    for joint, arr in pairs(pose) do
-        local m = motors[joint]
+    for jointKey, arr in pairs(pose) do
+        local m = resolve(jointKey)
         if m then
-            local ok = trySetTransform(m, cfFromArray(arr))
-            if ok then applied += 1 end
+            local ok, err = pcall(function() m.Transform = cfFromArray(arr) end)
+            if ok then applied += 1 else wlog("Transform write failed:", jointKey, err) end
         else
             missing += 1
         end
@@ -139,9 +156,9 @@ local function applyPose(motors, pose)
     return applied, missing
 end
 
-local function clearTransforms(motors)
+local function clearTransforms(motorsByName)
     local cleared = 0
-    for _, m in pairs(motors) do
+    for _, m in pairs(motorsByName) do
         if m.Transform ~= CFrame.identity then
             m.Transform = CFrame.identity
             cleared += 1
@@ -150,24 +167,47 @@ local function clearTransforms(motors)
     log("Cleared transforms on", cleared, "motors.")
 end
 
-local function getAnimate(char)
-    return char:FindFirstChild("Animate")
+local function stopAllTracks(humanoid)
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return end
+    local ok, tracks = pcall(function() return animator:GetPlayingAnimationTracks() end)
+    if ok and tracks then
+        for _, tr in ipairs(tracks) do pcall(function() tr:Stop(0) end) end
+        log("Stopped", #tracks, "AnimationTrack(s).")
+    end
 end
 
--- Build dense frames: base + sparse updates -> full pose per frame
+-- Build dense frames from base + updates; supports either frame indices (i) or times (t)
 local function buildDenseFrames(data)
     local fps = (data.fps and data.fps > 0) and data.fps or 30
-    local maxI = 1
+    local frameTime = 1 / fps
+
+    -- Determine timeline from t if present; else from i
+    local useTime = false
+    local maxTime, maxI = 0, 1
     for _, u in ipairs(data.updates or {}) do
+        if u.t then useTime = true; if u.t > maxTime then maxTime = u.t end end
         if u.i and u.i > maxI then maxI = u.i end
     end
-    local totalFrames = math.max(1, maxI)
 
+    local totalFrames, timeAtFrame
     local buckets = {}
-    for _, u in ipairs(data.updates or {}) do
-        if u.i then
-            buckets[u.i] = buckets[u.i] or {}
-            table.insert(buckets[u.i], u)
+
+    if useTime then
+        totalFrames = math.max(1, math.floor(maxTime / frameTime + 0.5))
+        timeAtFrame = function(f) return (f - 1) * frameTime end
+        for _, u in ipairs(data.updates or {}) do
+            local f = math.max(1, math.floor((u.t or 0) / frameTime + 0.5) + 1)
+            buckets[f] = buckets[f] or {}
+            table.insert(buckets[f], u)
+        end
+    else
+        totalFrames = math.max(1, maxI)
+        timeAtFrame = function(f) return (f - 1) * frameTime end
+        for _, u in ipairs(data.updates or {}) do
+            local f = math.max(1, u.i or 1)
+            buckets[f] = buckets[f] or {}
+            table.insert(buckets[f], u)
         end
     end
 
@@ -183,25 +223,21 @@ local function buildDenseFrames(data)
                 end
             end
         end
-        local framePose = {}
-        for j, arr in pairs(current) do framePose[j] = arr end
-        dense[f] = framePose
+        local pose = {}
+        for j, arr in pairs(current) do pose[j] = arr end
+        dense[f] = pose
     end
 
-    log("Built dense frames:",
-        "fps =", fps,
-        "frames =", totalFrames,
-        "frameTime =", (1/fps)
-    )
-    return dense, totalFrames, (1 / fps)
+    log(("Built dense frames: fps=%d frames=%d duration≈%.3fs"):format(fps, totalFrames, timeAtFrame(totalFrames) + frameTime))
+    return dense, totalFrames, frameTime
 end
 
 -- ======= RUNNER =======
 local Runner = {
-    conn = nil,
     playing = false,
-    deadline = 0,
+    connBound = false,
     motors = nil,
+    resolve = nil,
     char = nil,
     humanoid = nil,
     animate = nil,
@@ -210,6 +246,7 @@ local Runner = {
     totalFrames = 1,
     frameTime = 1/30,
     startClock = 0,
+    deadline = 0,
     lastTickLog = 0,
 }
 
@@ -220,36 +257,48 @@ function Runner:disableAnimate()
         self.animate.Disabled = true
         log("Animate disabled.")
     else
-        log("Animate script not found; nothing to disable.")
+        log("Animate not found; nothing to disable.")
     end
 end
 
 function Runner:restoreAnimate()
     if self.motors then clearTransforms(self.motors) end
     if self.animate and self.animate.Parent then
-        if self.animateWasDisabled ~= nil then
-            self.animate.Disabled = self.animateWasDisabled
-        end
+        if self.animateWasDisabled ~= nil then self.animate.Disabled = self.animateWasDisabled end
         self.animate.Disabled = false
         log("Animate restored.")
     end
+    if self.humanoid then pcall(function() self.humanoid.AutoRotate = true end) end
 end
 
-function Runner:validateRig()
-    local rigType = self.humanoid and self.humanoid.RigType and self.humanoid.RigType.Name or "Unknown"
-    log("RigType =", rigType)
-    -- Report any expected joints missing from POSE_DATA
-    local expected = {}
-    for _, jn in ipairs(POSE_DATA.joints or {}) do expected[jn] = true end
-    local missingList = {}
-    for jn, _ in pairs(expected) do
-        if not self.motors[jn] then table.insert(missingList, jn) end
-    end
-    if #missingList > 0 then
-        wlog("MISSING JOINTS in rig (will be skipped):")
-        for _, jn in ipairs(missingList) do wlog("  -", jn) end
-    else
-        log("All expected joints present.")
+function Runner:bindLoop()
+    if self.connBound then return end
+    RunService:BindToRenderStep(BIND_NAME, BIND_PRIORITY, function()
+        if not self.playing then return end
+        local now = os.clock()
+        local loopLen  = self.totalFrames * self.frameTime
+        local loopT    = (now - self.startClock) % math.max(loopLen, self.frameTime)
+        local frameIdx = math.floor(loopT / self.frameTime) + 1
+        if frameIdx < 1 then frameIdx = 1 end
+        if frameIdx > self.totalFrames then frameIdx = self.totalFrames end
+
+        local a, m = applyPose(self.resolve, self.dense[frameIdx])
+        if TRACE_FRAMES_S > 0 and (now - self.lastTickLog) >= TRACE_FRAMES_S then
+            self.lastTickLog = now
+            log(("Frame %d/%d applied. jointsApplied=%d missing=%d"):format(frameIdx, self.totalFrames, a, m))
+        end
+
+        if now >= self.deadline then self:stop(false) end
+    end)
+    self.connBound = true
+    log("Render loop bound @ priority", BIND_PRIORITY)
+end
+
+function Runner:unbindLoop()
+    if self.connBound then
+        pcall(function() RunService:UnbindFromRenderStep(BIND_NAME) end)
+        self.connBound = false
+        log("Render loop unbound.")
     end
 end
 
@@ -259,13 +308,15 @@ function Runner:start(duration)
     self.char = waitForCharacter(lp)
     self.humanoid = self.char:FindFirstChildOfClass("Humanoid")
     self.motors = mapMotors(self.char)
-    self:validateRig()
-
+    self.resolve = buildResolver(self.motors)
     self.dense, self.totalFrames, self.frameTime = buildDenseFrames(POSE_DATA)
 
     self:disableAnimate()
     if self.humanoid then
-        pcall(function() self.humanoid.AutoRotate = false end)
+        pcall(function()
+            self.humanoid.AutoRotate = false
+            stopAllTracks(self.humanoid) -- kill any local tracks that might keep posing
+        end)
     end
 
     self.startClock = os.clock()
@@ -273,56 +324,30 @@ function Runner:start(duration)
     self.lastTickLog = self.startClock
     self.playing = true
 
-    log("=== START PLAYBACK === duration =", duration or DEFAULT_DURATION,
-        "frames =", self.totalFrames, "frameTime =", self.frameTime)
+    local a, m = applyPose(self.resolve, self.dense[1])
+    log("=== START PLAYBACK === duration =", duration or DEFAULT_DURATION, "frames =", self.totalFrames, "frameTime =", self.frameTime)
+    log("Applied first frame. jointsApplied =", a, "missing =", m)
+    if m > 0 then wlog("Some joints were not found; check names above or alias mapping.") end
 
-    local applied, missing = applyPose(self.motors, self.dense[1])
-    log("Applied first frame. jointsApplied =", applied, "missing =", missing)
-
-    self.conn = RunService.RenderStepped:Connect(function()
-        if not self.playing then return end
-
-        local now = os.clock()
-        local loopLen  = self.totalFrames * self.frameTime
-        local loopT    = (now - self.startClock) % loopLen
-        local frameIdx = math.floor(loopT / self.frameTime) + 1
-        if frameIdx < 1 then frameIdx = 1 end
-        if frameIdx > self.totalFrames then frameIdx = self.totalFrames end
-
-        local a, m = applyPose(self.motors, self.dense[frameIdx])
-
-        if TRACE_FRAMES_S > 0 and (now - self.lastTickLog) >= TRACE_FRAMES_S then
-            self.lastTickLog = now
-            log(("Frame %d/%d applied. jointsApplied=%d missing=%d")
-                :format(frameIdx, self.totalFrames, a, m))
-        end
-
-        if now >= self.deadline then
-            self:stop(false)
-        end
-    end)
-    notify("CFrame Player", "Playback started", 1.5)
+    self:bindLoop()
+    notify("CFrame Player", "Playback started", 1.2)
 end
 
 function Runner:stop(isInterrupt)
-    if self.conn then self.conn:Disconnect() self.conn = nil end
     self.playing = false
+    self:unbindLoop()
     self:restoreAnimate()
-    if self.humanoid then
-        pcall(function() self.humanoid.AutoRotate = true end)
-    end
     log("=== STOP PLAYBACK === interrupt =", isInterrupt == true)
-    notify("CFrame Player", "Playback stopped", 1.5)
+    notify("CFrame Player", "Playback stopped", 1.2)
 end
 
-getgenv().DENSE_CFRAME_PLAYER.stop = function()
-    if Runner.playing then Runner:stop(true) end
+S.stop = function()
+    if Runner.playing then Runner:stop(true) else Runner:unbindLoop() end
 end
 
 Players.LocalPlayer.CharacterAdded:Connect(function(ch)
     if not Runner.playing then
-        local a = getAnimate(ch)
-        if a then a.Disabled = false end
+        local a = getAnimate(ch); if a then a.Disabled = false end
     end
 end)
 
@@ -333,16 +358,23 @@ gui.Name = GUI_NAME
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = pg
-getgenv().DENSE_CFRAME_PLAYER.gui = gui
+S.gui = gui
 
 local frame = Instance.new("Frame")
 frame.Name = "Panel"
-frame.Size = UDim2.new(0, 240, 0, 130)
-frame.Position = UDim2.new(1, -260, 1, -180)
+frame.Size = UDim2.new(0, 260, 0, 140)
+frame.Position = UDim2.new(1, -280, 1, -200)
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
 frame.BorderSizePixel = 0
 frame.Parent = gui
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 26)
+titleBar.BackgroundColor3 = Color3.fromRGB(26, 26, 32)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = frame
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 8)
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -351,9 +383,19 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 14
 title.TextColor3 = Color3.fromRGB(255, 200, 80)
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.Size = UDim2.new(1, -10, 0, 20)
-title.Position = UDim2.new(0, 10, 0, 6)
-title.Parent = frame
+title.Size = UDim2.new(1, -30, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.Parent = titleBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "✕"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.TextColor3 = Color3.fromRGB(220, 90, 90)
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -26, 0, 0)
+closeBtn.Parent = titleBar
 
 local durLabel = Instance.new("TextLabel")
 durLabel.BackgroundTransparency = 1
@@ -363,12 +405,12 @@ durLabel.TextSize = 12
 durLabel.TextColor3 = Color3.fromRGB(210, 210, 220)
 durLabel.TextXAlignment = Enum.TextXAlignment.Left
 durLabel.Size = UDim2.new(0, 90, 0, 20)
-durLabel.Position = UDim2.new(0, 10, 0, 28)
+durLabel.Position = UDim2.new(0, 10, 0, 34)
 durLabel.Parent = frame
 
 local durBox = Instance.new("TextBox")
 durBox.Size = UDim2.new(0, 60, 0, 20)
-durBox.Position = UDim2.new(0, 100, 0, 28)
+durBox.Position = UDim2.new(0, 100, 0, 34)
 durBox.Text = tostring(DEFAULT_DURATION)
 durBox.ClearTextOnFocus = false
 durBox.Font = Enum.Font.Gotham
@@ -379,8 +421,8 @@ durBox.Parent = frame
 Instance.new("UICorner", durBox).CornerRadius = UDim.new(0, 6)
 
 local runBtn = Instance.new("TextButton")
-runBtn.Size = UDim2.new(0, 220, 0, 28)
-runBtn.Position = UDim2.new(0, 10, 0, 56)
+runBtn.Size = UDim2.new(0, 240, 0, 28)
+runBtn.Position = UDim2.new(0, 10, 0, 64)
 runBtn.Text = "Run custom CFrame pose"
 runBtn.Font = Enum.Font.GothamBold
 runBtn.TextSize = 13
@@ -391,8 +433,8 @@ runBtn.Parent = frame
 Instance.new("UICorner", runBtn).CornerRadius = UDim.new(0, 6)
 
 local testBtn = Instance.new("TextButton")
-testBtn.Size = UDim2.new(0, 220, 0, 28)
-testBtn.Position = UDim2.new(0, 10, 0, 90)
+testBtn.Size = UDim2.new(0, 240, 0, 28)
+testBtn.Position = UDim2.new(0, 10, 0, 98)
 testBtn.Text = "1s sanity test (RightShoulder swing)"
 testBtn.Font = Enum.Font.GothamBold
 testBtn.TextSize = 13
@@ -406,7 +448,7 @@ Instance.new("UICorner", testBtn).CornerRadius = UDim.new(0, 6)
 do
     local UIS = game:GetService("UserInputService")
     local dragging, dragStart, startPos
-    frame.InputBegan:Connect(function(input)
+    titleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
@@ -424,7 +466,7 @@ do
     end)
 end
 
--- Button actions
+-- Buttons
 runBtn.MouseButton1Click:Connect(function()
     local dur = tonumber(durBox.Text)
     if not dur or dur <= 0 then
@@ -433,16 +475,16 @@ runBtn.MouseButton1Click:Connect(function()
         notify("CFrame Player", "Invalid duration. Using default: " .. tostring(dur) .. "s", 2)
         wlog("Invalid duration in box; defaulting to", dur)
     end
-    log("Run button pressed. duration =", dur)
+    log("Run pressed. duration =", dur)
     Runner:start(dur)
 end)
 
 testBtn.MouseButton1Click:Connect(function()
-    -- Minimal proof: rotate RightShoulder by ~30 degrees around Z for 1s, then restore.
-    log("Sanity Test: attempting to swing RightShoulder for 1s.")
+    log("Sanity Test: swing RightShoulder for 1s.")
     local ch = waitForCharacter(lp)
     local motors = mapMotors(ch)
-    local rs = motors["RightShoulder"] or motors["Right Shoulder"] -- R6 fallback
+    local resolve = buildResolver(motors)
+    local rs = resolve("RightShoulder")
     if not rs then
         wlog("Sanity Test FAILED: RightShoulder motor not found.")
         notify("Sanity Test", "RightShoulder not found", 2)
@@ -450,30 +492,36 @@ testBtn.MouseButton1Click:Connect(function()
     end
     local original = rs.Transform
     local start = os.clock()
-    local conn
-    conn = RunService.RenderStepped:Connect(function()
+    RunService:BindToRenderStep("DenseCFrame_Sanity", BIND_PRIORITY, function()
         local t = os.clock() - start
-        local ang = math.rad(30) * math.sin(t * math.pi * 2) -- back/forth within 1s
-        local ok = trySetTransform(rs, CFrame.Angles(0, 0, ang))
-        if not ok then wlog("Sanity Test write failed") end
+        local ang = math.rad(30) * math.sin(t * math.pi * 2)
+        pcall(function() rs.Transform = CFrame.Angles(0, 0, ang) end)
         if t >= 1.0 then
-            conn:Disconnect()
+            RunService:UnbindFromRenderStep("DenseCFrame_Sanity")
             rs.Transform = original
             log("Sanity Test complete; restored RightShoulder transform.")
-            notify("Sanity Test", "Completed", 1.5)
+            notify("Sanity Test", "Completed", 1.2)
         end
     end)
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    log("Close pressed. Cleaning up.")
+    S.stop()
+    if S.gui and S.gui.Parent then S.gui:Destroy() end
+    -- wipe globals for clean re-exec
+    getgenv().DENSE_CFRAME_PLAYER = { }
+    notify("CFrame Player", "Closed", 1)
 end)
 
 -- Safety: ensure Animate is enabled if UI is removed
 gui.AncestryChanged:Connect(function(_, parent)
     if not parent then
-        if Runner.playing then Runner:stop(true) end
+        S.stop()
         local ch = lp.Character or lp.CharacterAdded:Wait()
-        local a = getAnimate(ch)
-        if a then a.Disabled = false end
+        local a = getAnimate(ch); if a then a.Disabled = false end
         log("UI removed; ensured Animate enabled.")
     end
 end)
 
-log("Dense CFrame Player loaded. Click 'Run custom CFrame pose' or 'Sanity Test'.")
+log("Dense CFrame Player loaded. Use Run or Sanity Test. Close (✕) to fully remove.")
