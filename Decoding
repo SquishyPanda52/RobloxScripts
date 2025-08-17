@@ -1,134 +1,60 @@
 --[[
-  Hilton | Arm Pose (Motor6D.Transform)
-  - Client-only, no asset IDs
-  - Forces the right arm into a fixed pose and keeps it there "forever"
-  - Re-exec to cleanly remove and stop
-  - Works on R15 and R6
+  Hilton | Locked Arm Pose (Animation Hijack + Transform)
+  Client-only, re-exec safe
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
--- ===== CONFIG =====
-local CONFIG = {
-    -- Approx pose: raise arm forward ~70 degrees. Tweak if you want side-raise.
-    SHOULDER_DEG = 70,       -- shoulder flexion (forward raise)
-    ELBOW_DEG    = 0,        -- elbow bend (0 = straight)
-    APPLY_EVERY_FRAME = true, -- keep overriding animations each frame
-    LOG_PREFIX = "[ArmPose] ",
-}
--- ==================
+local G = getgenv and getgenv() or _G
+G.__LockedArm = G.__LockedArm or { active=false, conns={}, joints={} }
 
-local function log(level, msg)
-    print(("%s[%s] %s"):format(CONFIG.LOG_PREFIX, level, msg))
+local function cleanup()
+    for _,c in ipairs(G.__LockedArm.conns) do pcall(function() c:Disconnect() end) end
+    for _,m in pairs(G.__LockedArm.joints) do pcall(function() m.Transform = CFrame.new() end) end
+    table.clear(G.__LockedArm.conns)
+    table.clear(G.__LockedArm.joints)
+    G.__LockedArm.active=false
 end
 
--- Re-exec guard
-local G = (getgenv and getgenv()) or _G
-G.__ArmPose = G.__ArmPose or { active = false, step = nil, conns = {}, joints = {} }
-
-if G.__ArmPose.active then
-    log("INFO", "Re-exec: cleaning previous session.")
-    if G.__ArmPose.step then pcall(function() G.__ArmPose.step:Disconnect() end) end
-    -- Reset any transforms we touched
-    for name, m in pairs(G.__ArmPose.joints) do
-        pcall(function() m.Transform = CFrame.new() end)
-    end
-    -- Disconnect signals
-    for _, c in ipairs(G.__ArmPose.conns) do pcall(function() c:Disconnect() end) end
-    G.__ArmPose.conns, G.__ArmPose.joints = {}, {}
-    G.__ArmPose.active = false
-    log("DONE", "Cleanup complete. Run again to re-apply.")
+if G.__LockedArm.active then
+    cleanup()
+    print("[LockedArm] Cleanup complete.")
     return
 end
 
-G.__ArmPose.active = true
+G.__LockedArm.active=true
 
-local function getCharacter()
-    local plr = Players.LocalPlayer
-    while not plr do RunService.Heartbeat:Wait() plr = Players.LocalPlayer end
-    return plr.Character or plr.CharacterAdded:Wait()
-end
+local char = Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
 
-local function resolveJoints(char)
-    -- Supports R15 and R6
-    local joints = {}
-
-    -- R15 attempt
-    local rua = char:FindFirstChild("RightUpperArm")
-    local rla = char:FindFirstChild("RightLowerArm")
-    if rua then
-        local shoulder = rua:FindFirstChild("RightShoulder") or (char:FindFirstChild("UpperTorso") and char.UpperTorso:FindFirstChild("RightShoulder"))
-        if shoulder and shoulder:IsA("Motor6D") then joints.RightShoulder = shoulder end
-    end
-    if rla then
-        local elbow = rla:FindFirstChild("RightElbow") or (rua and rua:FindFirstChild("RightElbow"))
-        if elbow and elbow:IsA("Motor6D") then joints.RightElbow = elbow end
-    end
-
-    -- R6 fallback
-    if not joints.RightShoulder then
-        local torso = char:FindFirstChild("Torso")
-        local shoulderR6 = torso and torso:FindFirstChild("Right Shoulder")
-        if shoulderR6 and shoulderR6:IsA("Motor6D") then joints.RightShoulder = shoulderR6 end
-    end
-
-    return joints
-end
-
-local function applyPose(joints)
-    -- Convert degrees to radians
-    local s = math.rad(CONFIG.SHOULDER_DEG)
-    local e = math.rad(CONFIG.ELBOW_DEG)
-
-    -- Note: joint local axes can differ per rig; this uses X rotation for forward raise.
-    if joints.RightShoulder then
-        joints.RightShoulder.Transform = CFrame.Angles(-s, 0, 0)
-    end
-    if joints.RightElbow then
-        joints.RightElbow.Transform = CFrame.Angles(-e, 0, 0)
+-- Kill animation tracks affecting the right arm
+for _, track in ipairs(char:FindFirstChildOfClass("Humanoid"):GetPlayingAnimationTracks()) do
+    if track.Priority ~= Enum.AnimationPriority.Idle then
+        track:Stop(0)
     end
 end
 
-local function clearPose(joints)
-    for _, m in pairs(joints) do
-        pcall(function() m.Transform = CFrame.new() end)
-    end
+-- Grab joints (R15 shoulder/elbow or R6 shoulder)
+local joints = {}
+local rua = char:FindFirstChild("RightUpperArm")
+if rua then
+    local sh = rua:FindFirstChildWhichIsA("Motor6D") or char:FindFirstChild("UpperTorso"):FindFirstChild("RightShoulder")
+    if sh then joints.s = sh end
+end
+if not joints.s then
+    local torso = char:FindFirstChild("Torso")
+    local shR6 = torso and torso:FindFirstChild("Right Shoulder")
+    if shR6 then joints.s = shR6 end
 end
 
-local char = getCharacter()
-local joints = resolveJoints(char)
-if not next(joints) then
-    log("ERROR", "No target joints found. Is the rig loaded (R15 or R6)?")
-    G.__ArmPose.active = false
-    return
-end
+G.__LockedArm.joints = joints
 
-G.__ArmPose.joints = joints
+-- Fixed pose angles
+local SHOULDER_ANG = CFrame.Angles(math.rad(-70), 0, 0)
 
--- Initial pose
-applyPose(joints)
-log("OK", "Applied arm pose. Holding it in place.")
-
--- Keep it there forever (override any animations)
-if CONFIG.APPLY_EVERY_FRAME then
-    G.__ArmPose.step = RunService.RenderStepped:Connect(function()
-        applyPose(joints)
+G.__LockedArm.conns[#G.__LockedArm.conns+1] =
+    RunService.RenderStepped:Connect(function()
+        if joints.s then joints.s.Transform = SHOULDER_ANG end
     end)
-end
 
--- Re-apply on respawn so it persists across deaths
-local plr = Players.LocalPlayer
-table.insert(G.__ArmPose.conns, plr.CharacterAdded:Connect(function(newChar)
-    -- Clear old transforms just in case
-    clearPose(joints)
-    char = newChar
-    joints = resolveJoints(char)
-    G.__ArmPose.joints = joints or {}
-    if joints and next(joints) then
-        log("INFO", "Respawn detected. Re-applying pose.")
-        applyPose(joints)
-    else
-        log("WARN", "Respawned, but joints not found yet.")
-    end
-end))
+print("[LockedArm] Applied and locked pose.")
