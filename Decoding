@@ -1,158 +1,94 @@
--- R15 Walk/Run Override (Client-only, replicates) with permission-safe fallbacks
--- Plays one looped clip for both walking and running. No server edits. No Animate rewrite required.
+-- === Idle Animation Playback (runtime local, sparse player) ===
 
--- Your preferred clip first (will try this one; if it fails due to perms, we fall back).
-local TARGET_ID = "81698590304444"
-
--- Public R15 fallbacks (safe, commonly loadable). Replace with your own public IDs anytime.
--- Tip: keep these R15. Mixing R6 clips can fail or look off on R15 rigs.
-local FALLBACKS_R15 = {
-    "4555808220", "4049037604", "3333432454", "4555782893", "10214311282",
-    "10714010337", "10713981723", "10714372526", "10714076981", "10714392151",
-    "11444443576"
+local POSE_DATA = {
+    note   = "Sparse updates over one loop",
+    schema = "sparse+base",
+    fps    = 30,
+    rig    = "R15",
+    joints = {
+        "LeftAnkle","LeftElbow","LeftHip","LeftKnee","LeftShoulder","LeftWrist",
+        "Neck","RightAnkle","RightElbow","RightHip","RightKnee",
+        "RightShoulder","RightWrist","Root","Waist"
+    },
+    base = {
+        Waist          = {0,0,0,1,0,0,0,1,0,0,0,1},
+        LeftShoulder   = {0,0,0,0.25882,0.96593,-0,-0.96593,0.25882,-0,-0,0,1},
+        Root           = {0,0,0,1,0,0,0,1,0,0,0,1},
+        Neck           = {0,0,0,1,-0,-0,0,0.25882,0.96593,-0,-0.96593,0.25882},
+        RightWrist     = {0,0,0,1,0,0,0,1,0,0,0,1},
+        RightElbow     = {0,0,0,1,0,0,0,1,0,0,0,1},
+        RightHip       = {0,0,0,1,0,0,0,1,0,0,0,1},
+        RightKnee      = {0,0,0,1,0,0,0,1,0,0,0,1},
+        LeftKnee       = {0,0,0,1,0,0,0,1,0,0,0,1},
+        RightAnkle     = {0,0,0,1,0,0,0,1,0,0,0,1},
+        RightShoulder  = {0,0,0.00001,0.21757,-0.95979,-0.17736,0.17736,0.21757,-0.9598,0.9598,0.17736,0.21757},
+        LeftWrist      = {0,0,0,1,0,0,0,1,0,0,0,1},
+        LeftElbow      = {0,0,0,1,0,0,0,1,0,0,0,1},
+        LeftHip        = {0,0,0,1,0,0,0,1,0,0,0,1},
+        LeftAnkle      = {0,0,0,1,0,0,0,1,0,0,0,1}
+    },
+    updates = {
+        {
+            i = 1,
+            t = 0.075,
+            joints = {
+                Neck          = {0,0,0,1,-0,-0,0,0,1,-0,-1,0},
+                LeftShoulder  = {0,0,0,0,1,-0,-1,0,-0,-0,0,1},
+                RightShoulder = {0,0,0.00001,0,-1,-0,-0,0,-1,1,0,-0}
+            }
+        }
+    }
 }
 
-local Players = game:GetService("Players")
+-- === Player ===
+local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
+local lp         = Players.LocalPlayer
 
--- Singleton guard (safe re-injection)
-getgenv().BH_MOVE = getgenv().BH_MOVE or { active = false }
-local S = getgenv().BH_MOVE
+local char = lp.Character or lp.CharacterAdded:Wait()
 
-local function getRig()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hum = char:WaitForChild("Humanoid")
-    if hum.RigType ~= Enum.HumanoidRigType.R15 then
-        warn("R15 required for this movement override.")
-        return
+-- Map Motor6Ds for the joints we care about
+local motors = {}
+for _, m in ipairs(char:GetDescendants()) do
+    if m:IsA("Motor6D") then
+        motors[m.Name] = m
     end
-    local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
-    return char, hum, animator
 end
 
-local function tryLoad(animator, id)
-    local anim = Instance.new("Animation")
-    anim.AnimationId = "rbxassetid://" .. tostring(id)
-    local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
-    if ok and track then return track end
+local function cfFromArray(a)
+    return CFrame.new(unpack(a))
 end
 
-local function obtainTrack(animator)
-    -- Try your target first, then fallbacks
-    local track = tryLoad(animator, TARGET_ID)
-    if track then return track, TARGET_ID end
-    for _, id in ipairs(FALLBACKS_R15) do
-        track = tryLoad(animator, id)
-        if track then return track, id end
-    end
-    return nil, nil
-end
-
-local function suppressMovement(animator, keepTrack)
-    -- Keep Animate (and other movement clips) from fighting our track.
-    for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-        if t ~= keepTrack and t.Priority == Enum.AnimationPriority.Movement then
-            t:Stop(0.1)
-        end
-        if t ~= keepTrack and (t.Name == "walk" or t.Name == "run" or t.Name == "WalkAnim" or t.Name == "RunAnim") then
-            t:Stop(0.1)
+local function applyPose(pose)
+    for joint, arr in pairs(pose) do
+        local m = motors[joint]
+        if m and arr then
+            m.Transform = cfFromArray(arr)
         end
     end
 end
 
-local function mapSpeedToPlayback(speed)
-    local rate = speed / 16 -- baseline walkspeed
-    if rate < 0.1 then rate = 0.1 end
-    if rate > 2.5 then rate = 2.5 end
-    return rate
+-- Apply base immediately
+applyPose(POSE_DATA.base)
+
+-- Determine loop length from max update index (fallback 1 if empty)
+local totalFrames = 1
+if #POSE_DATA.updates > 0 then
+    for _, u in ipairs(POSE_DATA.updates) do
+        if u.i > totalFrames then totalFrames = u.i end
+    end
 end
 
-local function start()
-    if S.active then return end
-    local char, hum, animator = getRig()
-    if not hum then return end
+local frameTime = 1 / POSE_DATA.fps
 
-    local track, usedId = obtainTrack(animator)
-    if not track then
-        warn("No usable animation found (target + fallbacks failed).")
-        return
-    end
-
-    track.Name = "BH_MoveOverride"
-    track.Priority = Enum.AnimationPriority.Movement
-    track.Looped = true
-
-    local conns, moving, sweepAccum = {}, false, 0
-
-    local function ensurePlaying(speed)
-        if not moving then
-            moving = true
-            track:Play(0.1)
-        end
-        track:AdjustSpeed(mapSpeedToPlayback(speed))
-        suppressMovement(animator, track)
-    end
-
-    local function ensureStopped()
-        if moving then
-            moving = false
-            track:Stop(0.15)
+RunService.RenderStepped:Connect(function()
+    -- Which frame index are we on in the loop?
+    local loopT       = tick() % (totalFrames * frameTime)
+    local currentFrame = math.floor(loopT / frameTime) + 1
+    -- Apply any updates scheduled for this frame
+    for _, upd in ipairs(POSE_DATA.updates) do
+        if upd.i == currentFrame then
+            applyPose(upd.joints)
         end
     end
-
-    table.insert(conns, hum.Running:Connect(function(speed)
-        if speed > 0.1 then
-            ensurePlaying(speed)
-        else
-            ensureStopped()
-        end
-    end))
-
-    table.insert(conns, RunService.RenderStepped:Connect(function(dt)
-        sweepAccum += dt
-        if sweepAccum >= 0.3 then
-            sweepAccum = 0
-            if moving then suppressMovement(animator, track) end
-        end
-    end))
-
-    local function stop(reason)
-        if not S.active then return end
-        S.active = false
-        pcall(function() track:Stop(0.15) end)
-        pcall(function() track:Destroy() end)
-        for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-        S._track, S._conns = nil, nil
-        if reason then print("Move override stopped:", reason) end
-    end
-
-    table.insert(conns, hum.Died:Connect(function() stop("died") end))
-    table.insert(conns, LocalPlayer.CharacterAdded:Connect(function() stop("respawn") end))
-
-    S.active, S._track, S._conns = true, track, conns
-
-    local currentSpeed = hum.MoveDirection.Magnitude > 0 and hum.WalkSpeed or 0
-    if currentSpeed > 0 then
-        ensurePlaying(currentSpeed)
-    end
-    print(("R15 movement override active. Using asset id %s"):format(usedId))
-end
-
-local function stop()
-    if not S.active then return end
-    if S._track then pcall(function() S._track:Stop(0.15) end) end
-    if S._conns then
-        for _, c in ipairs(S._conns) do pcall(function() c:Disconnect() end) end
-    end
-    S.active, S._track, S._conns = false, nil, nil
-    print("R15 movement override disabled.")
-end
-
--- Public toggle
-S.start = start
-S.stop = stop
-
--- Auto-start (re-injection safe)
-if S.active then S.stop() end
-S.start()
+end)
