@@ -1,244 +1,134 @@
 --[[
-  Hilton | Client-only Idle/Emote Loader (re-exec safe)
-  - No server calls or permissions required
-  - Plays your animation locally or replaces local idle IDs (Animate) for you only
-  - Re-exec once to cleanly restore and stop
+  Hilton | Arm Pose (Motor6D.Transform)
+  - Client-only, no asset IDs
+  - Forces the right arm into a fixed pose and keeps it there "forever"
+  - Re-exec to cleanly remove and stop
+  - Works on R15 and R6
 ]]
-
--- ========= CONFIG =========
-local CONFIG = {
-    TARGET_ANIMATION_ID = "rbxassetid://87665575152540", -- Your Animation asset id
-    MODE = "play",            -- "play" (non-invasive) or "replace" (swap local idle IDs)
-    PRIORITY = Enum.AnimationPriority.Idle,
-    LOOPED = true,
-    FADE_IN = 0.12,
-    SPEED = 1.0,
-
-    -- Public, universally loadable idle fallbacks
-    FALLBACK_IDLE_1 = "rbxassetid://507766666",
-    FALLBACK_IDLE_2 = "rbxassetid://507766951",
-
-    LOG_PREFIX = "[IdleLoader] ",
-}
--- ==========================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+
+-- ===== CONFIG =====
+local CONFIG = {
+    -- Approx pose: raise arm forward ~70 degrees. Tweak if you want side-raise.
+    SHOULDER_DEG = 70,       -- shoulder flexion (forward raise)
+    ELBOW_DEG    = 0,        -- elbow bend (0 = straight)
+    APPLY_EVERY_FRAME = true, -- keep overriding animations each frame
+    LOG_PREFIX = "[ArmPose] ",
+}
+-- ==================
 
 local function log(level, msg)
     print(("%s[%s] %s"):format(CONFIG.LOG_PREFIX, level, msg))
 end
 
--- Global session state for re-exec safety
+-- Re-exec guard
 local G = (getgenv and getgenv()) or _G
-G.__IdleLoader = G.__IdleLoader or { active = false, conns = {}, tracks = {}, originals = nil }
+G.__ArmPose = G.__ArmPose or { active = false, step = nil, conns = {}, joints = {} }
 
--- If already active, cleanup and exit (toggle behavior)
-if G.__IdleLoader.active then
-    log("INFO", "Re-exec detected: cleaning up previous session.")
-
-    for _, tr in ipairs(G.__IdleLoader.tracks) do
-        pcall(function() tr:Stop(0.15) tr:Destroy() end)
+if G.__ArmPose.active then
+    log("INFO", "Re-exec: cleaning previous session.")
+    if G.__ArmPose.step then pcall(function() G.__ArmPose.step:Disconnect() end) end
+    -- Reset any transforms we touched
+    for name, m in pairs(G.__ArmPose.joints) do
+        pcall(function() m.Transform = CFrame.new() end)
     end
-    G.__IdleLoader.tracks = {}
-
-    if G.__IdleLoader.originals and G.__IdleLoader.originals.animate and G.__IdleLoader.originals.idles then
-        local animate = G.__IdleLoader.originals.animate
-        for name, id in pairs(G.__IdleLoader.originals.idles) do
-            local animObj = animate:FindFirstChild(name, true)
-            if animObj and animObj:IsA("Animation") then
-                animObj.AnimationId = id
-            end
-        end
-        log("INFO", "Restored original Animate idle AnimationIds.")
-    end
-    for _, c in ipairs(G.__IdleLoader.conns) do
-        pcall(function() c:Disconnect() end)
-    end
-    G.__IdleLoader.conns = {}
-    G.__IdleLoader.originals = nil
-    G.__IdleLoader.active = false
-    log("DONE", "Cleanup complete. Re-run to apply again.")
+    -- Disconnect signals
+    for _, c in ipairs(G.__ArmPose.conns) do pcall(function() c:Disconnect() end) end
+    G.__ArmPose.conns, G.__ArmPose.joints = {}, {}
+    G.__ArmPose.active = false
+    log("DONE", "Cleanup complete. Run again to re-apply.")
     return
 end
 
-G.__IdleLoader.active = true
-
--- Helpers
-local function normalizeId(id)
-    local s = tostring(id):gsub("%s+", "")
-    local num = s:match("(%d+)$")
-    if not num then return nil end
-    return "rbxassetid://" .. num
-end
+G.__ArmPose.active = true
 
 local function getCharacter()
     local plr = Players.LocalPlayer
     while not plr do RunService.Heartbeat:Wait() plr = Players.LocalPlayer end
-    if not plr.Character or not plr.Character.Parent then
-        plr.CharacterAdded:Wait()
-    end
-    return plr.Character
+    return plr.Character or plr.CharacterAdded:Wait()
 end
 
-local function getAnimator(char)
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    while not hum do RunService.Heartbeat:Wait() hum = char:FindFirstChildOfClass("Humanoid") end
-    local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
-    return hum, animator
+local function resolveJoints(char)
+    -- Supports R15 and R6
+    local joints = {}
+
+    -- R15 attempt
+    local rua = char:FindFirstChild("RightUpperArm")
+    local rla = char:FindFirstChild("RightLowerArm")
+    if rua then
+        local shoulder = rua:FindFirstChild("RightShoulder") or (char:FindFirstChild("UpperTorso") and char.UpperTorso:FindFirstChild("RightShoulder"))
+        if shoulder and shoulder:IsA("Motor6D") then joints.RightShoulder = shoulder end
+    end
+    if rla then
+        local elbow = rla:FindFirstChild("RightElbow") or (rua and rua:FindFirstChild("RightElbow"))
+        if elbow and elbow:IsA("Motor6D") then joints.RightElbow = elbow end
+    end
+
+    -- R6 fallback
+    if not joints.RightShoulder then
+        local torso = char:FindFirstChild("Torso")
+        local shoulderR6 = torso and torso:FindFirstChild("Right Shoulder")
+        if shoulderR6 and shoulderR6:IsA("Motor6D") then joints.RightShoulder = shoulderR6 end
+    end
+
+    return joints
 end
 
-local function tryLoadAnimation(animator, animId)
-    local okLoad, trackOrErr = pcall(function()
-        local a = Instance.new("Animation")
-        a.AnimationId = animId
-        return animator:LoadAnimation(a)
-    end)
-    if not okLoad then
-        return false, nil, "LoadAnimation failed: " .. tostring(trackOrErr)
+local function applyPose(joints)
+    -- Convert degrees to radians
+    local s = math.rad(CONFIG.SHOULDER_DEG)
+    local e = math.rad(CONFIG.ELBOW_DEG)
+
+    -- Note: joint local axes can differ per rig; this uses X rotation for forward raise.
+    if joints.RightShoulder then
+        joints.RightShoulder.Transform = CFrame.Angles(-s, 0, 0)
     end
-    local track = trackOrErr
-    track.Priority = CONFIG.PRIORITY
-    track.Looped = CONFIG.LOOPED
-    local okPlay, playErr = pcall(function()
-        track:Play(CONFIG.FADE_IN, 1, CONFIG.SPEED)
-    end)
-    if not okPlay then
-        pcall(function() track:Destroy() end)
-        return false, nil, "Track:Play failed: " .. tostring(playErr)
+    if joints.RightElbow then
+        joints.RightElbow.Transform = CFrame.Angles(-e, 0, 0)
     end
-    return true, track, nil
 end
 
--- Start
+local function clearPose(joints)
+    for _, m in pairs(joints) do
+        pcall(function() m.Transform = CFrame.new() end)
+    end
+end
+
 local char = getCharacter()
-local hum, animator = getAnimator(char)
-
-local targetId = normalizeId(CONFIG.TARGET_ANIMATION_ID)
-local fb1 = normalizeId(CONFIG.FALLBACK_IDLE_1)
-local fb2 = normalizeId(CONFIG.FALLBACK_IDLE_2)
-
-if not targetId then
-    log("ERROR", "Invalid TARGET_ANIMATION_ID. Aborting.")
-    G.__IdleLoader.active = false
+local joints = resolveJoints(char)
+if not next(joints) then
+    log("ERROR", "No target joints found. Is the rig loaded (R15 or R6)?")
+    G.__ArmPose.active = false
     return
 end
 
-local function playTargetOrFallback()
-    -- Try target
-    local ok, track, err = tryLoadAnimation(animator, targetId)
-    if ok then
-        table.insert(G.__IdleLoader.tracks, track)
-        log("OK", "Playing target animation.")
-        return true
-    else
-        log("WARN", ("Target failed to load or play. Reason: %s"):format(err or "unknown"))
-    end
-    -- Try fallback
-    local fOK, fTrack, fErr = tryLoadAnimation(animator, fb1 or fb2)
-    if fOK then
-        table.insert(G.__IdleLoader.tracks, fTrack)
-        log("OK", "Fallback idle playing.")
-        return true
-    else
-        log("ERROR", ("Fallback failed to load/play. Reason: %s"):format(fErr or "unknown"))
-        return false
-    end
+G.__ArmPose.joints = joints
+
+-- Initial pose
+applyPose(joints)
+log("OK", "Applied arm pose. Holding it in place.")
+
+-- Keep it there forever (override any animations)
+if CONFIG.APPLY_EVERY_FRAME then
+    G.__ArmPose.step = RunService.RenderStepped:Connect(function()
+        applyPose(joints)
+    end)
 end
 
-if CONFIG.MODE == "play" then
-    log("INFO", "Mode: play (non-invasive, local emote-style).")
-    playTargetOrFallback()
-
-elseif CONFIG.MODE == "replace" then
-    log("INFO", "Mode: replace (swap local Animate.idle AnimationIds).")
-
-    -- Probe target first so we don't swap to a broken ID
-    local probeOK, probeTrack, probeErr = tryLoadAnimation(animator, targetId)
-    if probeOK then
-        table.insert(G.__IdleLoader.tracks, probeTrack)
-        log("OK", "Target animation is loadable; proceeding to swap local idle IDs.")
-    else
-        log("WARN", ("Target not loadable (%s). Will use public fallbacks for replacement."):format(probeErr or "unknown"))
-    end
-
-    -- Find Animate
-    local animate = char:FindFirstChild("Animate")
-    if not animate then
-        for _ = 1, 60 do
-            RunService.Heartbeat:Wait()
-            animate = char:FindFirstChild("Animate")
-            if animate then break end
-        end
-    end
-    if not animate then
-        log("ERROR", "Animate script not found on character; cannot replace idle IDs.")
-        G.__IdleLoader.active = false
-        return
-    end
-
-    -- Cache originals once
-    if not G.__IdleLoader.originals then
-        G.__IdleLoader.originals = { animate = animate, idles = {} }
-        local idleFolder = animate:FindFirstChild("idle")
-        if idleFolder then
-            for _, child in ipairs(idleFolder:GetChildren()) do
-                if child:IsA("Animation") then
-                    G.__IdleLoader.originals.idles[child.Name] = child.AnimationId
-                end
-            end
-        end
-        -- R6 single path support (if present)
-        local single = animate:FindFirstChild("idle", true)
-        if single and single:IsA("Animation") then
-            G.__IdleLoader.originals.idles[single.Name] = single.AnimationId
-        end
-        log("INFO", "Cached original idle AnimationIds for restore on re-exec.")
-    end
-
-    local function setAnimId(animObj, id)
-        if animObj and animObj:IsA("Animation") and id then
-            animObj.AnimationId = id
-        end
-    end
-
-    local idleFolder = animate:FindFirstChild("idle")
-    local use1 = (probeOK and targetId) or fb1
-    local use2 = (probeOK and targetId) or fb2
-
-    if idleFolder then
-        setAnimId(idleFolder:FindFirstChild("Animation1"), use1)
-        setAnimId(idleFolder:FindFirstChild("Animation2"), use2)
-        log("OK", ("R15 idle IDs set -> A1: %s | A2: %s"):format(tostring(use1), tostring(use2)))
-    else
-        -- R6 single idle
-        local single = animate:FindFirstChild("idle", true)
-        local use = (probeOK and targetId) or fb1 or fb2
-        setAnimId(single, use)
-        log("OK", ("R6 idle ID set -> %s"):format(tostring(use)))
-    end
-
-    -- Nudge: stop current idle tracks so new IDs take effect instantly
-    for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
-        pcall(function()
-            if tr.Priority == Enum.AnimationPriority.Idle then tr:Stop(0.1) end
-        end)
-    end
-    log("DONE", "Local idle IDs swapped. Re-exec this script to restore originals.")
-
-else
-    log("ERROR", ("Unknown MODE '%s'. Use 'play' or 'replace'."):format(tostring(CONFIG.MODE)))
-end
-
--- Auto-clean on respawn (prevents residue; re-run to re-apply)
+-- Re-apply on respawn so it persists across deaths
 local plr = Players.LocalPlayer
-table.insert(G.__IdleLoader.conns, plr.CharacterAdded:Connect(function()
-    if not G.__IdleLoader.active then return end
-    log("INFO", "Character respawn detected; auto-cleaning session.")
-
-    for _, tr in ipairs(G.__IdleLoader.tracks) do
-        pcall(function() tr:Stop(0.1) tr:Destroy() end)
+table.insert(G.__ArmPose.conns, plr.CharacterAdded:Connect(function(newChar)
+    -- Clear old transforms just in case
+    clearPose(joints)
+    char = newChar
+    joints = resolveJoints(char)
+    G.__ArmPose.joints = joints or {}
+    if joints and next(joints) then
+        log("INFO", "Respawn detected. Re-applying pose.")
+        applyPose(joints)
+    else
+        log("WARN", "Respawned, but joints not found yet.")
     end
-    G.__IdleLoader.tracks = {}
-    G.__IdleLoader.active = false
 end))
