@@ -1,27 +1,49 @@
--- Capture the next loadstring payload in-executor
-local captured
-local old_loadstring = loadstring
-getgenv().loadstring = function(src, name)
-  captured = src
-  -- Optional: write if your executor supports it
-  if writefile then
-    writefile("decoded.lua", src)
-  end
-  -- Return a noop so execution doesn’t continue
-  return function() end
+-- Pure Animate Replacement for Walk/Run (R15)
+-- Directly sets Animate.walk/run AnimationIds to your clip.
+
+local ANIMATION_ID = "rbxassetid://81698590304444"
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local function apply()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hum = char:WaitForChild("Humanoid")
+    if hum.RigType ~= Enum.HumanoidRigType.R15 then
+        warn("Requires R15 rig.")
+        return
+    end
+
+    -- Wait for Animate script
+    local animate = char:FindFirstChild("Animate")
+    if not animate then
+        animate = char.ChildAdded:Wait()
+        if animate.Name ~= "Animate" then
+            warn("Animate script not found.")
+            return
+        end
+    end
+
+    -- Walk/Run animation objects
+    local walk = animate:FindFirstChild("walk", true)
+    local run = animate:FindFirstChild("run", true)
+
+    if walk and walk:FindFirstChild("WalkAnim") then
+        walk.WalkAnim.AnimationId = ANIMATION_ID
+    end
+    if run and run:FindFirstChild("RunAnim") then
+        run.RunAnim.AnimationId = ANIMATION_ID
+    end
+
+    -- Force reload
+    hum:ChangeState(Enum.HumanoidStateType.Physics)
+    hum:ChangeState(Enum.HumanoidStateType.Running)
+    print("Animate walk/run overridden to", ANIMATION_ID)
 end
 
--- Block network calls so nothing external runs
-local oldHttpGet = (game and game.HttpGet)
-if oldHttpGet then
-  game.HttpGet = function(self, url)
-    error("Http blocked: " .. tostring(url))
-  end
-end
-
--- Now run the obfuscated script source (paste it here or load from file)
--- dofile("obf.lua") or loadstring([[
---   ... your obfuscated text ...
--- ]])()
-
-print("Captured:", captured and (#captured .. " bytes") or "none")
+-- Run immediately and on respawn
+apply()
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.2)
+    apply()
+end)
