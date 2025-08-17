@@ -1,72 +1,79 @@
--- Hilton | Arm Lock (AnimationIntercept + Transform + FrameClamp)
--- Run once to lock, run again to unlock
+-- Hilton | ArmLock A (Late Priority Transform)
+-- Client-only. Run once to lock, run again to unlock.
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local G = getgenv and getgenv() or _G
-G.__ArmLock = G.__ArmLock or { active=false, conns={}, joints={} }
+G.__ArmLockA = G.__ArmLockA or { active=false, conns={}, joints=nil, stepName="ArmLockA_Step" }
 
-local function cleanup()
-    for _,c in ipairs(G.__ArmLock.conns) do pcall(function() c:Disconnect() end) end
-    for _,m in pairs(G.__ArmLock.joints) do pcall(function() m.Transform = CFrame.new() end) end
-    table.clear(G.__ArmLock.conns)
-    table.clear(G.__ArmLock.joints)
-    G.__ArmLock.active=false
+local CONFIG = {
+    SHOULDER_DEG = 70, -- forward raise
+    LOG = true,
+}
+local function log(...) if CONFIG.LOG then print("[ArmLockA]", ...) end end
+
+local function getCharHum()
+    local plr = Players.LocalPlayer
+    local char = plr.Character or plr.CharacterAdded:Wait()
+    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid")
+    return char, hum
 end
 
-if G.__ArmLock.active then
-    cleanup()
-    warn("[ArmLock] Released pose and cleaned up.")
-    return
-end
-
-G.__ArmLock.active=true
-
-local char = Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
-local hum = char:WaitForChild("Humanoid")
-
--- Get shoulder joint (R15 or R6)
-local joints = {}
-do
+local function resolveShoulder(char)
+    -- R15
     local rua = char:FindFirstChild("RightUpperArm")
     if rua then
-        local sh = rua:FindFirstChild("RightShoulder") or char:FindFirstChild("UpperTorso"):FindFirstChild("RightShoulder")
-        if sh then joints.s = sh end
-    else
-        local torso = char:FindFirstChild("Torso")
-        if torso then
-            local shR6 = torso:FindFirstChild("Right Shoulder")
-            if shR6 then joints.s = shR6 end
-        end
+        local sh = rua:FindFirstChild("RightShoulder")
+            or (char:FindFirstChild("UpperTorso") and char.UpperTorso:FindFirstChild("RightShoulder"))
+        if sh and sh:IsA("Motor6D") then return sh end
     end
-end
-G.__ArmLock.joints = joints
-
-local SHOULDER_ANG = CFrame.Angles(math.rad(-70),0,0)
-
--- Kill any current tracks on spawn
-for _,track in ipairs(hum:GetPlayingAnimationTracks()) do
-    track:Stop(0)
+    -- R6
+    local torso = char:FindFirstChild("Torso")
+    local shR6 = torso and torso:FindFirstChild("Right Shoulder")
+    if shR6 and shR6:IsA("Motor6D") then return shR6 end
+    return nil
 end
 
--- Stop *new* animations targeting the arm
-G.__ArmLock.conns[#G.__ArmLock.conns+1] = hum.AnimationPlayed:Connect(function(track)
-    -- Optional: inspect track.Animation.AnimationId here if you want to filter
-    pcall(function() track:Stop(0) end)
-end)
+local function cleanup()
+    pcall(function() RunService:UnbindFromRenderStep(G.__ArmLockA.stepName) end)
+    -- Disconnect
+    for i=#G.__ArmLockA.conns,1,-1 do pcall(function() G.__ArmLockA.conns[i]:Disconnect() end) ; G.__ArmLockA.conns[i]=nil end
+    -- Reset transform
+    if G.__ArmLockA.joints and G.__ArmLockA.joints.s then pcall(function() G.__ArmLockA.joints.s.Transform = CFrame.new() end) end
+    G.__ArmLockA.joints=nil
+    G.__ArmLockA.active=false
+    log("Cleaned up.")
+end
 
--- Re‑apply transform every frame
-G.__ArmLock.conns[#G.__ArmLock.conns+1] = RunService.RenderStepped:Connect(function()
-    if joints.s then
-        joints.s.Transform = SHOULDER_ANG
+if G.__ArmLockA.active then cleanup() return end
+G.__ArmLockA.active=true
+
+local char, hum = getCharHum()
+local joints = { s = resolveShoulder(char) }
+if not joints.s then
+    log("No shoulder joint found.")
+    return cleanup()
+end
+G.__ArmLockA.joints = joints
+
+local SHOULDER_ANG = CFrame.Angles(math.rad(-CONFIG.SHOULDER_DEG), 0, 0)
+local PRIORITY = (Enum.RenderPriority.Last.Value + 1)
+
+RunService:BindToRenderStep(G.__ArmLockA.stepName, PRIORITY, function()
+    if not joints.s or not joints.s.Parent then
+        -- Try to re-resolve if we lost the joint (respawn, etc.)
+        local c = Players.LocalPlayer.Character
+        if c then joints.s = resolveShoulder(c) end
+        if not joints.s then return end
     end
+    joints.s.Transform = SHOULDER_ANG
 end)
 
--- Re‑lock on respawn
-G.__ArmLock.conns[#G.__ArmLock.conns+1] = Players.LocalPlayer.CharacterAdded:Connect(function(newChar)
-    cleanup()
-    wait(0.5)
-    -- re‑exec the script here if you want persistence
-end)
+-- Respawn handling: refresh character/joint refs
+table.insert(G.__ArmLockA.conns, Players.LocalPlayer.CharacterAdded:Connect(function(newChar)
+    task.wait(0.1)
+    joints.s = resolveShoulder(newChar)
+end))
 
-warn("[ArmLock] Applied. Limb should now stay locked until script is re‑exec'ed to unlock.")
+log("Locked right arm with late-priority transform.")
