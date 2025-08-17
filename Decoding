@@ -1,68 +1,244 @@
--- CONFIG
-local EMOTE_ID = "71302743123422"
-local EMOTE_DURATION = 5 -- seconds
+--[[
+  Hilton | Client-only Idle/Emote Loader (re-exec safe)
+  - No server calls or permissions required
+  - Plays your animation locally or replaces local idle IDs (Animate) for you only
+  - Re-exec once to cleanly restore and stop
+]]
 
--- CLEANUP if rerun
-if getgenv().DanceUI then
-    getgenv().DanceUI:Destroy()
-    getgenv().DanceUI = nil
+-- ========= CONFIG =========
+local CONFIG = {
+    TARGET_ANIMATION_ID = "rbxassetid://87665575152540", -- Your Animation asset id
+    MODE = "play",            -- "play" (non-invasive) or "replace" (swap local idle IDs)
+    PRIORITY = Enum.AnimationPriority.Idle,
+    LOOPED = true,
+    FADE_IN = 0.12,
+    SPEED = 1.0,
+
+    -- Public, universally loadable idle fallbacks
+    FALLBACK_IDLE_1 = "rbxassetid://507766666",
+    FALLBACK_IDLE_2 = "rbxassetid://507766951",
+
+    LOG_PREFIX = "[IdleLoader] ",
+}
+-- ==========================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local function log(level, msg)
+    print(("%s[%s] %s"):format(CONFIG.LOG_PREFIX, level, msg))
 end
-if getgenv().DanceButtonConn then
-    getgenv().DanceButtonConn:Disconnect()
-    getgenv().DanceButtonConn = nil
-end
-if getgenv().CloseButtonConn then
-    getgenv().CloseButtonConn:Disconnect()
-    getgenv().CloseButtonConn = nil
-end
 
--- CREATE UI
-local screenGui = Instance.new("ScreenGui")
-screenGui.ResetOnSpawn = false
-screenGui.Name = "DanceUI"
-screenGui.Parent = game:GetService("CoreGui")
+-- Global session state for re-exec safety
+local G = (getgenv and getgenv()) or _G
+G.__IdleLoader = G.__IdleLoader or { active = false, conns = {}, tracks = {}, originals = nil }
 
-local button = Instance.new("TextButton")
-button.Size = UDim2.new(0, 120, 0, 40)
-button.Position = UDim2.new(0.5, -60, 0.5, -20)
-button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-button.TextColor3 = Color3.fromRGB(255, 255, 255)
-button.Text = "Play Emote"
-button.Parent = screenGui
+-- If already active, cleanup and exit (toggle behavior)
+if G.__IdleLoader.active then
+    log("INFO", "Re-exec detected: cleaning up previous session.")
 
-local closeButton = Instance.new("TextButton")
-closeButton.Size = UDim2.new(0, 30, 0, 30)
-closeButton.Position = UDim2.new(1, -35, 0, 5)
-closeButton.AnchorPoint = Vector2.new(1, 0)
-closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeButton.Text = "X"
-closeButton.Parent = screenGui
+    for _, tr in ipairs(G.__IdleLoader.tracks) do
+        pcall(function() tr:Stop(0.15) tr:Destroy() end)
+    end
+    G.__IdleLoader.tracks = {}
 
--- FUNCTION to play emote
-local function playEmote()
-    local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-    if humanoid then
-        local anim = Instance.new("Animation")
-        anim.AnimationId = "rbxassetid://" .. EMOTE_ID
-        local track = humanoid:LoadAnimation(anim)
-        track.Looped = false
-        track:Play()
-        task.delay(EMOTE_DURATION, function()
-            if track.IsPlaying then
-                track:Stop()
+    if G.__IdleLoader.originals and G.__IdleLoader.originals.animate and G.__IdleLoader.originals.idles then
+        local animate = G.__IdleLoader.originals.animate
+        for name, id in pairs(G.__IdleLoader.originals.idles) do
+            local animObj = animate:FindFirstChild(name, true)
+            if animObj and animObj:IsA("Animation") then
+                animObj.AnimationId = id
             end
-        end)
+        end
+        log("INFO", "Restored original Animate idle AnimationIds.")
+    end
+    for _, c in ipairs(G.__IdleLoader.conns) do
+        pcall(function() c:Disconnect() end)
+    end
+    G.__IdleLoader.conns = {}
+    G.__IdleLoader.originals = nil
+    G.__IdleLoader.active = false
+    log("DONE", "Cleanup complete. Re-run to apply again.")
+    return
+end
+
+G.__IdleLoader.active = true
+
+-- Helpers
+local function normalizeId(id)
+    local s = tostring(id):gsub("%s+", "")
+    local num = s:match("(%d+)$")
+    if not num then return nil end
+    return "rbxassetid://" .. num
+end
+
+local function getCharacter()
+    local plr = Players.LocalPlayer
+    while not plr do RunService.Heartbeat:Wait() plr = Players.LocalPlayer end
+    if not plr.Character or not plr.Character.Parent then
+        plr.CharacterAdded:Wait()
+    end
+    return plr.Character
+end
+
+local function getAnimator(char)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    while not hum do RunService.Heartbeat:Wait() hum = char:FindFirstChildOfClass("Humanoid") end
+    local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+    return hum, animator
+end
+
+local function tryLoadAnimation(animator, animId)
+    local okLoad, trackOrErr = pcall(function()
+        local a = Instance.new("Animation")
+        a.AnimationId = animId
+        return animator:LoadAnimation(a)
+    end)
+    if not okLoad then
+        return false, nil, "LoadAnimation failed: " .. tostring(trackOrErr)
+    end
+    local track = trackOrErr
+    track.Priority = CONFIG.PRIORITY
+    track.Looped = CONFIG.LOOPED
+    local okPlay, playErr = pcall(function()
+        track:Play(CONFIG.FADE_IN, 1, CONFIG.SPEED)
+    end)
+    if not okPlay then
+        pcall(function() track:Destroy() end)
+        return false, nil, "Track:Play failed: " .. tostring(playErr)
+    end
+    return true, track, nil
+end
+
+-- Start
+local char = getCharacter()
+local hum, animator = getAnimator(char)
+
+local targetId = normalizeId(CONFIG.TARGET_ANIMATION_ID)
+local fb1 = normalizeId(CONFIG.FALLBACK_IDLE_1)
+local fb2 = normalizeId(CONFIG.FALLBACK_IDLE_2)
+
+if not targetId then
+    log("ERROR", "Invalid TARGET_ANIMATION_ID. Aborting.")
+    G.__IdleLoader.active = false
+    return
+end
+
+local function playTargetOrFallback()
+    -- Try target
+    local ok, track, err = tryLoadAnimation(animator, targetId)
+    if ok then
+        table.insert(G.__IdleLoader.tracks, track)
+        log("OK", "Playing target animation.")
+        return true
+    else
+        log("WARN", ("Target failed to load or play. Reason: %s"):format(err or "unknown"))
+    end
+    -- Try fallback
+    local fOK, fTrack, fErr = tryLoadAnimation(animator, fb1 or fb2)
+    if fOK then
+        table.insert(G.__IdleLoader.tracks, fTrack)
+        log("OK", "Fallback idle playing.")
+        return true
+    else
+        log("ERROR", ("Fallback failed to load/play. Reason: %s"):format(fErr or "unknown"))
+        return false
     end
 end
 
--- BIND buttons
-getgenv().DanceButtonConn = button.MouseButton1Click:Connect(playEmote)
-getgenv().CloseButtonConn = closeButton.MouseButton1Click:Connect(function()
-    screenGui:Destroy()
-    getgenv().DanceUI = nil
-    if getgenv().DanceButtonConn then getgenv().DanceButtonConn:Disconnect() end
-    if getgenv().CloseButtonConn then getgenv().CloseButtonConn:Disconnect() end
-end)
+if CONFIG.MODE == "play" then
+    log("INFO", "Mode: play (non-invasive, local emote-style).")
+    playTargetOrFallback()
 
-getgenv().DanceUI = screenGui
+elseif CONFIG.MODE == "replace" then
+    log("INFO", "Mode: replace (swap local Animate.idle AnimationIds).")
+
+    -- Probe target first so we don't swap to a broken ID
+    local probeOK, probeTrack, probeErr = tryLoadAnimation(animator, targetId)
+    if probeOK then
+        table.insert(G.__IdleLoader.tracks, probeTrack)
+        log("OK", "Target animation is loadable; proceeding to swap local idle IDs.")
+    else
+        log("WARN", ("Target not loadable (%s). Will use public fallbacks for replacement."):format(probeErr or "unknown"))
+    end
+
+    -- Find Animate
+    local animate = char:FindFirstChild("Animate")
+    if not animate then
+        for _ = 1, 60 do
+            RunService.Heartbeat:Wait()
+            animate = char:FindFirstChild("Animate")
+            if animate then break end
+        end
+    end
+    if not animate then
+        log("ERROR", "Animate script not found on character; cannot replace idle IDs.")
+        G.__IdleLoader.active = false
+        return
+    end
+
+    -- Cache originals once
+    if not G.__IdleLoader.originals then
+        G.__IdleLoader.originals = { animate = animate, idles = {} }
+        local idleFolder = animate:FindFirstChild("idle")
+        if idleFolder then
+            for _, child in ipairs(idleFolder:GetChildren()) do
+                if child:IsA("Animation") then
+                    G.__IdleLoader.originals.idles[child.Name] = child.AnimationId
+                end
+            end
+        end
+        -- R6 single path support (if present)
+        local single = animate:FindFirstChild("idle", true)
+        if single and single:IsA("Animation") then
+            G.__IdleLoader.originals.idles[single.Name] = single.AnimationId
+        end
+        log("INFO", "Cached original idle AnimationIds for restore on re-exec.")
+    end
+
+    local function setAnimId(animObj, id)
+        if animObj and animObj:IsA("Animation") and id then
+            animObj.AnimationId = id
+        end
+    end
+
+    local idleFolder = animate:FindFirstChild("idle")
+    local use1 = (probeOK and targetId) or fb1
+    local use2 = (probeOK and targetId) or fb2
+
+    if idleFolder then
+        setAnimId(idleFolder:FindFirstChild("Animation1"), use1)
+        setAnimId(idleFolder:FindFirstChild("Animation2"), use2)
+        log("OK", ("R15 idle IDs set -> A1: %s | A2: %s"):format(tostring(use1), tostring(use2)))
+    else
+        -- R6 single idle
+        local single = animate:FindFirstChild("idle", true)
+        local use = (probeOK and targetId) or fb1 or fb2
+        setAnimId(single, use)
+        log("OK", ("R6 idle ID set -> %s"):format(tostring(use)))
+    end
+
+    -- Nudge: stop current idle tracks so new IDs take effect instantly
+    for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+        pcall(function()
+            if tr.Priority == Enum.AnimationPriority.Idle then tr:Stop(0.1) end
+        end)
+    end
+    log("DONE", "Local idle IDs swapped. Re-exec this script to restore originals.")
+
+else
+    log("ERROR", ("Unknown MODE '%s'. Use 'play' or 'replace'."):format(tostring(CONFIG.MODE)))
+end
+
+-- Auto-clean on respawn (prevents residue; re-run to re-apply)
+local plr = Players.LocalPlayer
+table.insert(G.__IdleLoader.conns, plr.CharacterAdded:Connect(function()
+    if not G.__IdleLoader.active then return end
+    log("INFO", "Character respawn detected; auto-cleaning session.")
+
+    for _, tr in ipairs(G.__IdleLoader.tracks) do
+        pcall(function() tr:Stop(0.1) tr:Destroy() end)
+    end
+    G.__IdleLoader.tracks = {}
+    G.__IdleLoader.active = false
+end))
