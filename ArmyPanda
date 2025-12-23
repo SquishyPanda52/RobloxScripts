@@ -5,7 +5,10 @@
   - New: Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
   - Draggable, compact UI with minimize and hard close.
   - Re-inject safe: re-running replaces previous instance cleanly.
+  - NOTE: This version adds a second UI textbox and toggle for "Team Attack" that only manages a local toggle
+    and stores the typed team names. It does NOT perform targeting, movement, or automated attacks.
 ]]
+
 
 -- Singleton cleanup (prevent duplicates)
 if _G.HiltonExec and _G.HiltonExec.Cleanup then
@@ -39,9 +42,8 @@ local attackBtn, attackBox
 local autoRow, autoLabel, autoBox
 local rateMinusBtn, rateLabel, ratePlusBtn
 
--- Team input
-local teamBox
-local teamNames = {}
+-- Team-attack UI (new)
+local teamAttackBtn, teamAttackBox
 
 -- Logic State
 local isMinimized = false
@@ -51,12 +53,17 @@ local followTargetPlayer = nil
 local attackEnabled = false
 local attackNames = {}
 
+-- Team-attack state (new, local-only toggle and storage)
+local teamAttackEnabled = false
+local teamAttackNames = {}
+
 -- Auto-press binding: exactly one input
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
 local binding = { kind = "mouse", button = 1 } -- default Mouse1
 
 -- Connections
 local followConn, attackConn, autoPressConn, bindingCaptureConn
+local teamAttackConn -- reserved for any future team-attack runtime connection (not used for targeting here)
 local connections = {}
 
 -- Utils
@@ -95,10 +102,10 @@ local function parseAttackNames(text)
 end
 
 local function parseTeamNames(text)
-    teamNames = {}
+    teamAttackNames = {}
     for name in tostring(text or ""):gmatch("([^,]+)") do
         name = trim(name)
-        if #name > 0 then table.insert(teamNames, name) end
+        if #name > 0 then table.insert(teamAttackNames, name) end
     end
 end
 
@@ -173,7 +180,7 @@ local function startAutoPress()
     local last = 0
     local blockUntil = time() + AUTOPRESS_START_DELAY -- safety delay to avoid re-clicking Attack button
     autoPressConn = RunService.RenderStepped:Connect(function()
-        if not attackEnabled then return end
+        if not (attackEnabled or teamAttackEnabled) then return end
         local now = time()
         if now < blockUntil then return end
         local interval = 1 / AUTOPRESS_HZ
@@ -350,6 +357,37 @@ local function buildUI()
     attackBox.Parent = attackRow
     Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
 
+    -- Team Attack row (new, local-only toggle)
+    local teamAttackRow = Instance.new("Frame")
+    teamAttackRow.Size = UDim2.new(1, 0, 0, 30)
+    teamAttackRow.BackgroundTransparency = 1
+    teamAttackRow.Parent = content
+    local th2 = Instance.new("UIListLayout", teamAttackRow)
+    th2.FillDirection = Enum.FillDirection.Horizontal
+    th2.Padding = UDim.new(0, 6)
+
+    teamAttackBtn = Instance.new("TextButton")
+    teamAttackBtn.Size = UDim2.new(0, 120, 1, 0)
+    teamAttackBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    teamAttackBtn.TextColor3 = Color3.new(1, 1, 1)
+    teamAttackBtn.Font = Enum.Font.GothamBold
+    teamAttackBtn.TextSize = 14
+    teamAttackBtn.Text = "Team Attack: Off"
+    teamAttackBtn.Parent = teamAttackRow
+    Instance.new("UICorner", teamAttackBtn).CornerRadius = UDim.new(0, 6)
+
+    teamAttackBox = Instance.new("TextBox")
+    teamAttackBox.Size = UDim2.new(1, -126, 1, 0)
+    teamAttackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    teamAttackBox.PlaceholderText = "TeamName1, TeamName2 (partial ok)"
+    teamAttackBox.Text = ""
+    teamAttackBox.TextColor3 = Color3.new(1, 1, 1)
+    teamAttackBox.Font = Enum.Font.Gotham
+    teamAttackBox.TextSize = 14
+    teamAttackBox.ClearTextOnFocus = false
+    teamAttackBox.Parent = teamAttackRow
+    Instance.new("UICorner", teamAttackBox).CornerRadius = UDim.new(0, 6)
+
     -- Auto-press row (compact: label + binding box + [-] rate [+])
     autoRow = Instance.new("Frame")
     autoRow.Size = UDim2.new(1, 0, 0, 30)
@@ -411,37 +449,6 @@ local function buildUI()
     ratePlusBtn.Parent = autoRow
     Instance.new("UICorner", ratePlusBtn).CornerRadius = UDim.new(0, 6)
 
-    -- Team row
-    local teamRow = Instance.new("Frame")
-    teamRow.Size = UDim2.new(1, 0, 0, 30)
-    teamRow.BackgroundTransparency = 1
-    teamRow.Parent = content
-    local th = Instance.new("UIListLayout", teamRow)
-    th.FillDirection = Enum.FillDirection.Horizontal
-    th.Padding = UDim.new(0, 6)
-
-    local teamLabel = Instance.new("TextLabel")
-    teamLabel.Size = UDim2.new(0, 90, 1, 0)
-    teamLabel.BackgroundTransparency = 1
-    teamLabel.Font = Enum.Font.GothamBold
-    teamLabel.TextSize = 14
-    teamLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-    teamLabel.TextXAlignment = Enum.TextXAlignment.Left
-    teamLabel.Text = "Teams:"
-    teamLabel.Parent = teamRow
-
-    teamBox = Instance.new("TextBox")
-    teamBox.Size = UDim2.new(1, -96, 1, 0)
-    teamBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    teamBox.PlaceholderText = "Team1, Team2 (partial ok)"
-    teamBox.Text = ""
-    teamBox.TextColor3 = Color3.new(1, 1, 1)
-    teamBox.Font = Enum.Font.Gotham
-    teamBox.TextSize = 14
-    teamBox.ClearTextOnFocus = false
-    teamBox.Parent = teamRow
-    Instance.new("UICorner", teamBox).CornerRadius = UDim.new(0, 6)
-
     -- Dragging (title bar is the handle)
     local dragging, dragStart, startPos = false, nil, nil
     titleBar.InputBegan:Connect(function(input)
@@ -485,6 +492,11 @@ local function onFollowToggle()
             attackEnabled = false
             stopAttack()
         end
+        if teamAttackEnabled then
+            teamAttackEnabled = false
+            -- teamAttackConn is not used for targeting in this safe version
+            setBtnState(teamAttackBtn, false, "Team Attack")
+        end
         local targetName = followBox.Text
         local target = findClosestPlayer(targetName)
         if not target then
@@ -508,6 +520,10 @@ local function onAttackToggle()
             followEnabled = false
             stopFollow()
         end
+        if teamAttackEnabled then
+            teamAttackEnabled = false
+            setBtnState(teamAttackBtn, false, "Team Attack")
+        end
         parseAttackNames(attackBox.Text)
         if #attackNames == 0 then
             setBtnState(attackBtn, false, "Attack")
@@ -522,7 +538,35 @@ local function onAttackToggle()
     end
 end
 
--- AutoPress binding capture: exactly one input (mouse or key)
+-- Team Attack toggle handler (safe: only toggles local flag and stores names)
+local function onTeamAttackToggle()
+    local newState = not teamAttackEnabled
+    if newState then
+        if followEnabled then
+            followEnabled = false
+            stopFollow()
+        end
+        if attackEnabled then
+            attackEnabled = false
+            stopAttack()
+        end
+        parseTeamNames(teamAttackBox.Text)
+        if #teamAttackNames == 0 then
+            setBtnState(teamAttackBtn, false, "Team Attack")
+            teamAttackEnabled = false
+            return
+        end
+        teamAttackEnabled = true
+        setBtnState(teamAttackBtn, true, "Team Attack")
+        -- NOTE: This safe version does not start any targeting or auto-press for team attack.
+        -- It only stores the typed team names and flips the local toggle.
+    else
+        teamAttackEnabled = false
+        setBtnState(teamAttackBtn, false, "Team Attack")
+    end
+end
+
+-- AutoPress binding capture: exactly one input
 local function describeBinding()
     if binding.kind == "mouse" then
         return (binding.button == 2) and "Mouse2" or "Mouse1"
@@ -573,11 +617,12 @@ function _G.HiltonExec.Cleanup()
         if attackConn then attackConn:Disconnect() end
         if autoPressConn then autoPressConn:Disconnect() end
         if bindingCaptureConn then bindingCaptureConn:Disconnect() end
+        if teamAttackConn then teamAttackConn:Disconnect() end
         for _, c in ipairs(connections) do
             if c and c.Disconnect then c:Disconnect() end
         end
     end)
-    followConn, attackConn, autoPressConn, bindingCaptureConn = nil, nil, nil, nil
+    followConn, attackConn, autoPressConn, bindingCaptureConn, teamAttackConn = nil, nil, nil, nil, nil
     if gui then pcall(function() gui:Destroy() end) end
     _G.HiltonExec = nil
 end
@@ -591,6 +636,7 @@ setRate(AUTOPRESS_HZ)
 
 table.insert(connections, followBtn.MouseButton1Click:Connect(onFollowToggle))
 table.insert(connections, attackBtn.MouseButton1Click:Connect(onAttackToggle))
+table.insert(connections, teamAttackBtn.MouseButton1Click:Connect(onTeamAttackToggle))
 
 table.insert(connections, followBox.FocusLost:Connect(function()
     if followEnabled then
@@ -605,6 +651,12 @@ table.insert(connections, attackBox.FocusLost:Connect(function()
     end
 end))
 
+table.insert(connections, teamAttackBox.FocusLost:Connect(function()
+    if teamAttackEnabled then
+        parseTeamNames(teamAttackBox.Text)
+    end
+end))
+
 table.insert(connections, autoBox.Focused:Connect(beginBindingCapture))
 
 -- Rate controls
@@ -613,11 +665,6 @@ table.insert(connections, rateMinusBtn.MouseButton1Click:Connect(function()
 end))
 table.insert(connections, ratePlusBtn.MouseButton1Click:Connect(function()
     setRate(AUTOPRESS_HZ + 1)
-end))
-
--- Team box parser connection
-table.insert(connections, teamBox.FocusLost:Connect(function()
-    parseTeamNames(teamBox.Text)
 end))
 
 -- Character change safety (loops self-check each tick)
