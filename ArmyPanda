@@ -6,6 +6,7 @@
   - Draggable, compact UI with minimize and hard close.
   - Re-inject safe: re-running replaces previous instance cleanly.
   - Added: Team Attack mode (separate attack mode that targets players by team name).
+  - Behavior: All attack modes (user-target and team-target) and follow are toggled off on death/respawn.
 ]]
 
 
@@ -61,6 +62,10 @@ local binding = { kind = "mouse", button = 1 } -- default Mouse1
 -- Connections
 local followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn
 local connections = {}
+
+-- Humanoid/character death connection for local player
+local localHumanoidDiedConn = nil
+local localCharacterRemovingConn = nil
 
 -- Utils
 local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
@@ -668,6 +673,45 @@ local function setRate(v)
     end
 end
 
+-- Ensure all attack/follow modes are turned off (used on death/respawn)
+local function disableAllModes()
+    if followEnabled then stopFollow() end
+    if attackEnabled then stopAttack() end
+    if teamAttackEnabled then stopTeamAttack() end
+end
+
+-- Hook up local player's humanoid death and character removal to disable modes
+local function connectLocalCharacterEvents(character)
+    -- disconnect previous if present
+    if localHumanoidDiedConn then
+        pcall(function() localHumanoidDiedConn:Disconnect() end)
+        localHumanoidDiedConn = nil
+    end
+    if localCharacterRemovingConn then
+        pcall(function() localCharacterRemovingConn:Disconnect() end)
+        localCharacterRemovingConn = nil
+    end
+
+    if not character then return end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        localHumanoidDiedConn = humanoid.Died:Connect(function()
+            -- On death, disable all modes immediately
+            disableAllModes()
+        end)
+        table.insert(connections, localHumanoidDiedConn)
+    end
+
+    -- Also handle CharacterRemoving to be safe (some games remove character)
+    localCharacterRemovingConn = character.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            disableAllModes()
+        end
+    end)
+    table.insert(connections, localCharacterRemovingConn)
+end
+
 -- Cleanup routine
 function _G.HiltonExec.Cleanup()
     pcall(function()
@@ -676,11 +720,16 @@ function _G.HiltonExec.Cleanup()
         if teamAttackConn then teamAttackConn:Disconnect() end
         if autoPressConn then autoPressConn:Disconnect() end
         if bindingCaptureConn then bindingCaptureConn:Disconnect() end
+        if localHumanoidDiedConn then localHumanoidDiedConn:Disconnect() end
+        if localCharacterRemovingConn then localCharacterRemovingConn:Disconnect() end
         for _, c in ipairs(connections) do
-            if c and c.Disconnect then c:Disconnect() end
+            if c and c.Disconnect then
+                pcall(function() c:Disconnect() end)
+            end
         end
     end)
     followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn = nil, nil, nil, nil, nil
+    localHumanoidDiedConn, localCharacterRemovingConn = nil, nil
     if gui then pcall(function() gui:Destroy() end) end
     _G.HiltonExec = nil
 end
@@ -725,5 +774,22 @@ table.insert(connections, ratePlusBtn.MouseButton1Click:Connect(function()
     setRate(AUTOPRESS_HZ + 1)
 end))
 
--- Character change safety (loops self-check each tick)
-table.insert(connections, localPlayer.CharacterAdded:Connect(function() end))
+-- Character change safety: connect to CharacterAdded to re-hook death events and ensure modes are disabled on respawn
+table.insert(connections, localPlayer.CharacterAdded:Connect(function(character)
+    -- When character spawns, ensure all modes are off (safety) and hook death
+    disableAllModes()
+    connectLocalCharacterEvents(character)
+end))
+
+-- If character already exists when script runs, hook it
+if localPlayer.Character then
+    connectLocalCharacterEvents(localPlayer.Character)
+end
+
+-- Also handle PlayerRemoving cleanup (optional)
+table.insert(connections, Players.PlayerRemoving:Connect(function(pl)
+    -- if the player being removed is the current follow target, stop follow
+    if followTargetPlayer == pl then
+        stopFollow()
+    end
+end))
