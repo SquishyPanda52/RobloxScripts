@@ -39,6 +39,10 @@ local attackBtn, attackBox
 local autoRow, autoLabel, autoBox
 local rateMinusBtn, rateLabel, ratePlusBtn
 
+-- Team input
+local teamBox
+local teamNames = {}
+
 -- Logic State
 local isMinimized = false
 local followEnabled = false
@@ -87,6 +91,14 @@ local function parseAttackNames(text)
     for name in tostring(text or ""):gmatch("([^,]+)") do
         name = trim(name)
         if #name > 0 then table.insert(attackNames, name) end
+    end
+end
+
+local function parseTeamNames(text)
+    teamNames = {}
+    for name in tostring(text or ""):gmatch("([^,]+)") do
+        name = trim(name)
+        if #name > 0 then table.insert(teamNames, name) end
     end
 end
 
@@ -399,6 +411,37 @@ local function buildUI()
     ratePlusBtn.Parent = autoRow
     Instance.new("UICorner", ratePlusBtn).CornerRadius = UDim.new(0, 6)
 
+    -- Team row
+    local teamRow = Instance.new("Frame")
+    teamRow.Size = UDim2.new(1, 0, 0, 30)
+    teamRow.BackgroundTransparency = 1
+    teamRow.Parent = content
+    local th = Instance.new("UIListLayout", teamRow)
+    th.FillDirection = Enum.FillDirection.Horizontal
+    th.Padding = UDim.new(0, 6)
+
+    local teamLabel = Instance.new("TextLabel")
+    teamLabel.Size = UDim2.new(0, 90, 1, 0)
+    teamLabel.BackgroundTransparency = 1
+    teamLabel.Font = Enum.Font.GothamBold
+    teamLabel.TextSize = 14
+    teamLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    teamLabel.TextXAlignment = Enum.TextXAlignment.Left
+    teamLabel.Text = "Teams:"
+    teamLabel.Parent = teamRow
+
+    teamBox = Instance.new("TextBox")
+    teamBox.Size = UDim2.new(1, -96, 1, 0)
+    teamBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    teamBox.PlaceholderText = "Team1, Team2 (partial ok)"
+    teamBox.Text = ""
+    teamBox.TextColor3 = Color3.new(1, 1, 1)
+    teamBox.Font = Enum.Font.Gotham
+    teamBox.TextSize = 14
+    teamBox.ClearTextOnFocus = false
+    teamBox.Parent = teamRow
+    Instance.new("UICorner", teamBox).CornerRadius = UDim.new(0, 6)
+
     -- Dragging (title bar is the handle)
     local dragging, dragStart, startPos = false, nil, nil
     titleBar.InputBegan:Connect(function(input)
@@ -570,6 +613,11 @@ table.insert(connections, rateMinusBtn.MouseButton1Click:Connect(function()
 end))
 table.insert(connections, ratePlusBtn.MouseButton1Click:Connect(function()
     setRate(AUTOPRESS_HZ + 1)
+end))
+
+-- Team box parser connection
+table.insert(connections, teamBox.FocusLost:Connect(function()
+    parseTeamNames(teamBox.Text)
 end))
 
 -- Character change safety (loops self-check each tick)
