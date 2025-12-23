@@ -5,8 +5,7 @@
   - New: Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
   - Draggable, compact UI with minimize and hard close.
   - Re-inject safe: re-running replaces previous instance cleanly.
-  - NOTE: This version adds a second UI textbox and toggle for "Team Attack" that only manages a local toggle
-    and stores the typed team names. It does NOT perform targeting, movement, or automated attacks.
+  - Added: Team Attack mode (separate attack mode that targets players by team name).
 ]]
 
 
@@ -39,11 +38,9 @@ local gui, mainFrame, titleBar, minBtn, closeBtn
 local content
 local followBtn, followBox
 local attackBtn, attackBox
+local teamAttackBtn, teamAttackBox
 local autoRow, autoLabel, autoBox
 local rateMinusBtn, rateLabel, ratePlusBtn
-
--- Team-attack UI (new)
-local teamAttackBtn, teamAttackBox
 
 -- Logic State
 local isMinimized = false
@@ -53,7 +50,7 @@ local followTargetPlayer = nil
 local attackEnabled = false
 local attackNames = {}
 
--- Team-attack state (new, local-only toggle and storage)
+-- Team attack state (new)
 local teamAttackEnabled = false
 local teamAttackNames = {}
 
@@ -62,8 +59,7 @@ local teamAttackNames = {}
 local binding = { kind = "mouse", button = 1 } -- default Mouse1
 
 -- Connections
-local followConn, attackConn, autoPressConn, bindingCaptureConn
-local teamAttackConn -- reserved for any future team-attack runtime connection (not used for targeting here)
+local followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn
 local connections = {}
 
 -- Utils
@@ -101,6 +97,7 @@ local function parseAttackNames(text)
     end
 end
 
+-- Team parsing (new)
 local function parseTeamNames(text)
     teamAttackNames = {}
     for name in tostring(text or ""):gmatch("([^,]+)") do
@@ -159,8 +156,12 @@ end
 local function stopAttack()
     attackEnabled = false
     if attackConn then attackConn:Disconnect() attackConn = nil end
-    if autoPressConn then autoPressConn:Disconnect() autoPressConn = nil end
     setBtnState(attackBtn, false, "Attack")
+    -- update auto-press state (don't stop auto-press if team attack still active)
+    if autoPressConn and not (attackEnabled or teamAttackEnabled) then
+        autoPressConn:Disconnect()
+        autoPressConn = nil
+    end
 end
 
 local function doAutoPress()
@@ -192,6 +193,62 @@ local function startAutoPress()
     table.insert(connections, autoPressConn)
 end
 
+-- Team attack helpers (new)
+local function stopTeamAttack()
+    teamAttackEnabled = false
+    if teamAttackConn then teamAttackConn:Disconnect() teamAttackConn = nil end
+    setBtnState(teamAttackBtn, false, "TeamAttack")
+    -- update auto-press state (don't stop auto-press if original attack still active)
+    if autoPressConn and not (attackEnabled or teamAttackEnabled) then
+        autoPressConn:Disconnect()
+        autoPressConn = nil
+    end
+end
+
+local function startTeamAttack()
+    if teamAttackConn then teamAttackConn:Disconnect() teamAttackConn = nil end
+    teamAttackConn = RunService.Heartbeat:Connect(function()
+        if not teamAttackEnabled or #teamAttackNames == 0 then return end
+
+        local myHum = getHumanoid(localPlayer)
+        local myRoot = getHRP(localPlayer)
+        if not (myHum and myRoot) or myHum.Health <= 0 then
+            return
+        end
+
+        local closestDist, targetPos
+        for _, tname in ipairs(teamAttackNames) do
+            local frag = trim(tname):lower()
+            if frag ~= "" then
+                for _, pl in ipairs(Players:GetPlayers()) do
+                    if pl ~= localPlayer and pl.Team and pl.Team.Name then
+                        local teamNameLower = tostring(pl.Team.Name):lower()
+                        if teamNameLower:find(frag, 1, true) then
+                            local hrp = getHRP(pl)
+                            if hrp then
+                                local d = (hrp.Position - myRoot.Position).Magnitude
+                                if not closestDist or d < closestDist then
+                                    closestDist, targetPos = d, hrp.Position
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if targetPos then
+            myHum:MoveTo(targetPos)
+        end
+    end)
+    table.insert(connections, teamAttackConn)
+
+    -- ensure auto-press is running
+    if not autoPressConn then
+        startAutoPress()
+    end
+end
+
 local function startAttack()
     if attackConn then attackConn:Disconnect() attackConn = nil end
     attackConn = RunService.Heartbeat:Connect(function()
@@ -221,7 +278,10 @@ local function startAttack()
     end)
     table.insert(connections, attackConn)
 
-    startAutoPress()
+    -- ensure auto-press is running
+    if not autoPressConn then
+        startAutoPress()
+    end
 end
 
 -- UI build
@@ -357,14 +417,14 @@ local function buildUI()
     attackBox.Parent = attackRow
     Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
 
-    -- Team Attack row (new, local-only toggle)
+    -- Team Attack row (new)
     local teamAttackRow = Instance.new("Frame")
     teamAttackRow.Size = UDim2.new(1, 0, 0, 30)
     teamAttackRow.BackgroundTransparency = 1
     teamAttackRow.Parent = content
-    local th2 = Instance.new("UIListLayout", teamAttackRow)
-    th2.FillDirection = Enum.FillDirection.Horizontal
-    th2.Padding = UDim.new(0, 6)
+    local tah = Instance.new("UIListLayout", teamAttackRow)
+    tah.FillDirection = Enum.FillDirection.Horizontal
+    tah.Padding = UDim.new(0, 6)
 
     teamAttackBtn = Instance.new("TextButton")
     teamAttackBtn.Size = UDim2.new(0, 120, 1, 0)
@@ -372,7 +432,7 @@ local function buildUI()
     teamAttackBtn.TextColor3 = Color3.new(1, 1, 1)
     teamAttackBtn.Font = Enum.Font.GothamBold
     teamAttackBtn.TextSize = 14
-    teamAttackBtn.Text = "Team Attack: Off"
+    teamAttackBtn.Text = "TeamAttack: Off"
     teamAttackBtn.Parent = teamAttackRow
     Instance.new("UICorner", teamAttackBtn).CornerRadius = UDim.new(0, 6)
 
@@ -494,8 +554,7 @@ local function onFollowToggle()
         end
         if teamAttackEnabled then
             teamAttackEnabled = false
-            -- teamAttackConn is not used for targeting in this safe version
-            setBtnState(teamAttackBtn, false, "Team Attack")
+            stopTeamAttack()
         end
         local targetName = followBox.Text
         local target = findClosestPlayer(targetName)
@@ -522,7 +581,7 @@ local function onAttackToggle()
         end
         if teamAttackEnabled then
             teamAttackEnabled = false
-            setBtnState(teamAttackBtn, false, "Team Attack")
+            stopTeamAttack()
         end
         parseAttackNames(attackBox.Text)
         if #attackNames == 0 then
@@ -538,7 +597,7 @@ local function onAttackToggle()
     end
 end
 
--- Team Attack toggle handler (safe: only toggles local flag and stores names)
+-- Team attack toggle (new)
 local function onTeamAttackToggle()
     local newState = not teamAttackEnabled
     if newState then
@@ -552,17 +611,15 @@ local function onTeamAttackToggle()
         end
         parseTeamNames(teamAttackBox.Text)
         if #teamAttackNames == 0 then
-            setBtnState(teamAttackBtn, false, "Team Attack")
+            setBtnState(teamAttackBtn, false, "TeamAttack")
             teamAttackEnabled = false
             return
         end
         teamAttackEnabled = true
-        setBtnState(teamAttackBtn, true, "Team Attack")
-        -- NOTE: This safe version does not start any targeting or auto-press for team attack.
-        -- It only stores the typed team names and flips the local toggle.
+        setBtnState(teamAttackBtn, true, "TeamAttack")
+        startTeamAttack()
     else
-        teamAttackEnabled = false
-        setBtnState(teamAttackBtn, false, "Team Attack")
+        stopTeamAttack()
     end
 end
 
@@ -615,14 +672,14 @@ function _G.HiltonExec.Cleanup()
     pcall(function()
         if followConn then followConn:Disconnect() end
         if attackConn then attackConn:Disconnect() end
+        if teamAttackConn then teamAttackConn:Disconnect() end
         if autoPressConn then autoPressConn:Disconnect() end
         if bindingCaptureConn then bindingCaptureConn:Disconnect() end
-        if teamAttackConn then teamAttackConn:Disconnect() end
         for _, c in ipairs(connections) do
             if c and c.Disconnect then c:Disconnect() end
         end
     end)
-    followConn, attackConn, autoPressConn, bindingCaptureConn, teamAttackConn = nil, nil, nil, nil, nil
+    followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn = nil, nil, nil, nil, nil
     if gui then pcall(function() gui:Destroy() end) end
     _G.HiltonExec = nil
 end
