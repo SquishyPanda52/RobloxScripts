@@ -157,7 +157,7 @@ local function stopAttack()
     attackEnabled = false
     if attackConn then attackConn:Disconnect() attackConn = nil end
     setBtnState(attackBtn, false, "Attack")
-    -- update auto-press state (don't stop auto-press if team attack still active)
+    -- stop auto-press only if no other attack mode is active
     if autoPressConn and not (attackEnabled or teamAttackEnabled) then
         autoPressConn:Disconnect()
         autoPressConn = nil
@@ -198,7 +198,7 @@ local function stopTeamAttack()
     teamAttackEnabled = false
     if teamAttackConn then teamAttackConn:Disconnect() teamAttackConn = nil end
     setBtnState(teamAttackBtn, false, "TeamAttack")
-    -- update auto-press state (don't stop auto-press if original attack still active)
+    -- stop auto-press only if no other attack mode is active
     if autoPressConn and not (attackEnabled or teamAttackEnabled) then
         autoPressConn:Disconnect()
         autoPressConn = nil
@@ -217,6 +217,7 @@ local function startTeamAttack()
         end
 
         local closestDist, targetPos
+        -- For each team fragment, scan players and pick the closest matching player's HRP
         for _, tname in ipairs(teamAttackNames) do
             local frag = trim(tname):lower()
             if frag ~= "" then
@@ -295,7 +296,7 @@ local function buildUI()
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "Main"
-    mainFrame.Size = UDim2.new(0, 300, 0, 220)
+    mainFrame.Size = UDim2.new(0, 300, 0, 260)
     mainFrame.Position = UDim2.new(0, 40, 0, 120)
     mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
     mainFrame.BorderSizePixel = 0
@@ -532,7 +533,7 @@ local function buildUI()
     minBtn.MouseButton1Click:Connect(function()
         isMinimized = not isMinimized
         content.Visible = not isMinimized
-        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 220)
+        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 260)
         minBtn.Text = isMinimized and "+" or "—"
     end)
 
@@ -635,7 +636,7 @@ end
 local function beginBindingCapture()
     if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
     autoBox.Text = "Press a key or click..."
-    bindingCaptureConn = UserInputService.InputBegan:Connect(function(input: InputObject, gpe)
+    bindingCaptureConn = UserInputService.InputBegan:Connect(function(input, gpe)
         if not autoBox:IsFocused() then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             binding = { kind = "mouse", button = 1 }
