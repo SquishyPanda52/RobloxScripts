@@ -1,133 +1,82 @@
--- AutoClientTemplate.lua (LocalScript)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
-if not player then
-    -- Not running as a LocalScript (or running too early). Bail out.
-    return
+if not player then return end
+
+-- ensure script runs as a LocalScript environment
+if not script:IsDescendantOf(game:GetService("StarterPlayer").StarterPlayerScripts) then
+    script.Parent = game:GetService("StarterPlayer").StarterPlayerScripts
+end
+print("Script parented to:", script.Parent:GetFullName())
+
+local function waitChar()
+    local c = player.Character or player.CharacterAdded:Wait()
+    return c
 end
 
--- Ensure script lives under a client-run container for reliability
-local function ensureClientParent()
-    -- Preferred containers that guarantee client execution
-    local preferred = {
-        player:WaitForChild("PlayerGui"),
-        player:WaitForChild("Backpack"),
-        player:WaitForChild("PlayerScripts")
-    }
+local character = waitChar()
+player.CharacterAdded:Connect(function(c) character = c end)
 
-    for _, container in ipairs(preferred) do
-        if script.Parent == container or script:IsDescendantOf(container) then
-            return
-        end
+local function makeFlingTool()
+    local tool = Instance.new("Tool")
+    tool.Name = "Fling"
+    tool.RequiresHandle = true
+    tool.CanBeDropped = false
+
+    local handle = Instance.new("Part")
+    handle.Name = "Handle"
+    handle.Size = Vector3.new(1,1,1)
+    handle.Transparency = 1
+    handle.CanCollide = false
+    handle.Parent = tool
+
+    tool.Parent = player:WaitForChild("Backpack")
+    return tool
+end
+
+local tool = makeFlingTool()
+local active = false
+local touchConn
+
+local function flingTarget(targetRoot)
+    if not targetRoot or not targetRoot:IsA("BasePart") then return end
+    local targetChar = targetRoot.Parent
+    if not targetChar then return end
+    local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+    if not targetHRP or targetChar == character then return end
+
+    local dir = (targetHRP.Position - (character:FindFirstChild("HumanoidRootPart") and character.HumanoidRootPart.Position or targetHRP.Position)).Unit
+    local vel = Instance.new("BodyVelocity")
+    vel.MaxForce = Vector3.new(1e5,1e5,1e5)
+    vel.Velocity = dir * 80 + Vector3.new(0,120,0)
+    vel.P = 1250
+    vel.Parent = targetHRP
+    Debris:AddItem(vel, 0.45)
+end
+
+local function onTouched(hit)
+    if not active then return end
+    local otherRoot = hit
+    -- if hit is a descendant (e.g., limb), find the HumanoidRootPart
+    if not otherRoot.Parent:FindFirstChild("HumanoidRootPart") then
+        otherRoot = otherRoot:FindFirstAncestorWhichIsA("BasePart") or otherRoot
     end
-
-    -- If not already under a client container, reparent to PlayerGui
-    -- This is safe for LocalScripts and keeps GUI-related behavior working
-    script.Parent = player:WaitForChild("PlayerGui")
-end
-
-ensureClientParent()
-
--- Wait for character and HRP
-local function getCharacterAndRoot()
-    local char = player.Character or player.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart", 5)
-    if not hrp then
-        -- fallback: wait longer if needed
-        hrp = char:WaitForChild("HumanoidRootPart")
-    end
-    return char, hrp
-end
-
-local character, humanoidRootPart = getCharacterAndRoot()
-
--- Example: use RenderStepped for smooth per-frame updates
-local usingRenderStepped = true -- set false to use Heartbeat instead
-local connection
-if usingRenderStepped then
-    connection = RunService.RenderStepped:Connect(function(dt)
-        -- per-frame client logic here (camera effects, smoothing, local physics helpers)
-    end)
-else
-    connection = RunService.Heartbeat:Connect(function(dt)
-        -- alternative per-frame logic
-    end)
-end
-
--- Example fling touch logic (local, touch-based)
-local flingActive = false
-local flingPower = 100
-
-local function enableFling()
-    if flingActive then return end
-    flingActive = true
-    -- optional visual/rotation helpers can be created here
-end
-
-local function disableFling()
-    if not flingActive then return end
-    flingActive = false
-end
-
-humanoidRootPart.Touched:Connect(function(hit)
-    if not flingActive then return end
-    local hitModel = hit and hit.Parent
-    if not hitModel then return end
-    local otherPlayer = Players:GetPlayerFromCharacter(hitModel)
-    if otherPlayer and otherPlayer ~= player then
-        local otherRoot = hitModel:FindFirstChild("HumanoidRootPart")
-        if otherRoot then
-            local dir = otherRoot.Position - humanoidRootPart.Position
-            if dir.Magnitude == 0 then dir = Vector3.new(0,1,0) end
-            dir = dir.Unit
-            local flingVel = dir * flingPower * 50
-            pcall(function()
-                otherRoot.AssemblyLinearVelocity = flingVel
-            end)
-        end
-    end
-end)
-
--- Optional: click/remote fling (fires a RemoteEvent in ReplicatedStorage)
-local clickFlingEvent = ReplicatedStorage:FindFirstChild("ClickFlingEvent")
-local function onActivated()
-    if not clickFlingEvent then return end
-    -- Example: raycast from head to find a target and send UserId to server
-    local head = character:FindFirstChild("Head")
-    if not head then return end
-    local origin = head.Position
-    local dir = head.CFrame.LookVector * 200
-    local rayParams = RaycastParams.new()
-    rayParams.FilterDescendantsInstances = {character}
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    local result = workspace:Raycast(origin, dir, rayParams)
-    if result and result.Instance then
-        local targetModel = result.Instance:FindFirstAncestorOfClass("Model")
-        if targetModel then
-            local targetPlayer = Players:GetPlayerFromCharacter(targetModel)
-            if targetPlayer and targetPlayer ~= player then
-                clickFlingEvent:FireServer(targetPlayer.UserId)
-            end
-        end
+    local hrp = otherRoot.Parent and otherRoot.Parent:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        flingTarget(hrp)
     end
 end
 
--- Example tool hookup (if this script is inside a Tool)
-local tool = script:FindFirstAncestorOfClass("Tool")
-if tool then
-    tool.Equipped:Connect(function()
-        enableFling()
-    end)
-    tool.Unequipped:Connect(function()
-        disableFling()
-    end)
-    tool.Activated:Connect(onActivated)
-end
-
--- Cleanup on destroy
-script.Destroying:Connect(function()
-    if connection then connection:Disconnect() end
+tool.Activated:Connect(function()
+    active = not active
+    if active then
+        local hrp = character:WaitForChild("HumanoidRootPart")
+        touchConn = hrp.Touched:Connect(onTouched)
+        tool.ToolTip = "Fling: ON"
+    else
+        if touchConn then touchConn:Disconnect() touchConn = nil end
+        tool.ToolTip = "Fling: OFF"
+    end
 end)
