@@ -1,36 +1,38 @@
--- Fly LocalScript (client-only). Place this file anywhere; it will reparent itself to run as a LocalScript.
+-- Fly LocalScript (client-side)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local StarterPlayer = game:GetService("StarterPlayer")
+local ContextActionService = game:GetService("ContextActionService")
 
 local player = Players.LocalPlayer
-if not player then return end
+local playerGui = player:WaitForChild("PlayerGui")
+local starter = game:GetService("StarterPlayer").StarterPlayerScripts
 
--- ensure script runs as a LocalScript environment
-local function ensure_parent()
-    local okParent = player:FindFirstChild("PlayerGui") or StarterPlayer:FindFirstChild("StarterPlayerScripts")
-    if okParent and script.Parent ~= okParent then
-        script.Parent = okParent
-    end
-    print("Fly script parented to:", script.Parent and script.Parent:GetFullName() or "nil")
+-- auto-reparent for true LocalScript behavior
+if not script:IsDescendantOf(starter) then
+	script.Parent = starter
 end
-ensure_parent()
+print("Script parent:", script.Parent:GetFullName())
 
--- wait for character and parts
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:FindFirstChildOfClass("Humanoid")
+-- wait for character
+local function getCharacter()
+	local c = player.Character or player.CharacterAdded:Wait()
+	return c
+end
 
--- UI creation (all created at runtime)
+local character = getCharacter()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- UI (created in code)
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FlyUI"
+screenGui.Name = "FlyToggleUI"
 screenGui.ResetOnSpawn = false
-screenGui.Parent = player:WaitForChild("PlayerGui")
+screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame", screenGui)
-frame.Size = UDim2.new(0, 260, 0, 120)
-frame.Position = UDim2.new(0.5, -130, 0.88, -60)
+frame.Size = UDim2.new(0, 260, 0, 110)
+frame.Position = UDim2.new(0.5, -130, 0.88, -55)
 frame.BackgroundTransparency = 0.15
 frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
 frame.BorderSizePixel = 0
@@ -40,8 +42,8 @@ local title = Instance.new("TextLabel", frame)
 title.Size = UDim2.new(1, -12, 0, 28)
 title.Position = UDim2.new(0, 6, 0, 6)
 title.BackgroundTransparency = 1
-title.Text = "Fly Controller"
-title.TextColor3 = Color3.fromRGB(255,255,255)
+title.Text = "Fly"
+title.TextColor3 = Color3.new(1,1,1)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 18
 title.TextXAlignment = Enum.TextXAlignment.Left
@@ -49,239 +51,207 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 local toggleBtn = Instance.new("TextButton", frame)
 toggleBtn.Size = UDim2.new(0, 120, 0, 36)
 toggleBtn.Position = UDim2.new(0, 6, 0, 40)
-toggleBtn.Text = "Enable Fly"
-toggleBtn.Font = Enum.Font.Gotham
+toggleBtn.Text = "Enable"
+toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.TextSize = 16
 toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
-toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+toggleBtn.TextColor3 = Color3.new(1,1,1)
 toggleBtn.AutoButtonColor = true
 
 local speedLabel = Instance.new("TextLabel", frame)
 speedLabel.Size = UDim2.new(0, 120, 0, 20)
-speedLabel.Position = UDim2.new(0, 6, 0, 82)
+speedLabel.Position = UDim2.new(0, 134, 0, 44)
 speedLabel.BackgroundTransparency = 1
 speedLabel.Text = "Speed: 50"
 speedLabel.Font = Enum.Font.Gotham
 speedLabel.TextSize = 14
-speedLabel.TextColor3 = Color3.fromRGB(230,230,230)
+speedLabel.TextColor3 = Color3.new(1,1,1)
 speedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local speedSlider = Instance.new("Frame", frame)
-speedSlider.Size = UDim2.new(0, 120, 0, 8)
-speedSlider.Position = UDim2.new(0, 134, 0, 86)
-speedSlider.BackgroundColor3 = Color3.fromRGB(60,60,60)
-speedSlider.BorderSizePixel = 0
+local hint = Instance.new("TextLabel", frame)
+hint.Size = UDim2.new(1, -12, 0, 20)
+hint.Position = UDim2.new(0, 6, 0, 80)
+hint.BackgroundTransparency = 1
+hint.Text = "WASD + Space/Ctrl | Mouse wheel to change speed | F to toggle"
+hint.Font = Enum.Font.Gotham
+hint.TextSize = 12
+hint.TextColor3 = Color3.fromRGB(200,200,200)
+hint.TextXAlignment = Enum.TextXAlignment.Left
 
-local speedFill = Instance.new("Frame", speedSlider)
-speedFill.Size = UDim2.new(0.5, 0, 1, 0)
-speedFill.Position = UDim2.new(0, 0, 0, 0)
-speedFill.BackgroundColor3 = Color3.fromRGB(0,170,255)
-speedFill.BorderSizePixel = 0
-
--- state
+-- Flight state
 local flying = false
 local speed = 50
-local targetSpeed = speed
-local acceleration = 120 -- studs/s^2 for smoothing
-local currentVelocity = Vector3.new(0,0,0)
+local maxSpeed = 250
+local minSpeed = 10
+local accel = 200 -- studs/s^2 for smoothing
+local velocity = Vector3.new(0,0,0)
+local targetVelocity = Vector3.new(0,0,0)
 
--- movement input state
-local moveVec = Vector3.new(0,0,0)
-local upDown = 0
-
-local camera = workspace.CurrentCamera
-
--- Body objects
 local bodyGyro, bodyVelocity
-local renderConn
+local rsConn
 
-local function createBodies()
-    if not humanoidRootPart then return end
-    bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.P = 9e4
-    bodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
-    bodyGyro.CFrame = humanoidRootPart.CFrame
-    bodyGyro.Parent = humanoidRootPart
+-- Input state
+local moveVec = Vector3.new(0,0,0)
+local ascend = 0
 
-    bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
-    bodyVelocity.Velocity = Vector3.new(0,0,0)
-    bodyVelocity.Parent = humanoidRootPart
+local keys = {
+	forward = false,
+	back = false,
+	left = false,
+	right = false,
+	up = false,
+	down = false
+}
+
+local function updateMoveVec()
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local look = cam.CFrame.LookVector
+	local right = cam.CFrame.RightVector
+	local forward = Vector3.new(look.X, 0, look.Z).Unit
+	if forward ~= forward then forward = Vector3.new(0,0,-1) end
+	local rightFlat = Vector3.new(right.X, 0, right.Z).Unit
+	if rightFlat ~= rightFlat then rightFlat = Vector3.new(1,0,0) end
+	local mv = Vector3.new(0,0,0)
+	if keys.forward then mv = mv + forward end
+	if keys.back then mv = mv - forward end
+	if keys.right then mv = mv + rightFlat end
+	if keys.left then mv = mv - rightFlat end
+	mv = mv.Unit ~= mv.Unit and Vector3.new(0,0,0) or mv
+	moveVec = mv
+	ascend = (keys.up and 1 or 0) + (keys.down and -1 or 0)
 end
 
-local function destroyBodies()
-    if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
-    if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
-end
-
-local function updateMovement(dt)
-    if not flying or not humanoidRootPart or not camera then return end
-    -- camera-relative movement
-    local camCFrame = camera.CFrame
-    local forward = Vector3.new(camCFrame.LookVector.X, 0, camCFrame.LookVector.Z).Unit
-    if forward ~= forward then forward = Vector3.new(0,0,-1) end
-    local right = Vector3.new(camCFrame.RightVector.X, 0, camCFrame.RightVector.Z).Unit
-    if right ~= right then right = Vector3.new(1,0,0) end
-
-    local desired = (forward * moveVec.Z + right * moveVec.X) * targetSpeed
-    desired = desired + Vector3.new(0, upDown * targetSpeed, 0)
-
-    -- smooth velocity (accelerate/decelerate)
-    local delta = desired - currentVelocity
-    local maxChange = acceleration * dt
-    if delta.Magnitude > maxChange then
-        delta = delta.Unit * maxChange
-    end
-    currentVelocity = currentVelocity + delta
-
-    if bodyGyro then
-        bodyGyro.CFrame = CFrame.new(humanoidRootPart.Position, humanoidRootPart.Position + camera.CFrame.LookVector)
-    end
-    if bodyVelocity then
-        bodyVelocity.Velocity = currentVelocity
-    end
-end
-
-local function startFlying()
-    if flying then return end
-    flying = true
-    createBodies()
-    -- disable humanoid state changes that fight flight
-    if humanoid then
-        humanoid.PlatformStand = true
-    end
-    renderConn = RunService.RenderStepped:Connect(function(dt)
-        updateMovement(dt)
-    end)
-    toggleBtn.Text = "Disable Fly"
-    toggleBtn.BackgroundColor3 = Color3.fromRGB(255,85,85)
-end
-
-local function stopFlying()
-    if not flying then return end
-    flying = false
-    if renderConn then renderConn:Disconnect() renderConn = nil end
-    destroyBodies()
-    if humanoid then
-        humanoid.PlatformStand = false
-    end
-    currentVelocity = Vector3.new(0,0,0)
-    toggleBtn.Text = "Enable Fly"
-    toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
-end
-
--- input handling
-local function setMoveFromKeys()
-    local x = 0
-    local z = 0
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then z = z - 1 end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then z = z + 1 end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then x = x - 1 end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then x = x + 1 end
-    moveVec = Vector3.new(x, 0, z)
-    if moveVec.Magnitude > 1 then
-        moveVec = moveVec.Unit
-    end
-end
-
+-- Input handlers
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        local key = input.KeyCode
-        if key == Enum.KeyCode.Space then
-            upDown = 1
-        elseif key == Enum.KeyCode.LeftShift or key == Enum.KeyCode.RightShift then
-            upDown = -1
-        elseif key == Enum.KeyCode.E then
-            targetSpeed = math.clamp(targetSpeed + 10, 10, 500)
-            speed = targetSpeed
-            speedLabel.Text = "Speed: "..math.floor(speed)
-            speedFill.Size = UDim2.new(math.clamp(speed/500,0,1),0,1,0)
-        elseif key == Enum.KeyCode.Q then
-            targetSpeed = math.clamp(targetSpeed - 10, 10, 500)
-            speed = targetSpeed
-            speedLabel.Text = "Speed: "..math.floor(speed)
-            speedFill.Size = UDim2.new(math.clamp(speed/500,0,1),0,1,0)
-        end
-        setMoveFromKeys()
-    end
+	if gameProcessed then return end
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		local k = input.KeyCode
+		if k == Enum.KeyCode.W then keys.forward = true
+		elseif k == Enum.KeyCode.S then keys.back = true
+		elseif k == Enum.KeyCode.A then keys.left = true
+		elseif k == Enum.KeyCode.D then keys.right = true
+		elseif k == Enum.KeyCode.Space then keys.up = true
+		elseif k == Enum.KeyCode.LeftControl or k == Enum.KeyCode.RightControl then keys.down = true
+		elseif k == Enum.KeyCode.F then -- toggle
+			toggleBtn:Activate()
+		end
+		updateMoveVec()
+	end
 end)
 
 UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        local key = input.KeyCode
-        if key == Enum.KeyCode.Space or key == Enum.KeyCode.LeftShift or key == Enum.KeyCode.RightShift then
-            upDown = 0
-        end
-        setMoveFromKeys()
-    end
+	if gameProcessed then return end
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		local k = input.KeyCode
+		if k == Enum.KeyCode.W then keys.forward = false
+		elseif k == Enum.KeyCode.S then keys.back = false
+		elseif k == Enum.KeyCode.A then keys.left = false
+		elseif k == Enum.KeyCode.D then keys.right = false
+		elseif k == Enum.KeyCode.Space then keys.up = false
+		elseif k == Enum.KeyCode.LeftControl or k == Enum.KeyCode.RightControl then keys.down = false
+		end
+		updateMoveVec()
+	end
 end)
 
--- handle continuous key state (for smooth WASD)
-RunService.Heartbeat:Connect(function()
-    setMoveFromKeys()
+UserInputService.InputChanged:Connect(function(input, gameProcessed)
+	if input.UserInputType == Enum.UserInputType.MouseWheel then
+		speed = math.clamp(speed + input.Position.Z * 5, minSpeed, maxSpeed)
+		speedLabel.Text = "Speed: "..math.floor(speed)
+	end
 end)
 
--- mouse wheel to change speed
-UserInputService.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseWheel then
-        targetSpeed = math.clamp(targetSpeed + input.Position.Z * 5, 10, 500)
-        speed = targetSpeed
-        speedLabel.Text = "Speed: "..math.floor(speed)
-        speedFill.Size = UDim2.new(math.clamp(speed/500,0,1),0,1,0)
-    end
-end)
+-- Start/stop flight
+local function startFlying()
+	if flying then return end
+	flying = true
+	-- create movers
+	bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.P = 9e4
+	bodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
+	bodyGyro.CFrame = hrp.CFrame
+	bodyGyro.Parent = hrp
 
--- UI interactions
-toggleBtn.MouseButton1Click:Connect(function()
-    if flying then stopFlying() else startFlying() end
-end)
+	bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
+	bodyVelocity.Velocity = Vector3.new(0,0,0)
+	bodyVelocity.Parent = hrp
 
--- slider click to set speed
-local dragging = false
-local function updateSliderFromInput(input)
-    local absPos = input.Position.X
-    local sliderPos = speedSlider.AbsolutePosition.X
-    local sliderSize = speedSlider.AbsoluteSize.X
-    local rel = math.clamp((absPos - sliderPos) / sliderSize, 0, 1)
-    targetSpeed = math.floor(10 + rel * (500 - 10))
-    speed = targetSpeed
-    speedLabel.Text = "Speed: "..math.floor(speed)
-    speedFill.Size = UDim2.new(rel,0,1,0)
+	velocity = hrp.Velocity
+	targetVelocity = Vector3.new(0,0,0)
+
+	rsConn = RunService.RenderStepped:Connect(function(dt)
+		if not flying then return end
+		if not hrp or not hrp.Parent then return end
+		local cam = workspace.CurrentCamera
+		if cam then
+			bodyGyro.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.CFrame.LookVector)
+		end
+		-- compute target velocity
+		local horiz = moveVec * speed
+		local vert = Vector3.new(0, ascend * speed)
+		targetVelocity = horiz + vert
+		-- smooth velocity towards target
+		local delta = targetVelocity - velocity
+		local maxChange = accel * dt
+		if delta.Magnitude > maxChange then
+			delta = delta.Unit * maxChange
+		end
+		velocity = velocity + delta
+		-- apply
+		bodyVelocity.Velocity = velocity
+		-- keep humanoid state
+		if humanoid and humanoid.PlatformStand then
+			-- nothing
+		else
+			humanoid.PlatformStand = true
+		end
+	end)
 end
 
-speedSlider.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        updateSliderFromInput(input)
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        updateSliderFromInput(input)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
+local function stopFlying()
+	if not flying then return end
+	flying = false
+	if rsConn then rsConn:Disconnect() rsConn = nil end
+	if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
+	if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
+	if humanoid then
+		pcall(function() humanoid.PlatformStand = false end)
+	end
+	velocity = Vector3.new(0,0,0)
+	targetVelocity = Vector3.new(0,0,0)
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+	if not flying then
+		startFlying()
+		toggleBtn.Text = "Disable"
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(255,85,85)
+	else
+		stopFlying()
+		toggleBtn.Text = "Enable"
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
+	end
 end)
 
--- cleanup on character respawn
-player.CharacterAdded:Connect(function(char)
-    character = char
-    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-    humanoid = character:FindFirstChildOfClass("Humanoid")
-    stopFlying()
-end)
+-- ensure cleanup on death or character change
+local function onCharacterAdded(char)
+	stopFlying()
+	character = char
+	hrp = character:WaitForChild("HumanoidRootPart")
+	humanoid = character:WaitForChild("Humanoid")
+end
 
--- small heartbeat to lerp displayed speed toward target for smooth feel
-RunService.Heartbeat:Connect(function(dt)
-    speed = speed + (targetSpeed - speed) * math.clamp(10 * dt, 0, 1)
-    speedLabel.Text = "Speed: "..math.floor(speed)
-    speedFill.Size = UDim2.new(math.clamp(speed/500,0,1),0,1,0)
-end)
+player.CharacterAdded:Connect(onCharacterAdded)
+humanoid.Died:Connect(function() stopFlying() end)
 
--- initial print for debugging where script is running
-print("Fly LocalScript initialized for player:", player.Name)
+-- bind context action for mobile / gamepad toggle
+ContextActionService:BindAction("ToggleFly", function(_, state, _)
+	if state == Enum.UserInputState.Begin then
+		toggleBtn:Activate()
+	end
+end, false, Enum.KeyCode.F)
+
+-- initial print
+print("Fly LocalScript ready. UI created in PlayerGui:", screenGui:GetFullName())
