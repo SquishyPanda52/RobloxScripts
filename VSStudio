@@ -1,93 +1,213 @@
-local player = game.Players.LocalPlayer
+-- LocalScript (run client-side)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local player = Players.LocalPlayer
 local char = player.Character or player.CharacterAdded:Wait()
-local hum = char:WaitForChild("Humanoid")
-local pg = player:WaitForChild("PlayerGui")
+local humanoid = char:WaitForChild("Humanoid")
+local playerGui = player:WaitForChild("PlayerGui")
 
-if not script:IsDescendantOf(pg) then script.Parent = pg end
-print("SpeedChanger Script Parent:", script.Parent)
+-- ensure script runs as a true LocalScript UI
+if not script:IsDescendantOf(playerGui) then
+    script.Parent = playerGui
+end
+print("SpeedChanger script parented to:", script.Parent:GetFullName())
 
-local gui = Instance.new("ScreenGui", pg)
-gui.Name = "SpeedChangerUI"
-gui.ResetOnSpawn = false
+-- UI creation
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SpeedChangerGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
 
-local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0, 260, 0, 150)
-frame.Position = UDim2.new(0.5, -130, 0.4, -75)
-frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-frame.Active = true
-frame.Draggable = true
+local main = Instance.new("Frame", screenGui)
+main.Name = "Main"
+main.Size = UDim2.new(0, 360, 0, 160)
+main.Position = UDim2.new(0.5, -180, 0.4, -80)
+main.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+main.BorderSizePixel = 0
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.ClipsDescendants = true
+main.Active = true
 
-local top = Instance.new("Frame", frame)
-top.Size = UDim2.new(1, 0, 0, 28)
-top.BackgroundColor3 = Color3.fromRGB(60, 0, 0)
+local titleBar = Instance.new("Frame", main)
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 34)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundColor3 = Color3.fromRGB(30, 0, 20)
+titleBar.BorderSizePixel = 0
 
-local title = Instance.new("TextLabel", top)
-title.Size = UDim2.new(1, -60, 1, 0)
-title.Position = UDim2.new(0, 5, 0, 0)
+local title = Instance.new("TextLabel", titleBar)
+title.Size = UDim2.new(1, -80, 1, 0)
+title.Position = UDim2.new(0, 8, 0, 0)
 title.BackgroundTransparency = 1
 title.Text = "Speed Changer"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextColor3 = Color3.fromRGB(220, 220, 230)
 title.Font = Enum.Font.GothamBold
-title.TextSize = 16
+title.TextSize = 18
 title.TextXAlignment = Enum.TextXAlignment.Left
 
-local close = Instance.new("TextButton", top)
-close.Size = UDim2.new(0, 28, 1, 0)
-close.Position = UDim2.new(1, -28, 0, 0)
-close.Text = "X"
-close.BackgroundColor3 = Color3.fromRGB(120, 0, 0)
-close.TextColor3 = Color3.new(1,1,1)
-close.Font = Enum.Font.GothamBold
-close.TextSize = 16
+local btnClose = Instance.new("TextButton", titleBar)
+btnClose.Name = "Close"
+btnClose.Size = UDim2.new(0, 28, 0, 24)
+btnClose.Position = UDim2.new(1, -36, 0, 5)
+btnClose.BackgroundColor3 = Color3.fromRGB(170, 20, 20)
+btnClose.Text = "x"
+btnClose.TextColor3 = Color3.new(1,1,1)
+btnClose.Font = Enum.Font.GothamBold
+btnClose.TextSize = 16
+btnClose.AutoButtonColor = false
+btnClose.BorderSizePixel = 0
+btnClose.ZIndex = 5
 
-local mini = Instance.new("TextButton", top)
-mini.Size = UDim2.new(0, 28, 1, 0)
-mini.Position = UDim2.new(1, -56, 0, 0)
-mini.Text = "-"
-mini.BackgroundColor3 = Color3.fromRGB(0, 0, 120)
-mini.TextColor3 = Color3.new(1,1,1)
-mini.Font = Enum.Font.GothamBold
-mini.TextSize = 20
+local btnMin = Instance.new("TextButton", titleBar)
+btnMin.Name = "Minimize"
+btnMin.Size = UDim2.new(0, 28, 0, 24)
+btnMin.Position = UDim2.new(1, -68, 0, 5)
+btnMin.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+btnMin.Text = "-"
+btnMin.TextColor3 = Color3.new(1,1,1)
+btnMin.Font = Enum.Font.GothamBold
+btnMin.TextSize = 20
+btnMin.AutoButtonColor = false
+btnMin.BorderSizePixel = 0
+btnMin.ZIndex = 5
 
-local box = Instance.new("TextBox", frame)
-box.Size = UDim2.new(0, 200, 0, 35)
-box.Position = UDim2.new(0.5, -100, 0.45, -20)
-box.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-box.TextColor3 = Color3.new(1,1,1)
-box.PlaceholderText = "Enter Speed"
-box.Font = Enum.Font.Gotham
-box.TextSize = 18
+local content = Instance.new("Frame", main)
+content.Name = "Content"
+content.Size = UDim2.new(1, -16, 1, -50)
+content.Position = UDim2.new(0, 8, 0, 42)
+content.BackgroundTransparency = 1
 
-local btn = Instance.new("TextButton", frame)
-btn.Size = UDim2.new(0, 200, 0, 35)
-btn.Position = UDim2.new(0.5, -100, 0.75, -20)
-btn.BackgroundColor3 = Color3.fromRGB(0, 60, 180)
-btn.TextColor3 = Color3.new(1,1,1)
-btn.Text = "Change Speed"
-btn.Font = Enum.Font.GothamBold
-btn.TextSize = 18
+local label = Instance.new("TextLabel", content)
+label.Size = UDim2.new(1, 0, 0, 24)
+label.Position = UDim2.new(0, 0, 0, 0)
+label.BackgroundTransparency = 1
+label.Text = "Enter speed (walk speed):"
+label.TextColor3 = Color3.fromRGB(200,200,210)
+label.Font = Enum.Font.Gotham
+label.TextSize = 14
+label.TextXAlignment = Enum.TextXAlignment.Left
+
+local speedBox = Instance.new("TextBox", content)
+speedBox.Name = "SpeedBox"
+speedBox.Size = UDim2.new(1, 0, 0, 36)
+speedBox.Position = UDim2.new(0, 0, 0, 28)
+speedBox.BackgroundColor3 = Color3.fromRGB(18,18,22)
+speedBox.TextColor3 = Color3.fromRGB(230,230,235)
+speedBox.PlaceholderText = tostring(humanoid.WalkSpeed)
+speedBox.Font = Enum.Font.Gotham
+speedBox.TextSize = 18
+speedBox.ClearTextOnFocus = false
+speedBox.Text = ""
+
+local changeBtn = Instance.new("TextButton", content)
+changeBtn.Name = "ChangeBtn"
+changeBtn.Size = UDim2.new(1, 0, 0, 36)
+changeBtn.Position = UDim2.new(0, 0, 0, 72)
+changeBtn.BackgroundColor3 = Color3.fromRGB(0, 90, 160)
+changeBtn.Text = "Change speed"
+changeBtn.TextColor3 = Color3.new(1,1,1)
+changeBtn.Font = Enum.Font.GothamBold
+changeBtn.TextSize = 18
+changeBtn.BorderSizePixel = 0
+
+local hint = Instance.new("TextLabel", content)
+hint.Size = UDim2.new(1, 0, 0, 24)
+hint.Position = UDim2.new(0, 0, 0, 116)
+hint.BackgroundTransparency = 1
+hint.Text = "Local change only. Use reasonable values."
+hint.TextColor3 = Color3.fromRGB(150,150,160)
+hint.Font = Enum.Font.Gotham
+hint.TextSize = 12
+hint.TextXAlignment = Enum.TextXAlignment.Left
+
+-- close and minimize behavior
+btnClose.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
 
 local minimized = false
-
-mini.MouseButton1Click:Connect(function()
-	minimized = not minimized
-	for _,v in ipairs(frame:GetChildren()) do
-		if v ~= top then v.Visible = not minimized end
-	end
+btnMin.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        local t = TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {Size = UDim2.new(0, 200, 0, 34)})
+        t:Play()
+        content.Visible = false
+    else
+        local t = TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {Size = UDim2.new(0, 360, 0, 160)})
+        t:Play()
+        delay(0.25, function() content.Visible = true end)
+    end
 end)
 
-close.MouseButton1Click:Connect(function()
-	gui:Destroy()
+-- smooth draggable
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    local goal = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    local tween = TweenService:Create(main, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = goal})
+    tween:Play()
+end
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = main.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
 end)
 
-btn.MouseButton1Click:Connect(function()
-	local s = tonumber(box.Text)
-	if s and s > 0 then
-		hum.WalkSpeed = s
-		btn.Text = "Speed Set!"
-		task.delay(1, function() btn.Text = "Change Speed" end)
-	else
-		btn.Text = "Invalid"
-		task.delay(1, function() btn.Text = "Change Speed" end)
-	end
+titleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if dragging and dragInput then
+        update(dragInput)
+    end
+end)
+
+-- speed change logic
+local function setSpeedFromText(txt)
+    local n = tonumber(txt)
+    if not n then
+        speedBox.Text = ""
+        speedBox.PlaceholderText = "Invalid number"
+        return
+    end
+    if n < 0 then n = 0 end
+    if n > 500 then n = 500 end
+    humanoid.WalkSpeed = n
+    speedBox.Text = ""
+    speedBox.PlaceholderText = tostring(n)
+    -- small visual feedback
+    local orig = changeBtn.BackgroundColor3
+    changeBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 120)
+    delay(0.25, function() if changeBtn then changeBtn.BackgroundColor3 = orig end end)
+end
+
+changeBtn.MouseButton1Click:Connect(function()
+    setSpeedFromText(speedBox.Text ~= "" and speedBox.Text or speedBox.PlaceholderText)
+end)
+
+speedBox.FocusLost:Connect(function(enter)
+    if enter then
+        setSpeedFromText(speedBox.Text)
+    end
+end)
+
+-- keyboard quick apply (Enter)
+player:GetMouse().KeyDown:Connect(function(key)
+    if key == "\r" or key == "\n" then
+        if screenGui and screenGui.Parent then
+            setSpeedFromText(speedBox.Text ~= "" and speedBox.Text or speedBox.PlaceholderText)
+        end
+    end
 end)
