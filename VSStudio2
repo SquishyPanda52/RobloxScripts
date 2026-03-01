@@ -1,6 +1,7 @@
 -- Roblox Fly Script with Smooth PC Controls
 -- Place this as a LocalScript in StarterPlayer > StarterCharacterScripts
 
+local player = game.Players.LocalPlayer
 local character = script.Parent
 local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
