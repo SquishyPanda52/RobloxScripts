@@ -46,7 +46,7 @@ local smoothing = 0.85
 -- mobile joystick vector
 local mobileMove = Vector3.new(0,0,0)
 
-UserInputService.TouchMovementMode = Enum.TouchMovementMode.Scriptable
+UserInputService.TouchMovementMode = Enum.TouchMovementMode.Thumbstick
 
 UserInputService.TouchMove:Connect(function(_, delta)
 	mobileMove = Vector3.new(delta.X, 0, -delta.Y)
@@ -105,9 +105,9 @@ local function stopFlying()
 	if not flying then return end
 	flying = false
 
-	if rsConn then rsConn:Disconnect() rsConn = nil end
-	if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
-	if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
+	if rsConn then rsConn:Disconnect(); rsConn = nil end
+	if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
+	if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
 
 	humanoid.PlatformStand = false
 	velocity = Vector3.new(0,0,0)
