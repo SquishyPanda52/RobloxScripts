@@ -6,13 +6,8 @@ local ContextActionService = game:GetService("ContextActionService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-local starter = game:GetService("StarterPlayer").StarterPlayerScripts
 
--- auto-reparent for true LocalScript behavior
-if not script:IsDescendantOf(starter) then
-	script.Parent = starter
-end
-print("Script parent:", script.Parent:GetFullName())
+print("Script parent:", script.Parent and script.Parent:GetFullName() or "unknown")
 
 -- wait for character
 local function getCharacter()
@@ -213,9 +208,9 @@ end
 local function stopFlying()
 	if not flying then return end
 	flying = false
-	if rsConn then rsConn:Disconnect() rsConn = nil end
-	if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
-	if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
+	if rsConn then rsConn:Disconnect(); rsConn = nil end
+	if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
+	if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
 	if humanoid then
 		pcall(function() humanoid.PlatformStand = false end)
 	end
