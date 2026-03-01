@@ -1,151 +1,120 @@
--- Roblox Fly Script with Smooth PC Controls
--- Place this as a LocalScript in StarterPlayer > StarterCharacterScripts
-
-local player = game.Players.LocalPlayer
-local character = script.Parent
-local humanoid = character:WaitForChild("Humanoid")
-local rootPart = character:WaitForChild("HumanoidRootPart")
-
-local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
 
--- Flight Configuration
+local player = Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+local cam = workspace.CurrentCamera
+
+print("Fly Script Loaded - Memory Only Execution")
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "FlyUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local btn = Instance.new("TextButton")
+btn.Name = "FlyBtn"
+btn.Size = UDim2.new(0, 100, 0, 40)
+btn.Position = UDim2.new(0.5, -50, 0.85, -20)
+btn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+btn.TextColor3 = Color3.new(1, 1, 1)
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 16
+btn.Text = "Fly ON"
+btn.Parent = gui
+
+local spd = Instance.new("TextLabel")
+spd.Name = "SpeedLabel"
+spd.Size = UDim2.new(0, 100, 0, 20)
+spd.Position = UDim2.new(0.5, -50, 0.82, -20)
+spd.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+spd.TextColor3 = Color3.new(1, 1, 1)
+spd.Font = Enum.Font.Gotham
+spd.TextSize = 14
+spd.Text = "Speed: 50"
+spd.Parent = gui
+
+local flying = false
 local flySpeed = 50
-local acceleration = 2
-local maxSpeed = 100
-local friction = 0.9
+local maxSpeed = 150
+local accel = 0.2
+local vel = Vector3.new(0, 0, 0)
+local bg, bv
 
--- Flight State
-local isFlying = false
-local velocity = Vector3.new(0, 0, 0)
-local targetVelocity = Vector3.new(0, 0, 0)
-
--- Physics Objects
-local bodyVelocity
-local bodyGyro
-
--- Initialize Flight
 local function startFly()
-    if isFlying then return end
-    isFlying = true
-    
-    -- Disable normal gravity
-    humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
-    humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-    
-    -- Create BodyVelocity for movement
-    bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVelocity.Parent = rootPart
-    
-    -- Create BodyGyro for rotation
-    bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    bodyGyro.CFrame = rootPart.CFrame
-    bodyGyro.Parent = rootPart
+	bg = Instance.new("BodyGyro")
+	bg.P = 9000
+	bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+	bg.CFrame = hrp.CFrame
+	bg.Parent = hrp
+	
+	bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+	bv.Velocity = Vector3.new(0, 0, 0)
+	bv.Parent = hrp
+	
+	flying = true
+	btn.Text = "Fly OFF"
+	btn.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
 end
 
--- Stop Flight
 local function stopFly()
-    if not isFlying then return end
-    isFlying = false
-    
-    -- Re-enable gravity
-    humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, true)
-    humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-    
-    -- Remove physics objects
-    if bodyVelocity then bodyVelocity:Destroy() end
-    if bodyGyro then bodyGyro:Destroy() end
-    
-    velocity = Vector3.new(0, 0, 0)
-    targetVelocity = Vector3.new(0, 0, 0)
+	flying = false
+	if bg then bg:Destroy() end
+	if bv then bv:Destroy() end
+	vel = Vector3.new(0, 0, 0)
+	btn.Text = "Fly ON"
+	btn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
 end
 
--- Handle Input for Flight Control
-local function handleInput(input, gameProcessed)
-    if gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.F then
-        -- Toggle Flight with F key
-        if isFlying then
-            stopFly()
-        else
-            startFly()
-        end
-    end
-end
+btn.MouseButton1Click:Connect(function()
+	if flying then
+		stopFly()
+	else
+		startFly()
+	end
+end)
 
--- Update Flight Velocity Based on Input
-local function updateFlightInput()
-    if not isFlying then return end
-    
-    targetVelocity = Vector3.new(0, 0, 0)
-    local camera = workspace.CurrentCamera
-    
-    -- Get camera direction for forward/backward
-    local moveDirection = (camera.Focus.Position - camera.CFrame.Position).Unit
-    
-    -- Up (Space) and Down (Ctrl)
-    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-        targetVelocity = targetVelocity + Vector3.new(0, 1, 0) * flySpeed
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-        targetVelocity = targetVelocity + Vector3.new(0, -1, 0) * flySpeed
-    end
-    
-    -- Forward (W) and Backward (S)
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-        targetVelocity = targetVelocity + moveDirection * flySpeed
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-        targetVelocity = targetVelocity - moveDirection * flySpeed
-    end
-    
-    -- Left (A) and Right (D)
-    local rightDirection = camera.CFrame.RightVector
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-        targetVelocity = targetVelocity - rightDirection * flySpeed
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-        targetVelocity = targetVelocity + rightDirection * flySpeed
-    end
-    
-    -- Speed boost with Shift
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-        flySpeed = math.min(flySpeed + 1, maxSpeed)
-    else
-        flySpeed = math.max(flySpeed - 1, 50)
-    end
-    
-    -- Smooth acceleration
-    velocity = velocity:Lerp(targetVelocity, acceleration * 0.1)
-    velocity = velocity * friction
-end
-
--- Apply Flight Movement
-local function applyFlightMovement()
-    if not isFlying then return end
-    
-    bodyVelocity.Velocity = velocity
-    bodyGyro.CFrame = workspace.CurrentCamera.CFrame
-end
-
--- Main Loop
 RunService.RenderStepped:Connect(function()
-    if isFlying then
-        updateFlightInput()
-        applyFlightMovement()
-    end
+	if not flying or not bg or not bv then return end
+	
+	local moveVel = Vector3.new(0, 0, 0)
+	local currentSpeed = flySpeed
+	
+	if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
+		currentSpeed = math.min(flySpeed + 30, maxSpeed)
+	end
+	
+	if UIS:IsKeyDown(Enum.KeyCode.W) then
+		moveVel = moveVel + cam.CFrame.LookVector * currentSpeed
+	end
+	if UIS:IsKeyDown(Enum.KeyCode.S) then
+		moveVel = moveVel - cam.CFrame.LookVector * currentSpeed
+	end
+	if UIS:IsKeyDown(Enum.KeyCode.D) then
+		moveVel = moveVel + cam.CFrame.RightVector * currentSpeed
+	end
+	if UIS:IsKeyDown(Enum.KeyCode.A) then
+		moveVel = moveVel - cam.CFrame.RightVector * currentSpeed
+	end
+	if UIS:IsKeyDown(Enum.KeyCode.Space) then
+		moveVel = moveVel + Vector3.new(0, currentSpeed, 0)
+	end
+	if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
+		moveVel = moveVel - Vector3.new(0, currentSpeed, 0)
+	end
+	
+	vel = vel:Lerp(moveVel, accel)
+	bv.Velocity = vel
+	bg.CFrame = cam.CFrame
+	spd.Text = "Speed: " .. math.floor(currentSpeed)
 end)
 
--- Input Binding
-UserInputService.InputBegan:Connect(handleInput)
-
--- Cleanup on death
-humanoid.Died:Connect(function()
-    stopFly()
+UIS.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == Enum.KeyCode.F then
+		if flying then stopFly() else startFly() end
+	end
 end)
-
-print("Fly Script Loaded! Press F to fly. Use WASD + Space/Ctrl for movement. Shift to speed up.")
