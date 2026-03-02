@@ -1,144 +1,435 @@
--- UNIVERSAL CAMERA-DIRECTIONAL FLY SYSTEM (CLIENT ONLY)
-
+-- LocalScript (place in StarterPlayerScripts)
+-- Client-only fly UI and controls. No server dependencies.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local ContextActionService = game:GetService("ContextActionService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local character = player.Character or player.CharacterAdded:Wait()
-local hrp = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
+-- State
+local flying = false
+local speed = 50
+local forward = 0
+local right = 0
+local up = 0
+local connections = {}
+local renderConn
 
-print("Fly script parent:", script.Parent and script.Parent:GetFullName() or "unknown")
+-- Utility: safe disconnect
+local function safeDisconnect(conn)
+	if conn and conn.Disconnect then
+		conn:Disconnect()
+	elseif conn and conn.disconnect then
+		conn:disconnect()
+	end
+end
 
--- UI
+-- Create UI entirely by code
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlyToggleUI"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
-local toggleBtn = Instance.new("TextButton", screenGui)
-toggleBtn.Size = UDim2.new(0, 140, 0, 50)
-toggleBtn.Position = UDim2.new(0.5, -70, 0.85, -25)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
-toggleBtn.TextColor3 = Color3.new(1,1,1)
+-- Main frame
+local frame = Instance.new("Frame")
+frame.Name = "MainFrame"
+frame.Size = UDim2.new(0, 320, 0, 160)
+frame.Position = UDim2.new(0.5, -160, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
+frame.Active = true -- for dragging
+
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 28)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = frame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -60, 1, 0)
+titleLabel.Position = UDim2.new(0, 8, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Fly Controller"
+titleLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 14
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+-- Minimize and Close buttons
+local btnMin = Instance.new("TextButton")
+btnMin.Name = "Minimize"
+btnMin.Size = UDim2.new(0, 24, 0, 24)
+btnMin.Position = UDim2.new(1, -56, 0, 2)
+btnMin.Text = "–"
+btnMin.Font = Enum.Font.GothamBold
+btnMin.TextSize = 18
+btnMin.TextColor3 = Color3.fromRGB(200,200,200)
+btnMin.BackgroundColor3 = Color3.fromRGB(40,40,40)
+btnMin.BorderSizePixel = 0
+btnMin.Parent = titleBar
+
+local btnClose = Instance.new("TextButton")
+btnClose.Name = "Close"
+btnClose.Size = UDim2.new(0, 24, 0, 24)
+btnClose.Position = UDim2.new(1, -28, 0, 2)
+btnClose.Text = "X"
+btnClose.Font = Enum.Font.GothamBold
+btnClose.TextSize = 14
+btnClose.TextColor3 = Color3.fromRGB(255,120,120)
+btnClose.BackgroundColor3 = Color3.fromRGB(40,40,40)
+btnClose.BorderSizePixel = 0
+btnClose.Parent = titleBar
+
+-- Content area
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.Size = UDim2.new(1, 0, 1, -28)
+content.Position = UDim2.new(0, 0, 0, 28)
+content.BackgroundTransparency = 1
+content.Parent = frame
+
+-- Speed label and textbox
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(0, 120, 0, 24)
+speedLabel.Position = UDim2.new(0, 8, 0, 8)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Speed:"
+speedLabel.TextColor3 = Color3.fromRGB(220,220,220)
+speedLabel.Font = Enum.Font.Gotham
+speedLabel.TextSize = 14
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = content
+
+local speedBox = Instance.new("TextBox")
+speedBox.Name = "SpeedBox"
+speedBox.Size = UDim2.new(0, 120, 0, 28)
+speedBox.Position = UDim2.new(0, 8, 0, 36)
+speedBox.Text = tostring(speed)
+speedBox.ClearTextOnFocus = false
+speedBox.Font = Enum.Font.Gotham
+speedBox.TextSize = 14
+speedBox.TextColor3 = Color3.fromRGB(20,20,20)
+speedBox.BackgroundColor3 = Color3.fromRGB(230,230,230)
+speedBox.Parent = content
+
+-- Toggle fly button
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleFly"
+toggleBtn.Size = UDim2.new(0, 120, 0, 36)
+toggleBtn.Position = UDim2.new(0, 8, 0, 72)
+toggleBtn.Text = "Enable Fly"
 toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 20
-toggleBtn.Text = "Enable"
-toggleBtn.AutoButtonColor = true
+toggleBtn.TextSize = 16
+toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = content
 
-local speed = 50
-local minSpeed = 10
-local maxSpeed = 250
+-- Instruction label
+local instr = Instance.new("TextLabel")
+instr.Size = UDim2.new(1, -16, 0, 36)
+instr.Position = UDim2.new(0, 8, 0, 116)
+instr.BackgroundTransparency = 1
+instr.Text = "WASD to move, Space to go up, LeftShift to go down"
+instr.TextColor3 = Color3.fromRGB(180,180,180)
+instr.Font = Enum.Font.Gotham
+instr.TextSize = 12
+instr.TextWrapped = true
+instr.Parent = content
 
-local flying = false
-local bodyGyro, bodyVelocity
-local rsConn
+-- Minimized small box (hidden initially)
+local miniBox = Instance.new("Frame")
+miniBox.Name = "MiniBox"
+miniBox.Size = UDim2.new(0, 48, 0, 28)
+miniBox.Position = UDim2.new(0.5, -24, 0.2, 0)
+miniBox.BackgroundColor3 = Color3.fromRGB(30,30,30)
+miniBox.BorderSizePixel = 0
+miniBox.Visible = false
+miniBox.Active = true
+miniBox.Parent = screenGui
 
--- smoothing
-local velocity = Vector3.new(0,0,0)
-local targetVelocity = Vector3.new(0,0,0)
-local smoothing = 0.85
+local miniOpen = Instance.new("TextButton")
+miniOpen.Size = UDim2.new(1, 0, 1, 0)
+miniOpen.BackgroundTransparency = 1
+miniOpen.Text = "+"
+miniOpen.Font = Enum.Font.GothamBold
+miniOpen.TextSize = 20
+miniOpen.TextColor3 = Color3.fromRGB(200,200,200)
+miniOpen.Parent = miniBox
 
--- mobile joystick vector
-local mobileMove = Vector3.new(0,0,0)
+-- Draggable behavior for frame and miniBox
+local function makeDraggable(guiFrame)
+	local dragging = false
+	local dragInput, dragStart, startPos
 
-UserInputService.TouchMovementMode = Enum.TouchMovementMode.Thumbstick
-
-UserInputService.TouchMove:Connect(function(_, delta)
-	mobileMove = Vector3.new(delta.X, 0, -delta.Y)
-	if mobileMove.Magnitude > 1 then
-		mobileMove = mobileMove.Unit
+	local function update(input)
+		local delta = input.Position - dragStart
+		guiFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 	end
-end)
 
-UserInputService.InputChanged:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseWheel then
-		speed = math.clamp(speed + input.Position.Z * 5, minSpeed, maxSpeed)
-	end
-end)
-
-local function startFlying()
-	if flying then return end
-	flying = true
-
-	bodyGyro = Instance.new("BodyGyro")
-	bodyGyro.P = 9e4
-	bodyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9)
-	bodyGyro.CFrame = hrp.CFrame
-	bodyGyro.Parent = hrp
-
-	bodyVelocity = Instance.new("BodyVelocity")
-	bodyVelocity.MaxForce = Vector3.new(9e9,9e9,9e9)
-	bodyVelocity.Velocity = Vector3.new(0,0,0)
-	bodyVelocity.Parent = hrp
-
-	velocity = hrp.Velocity
-
-	rsConn = RunService.RenderStepped:Connect(function(dt)
-		if not flying then return end
-		local cam = workspace.CurrentCamera
-		if not cam then return end
-
-		bodyGyro.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.CFrame.LookVector)
-
-		local moveDir = cam.CFrame.LookVector
-
-		if mobileMove.Magnitude > 0 then
-			moveDir = (cam.CFrame.LookVector * mobileMove.Z) + (cam.CFrame.RightVector * mobileMove.X)
+	guiFrame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startPos = guiFrame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
 		end
+	end)
 
-		targetVelocity = moveDir.Unit * speed
+	guiFrame.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			dragInput = input
+		end
+	end)
 
-		velocity = velocity:Lerp(targetVelocity, 1 - smoothing^(dt * 60))
-
-		bodyVelocity.Velocity = velocity
-
-		humanoid.PlatformStand = true
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			update(input)
+		end
 	end)
 end
 
-local function stopFlying()
-	if not flying then return end
-	flying = false
+makeDraggable(frame)
+makeDraggable(miniBox)
 
-	if rsConn then rsConn:Disconnect(); rsConn = nil end
-	if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
-	if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
-
-	humanoid.PlatformStand = false
-	velocity = Vector3.new(0,0,0)
-	targetVelocity = Vector3.new(0,0,0)
+-- Minimize animation: scale down to miniBox
+local function minimizeUI()
+	if not frame or not miniBox then return end
+	local targetPos = miniBox.Position
+	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local posTween = TweenService:Create(frame, tweenInfo, {Position = targetPos})
+	local sizeTween = TweenService:Create(frame, tweenInfo, {Size = miniBox.Size})
+	posTween:Play()
+	sizeTween:Play()
+	posTween.Completed:Wait()
+	frame.Visible = false
+	miniBox.Visible = true
 end
 
+local function restoreUI()
+	if not frame or not miniBox then return end
+	frame.Visible = true
+	miniBox.Visible = false
+	-- animate back to original size/position
+	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local posTween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -160, 0.2, 0)})
+	local sizeTween = TweenService:Create(frame, tweenInfo, {Size = UDim2.new(0, 320, 0, 160)})
+	posTween:Play()
+	sizeTween:Play()
+end
+
+btnMin.MouseButton1Click:Connect(function()
+	-- scale animation for a quick "close" feel then minimize
+	local sInfo = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true, 0)
+	local sTween = TweenService:Create(frame, sInfo, {Size = UDim2.new(0, 300, 0, 150)})
+	sTween:Play()
+	sTween.Completed:Wait()
+	minimizeUI()
+end)
+
+miniOpen.MouseButton1Click:Connect(function()
+	restoreUI()
+end)
+
+-- Close button: completely delete UI and disconnect everything
+btnClose.MouseButton1Click:Connect(function()
+	-- cleanup
+	flying = false
+	if renderConn then
+		safeDisconnect(renderConn)
+		renderConn = nil
+	end
+	for _,c in pairs(connections) do
+		safeDisconnect(c)
+	end
+	connections = {}
+	if screenGui and screenGui.Parent then
+		screenGui:Destroy()
+	end
+end)
+
+-- Input handling for movement
+local function onInputBegan(input, gameProcessed)
+	if gameProcessed then return end
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		local key = input.KeyCode
+		if key == Enum.KeyCode.W then forward = 1 end
+		if key == Enum.KeyCode.S then forward = -1 end
+		if key == Enum.KeyCode.A then right = -1 end
+		if key == Enum.KeyCode.D then right = 1 end
+		if key == Enum.KeyCode.Space then up = 1 end
+		if key == Enum.KeyCode.LeftShift then up = -1 end
+	end
+end
+
+local function onInputEnded(input, gameProcessed)
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		local key = input.KeyCode
+		if key == Enum.KeyCode.W or key == Enum.KeyCode.S then forward = 0 end
+		if key == Enum.KeyCode.A or key == Enum.KeyCode.D then right = 0 end
+		if key == Enum.KeyCode.Space or key == Enum.KeyCode.LeftShift then up = 0 end
+	end
+end
+
+-- Fly implementation (client-side)
+local function createMover(humanoidRootPart)
+	-- Clean previous
+	if renderConn then
+		safeDisconnect(renderConn)
+		renderConn = nil
+	end
+
+	local bv = Instance.new("BodyVelocity")
+	bv.Name = "FlyBodyVelocity"
+	bv.MaxForce = Vector3.new(9e5, 9e5, 9e5)
+	bv.Velocity = Vector3.new(0,0,0)
+	bv.P = 1250
+	bv.Parent = humanoidRootPart
+
+	local bg = Instance.new("BodyGyro")
+	bg.Name = "FlyBodyGyro"
+	bg.MaxTorque = Vector3.new(9e5, 9e5, 9e5)
+	bg.CFrame = workspace.CurrentCamera.CFrame
+	bg.P = 1250
+	bg.Parent = humanoidRootPart
+
+	-- Smooth movement using RenderStepped
+	renderConn = RunService.RenderStepped:Connect(function(dt)
+		if not flying then return end
+		local cam = workspace.CurrentCamera
+		if not cam then return end
+		-- direction relative to camera
+		local look = cam.CFrame.LookVector
+		local rightVec = cam.CFrame.RightVector
+		local upVec = Vector3.new(0,1,0)
+
+		local moveDir = (look * forward) + (rightVec * right) + (upVec * up)
+		if moveDir.Magnitude > 0 then
+			moveDir = moveDir.Unit
+		end
+
+		-- apply velocity
+		local currentSpeed = tonumber(speedBox.Text) or speed
+		currentSpeed = math.clamp(currentSpeed, 5, 500)
+		bv.Velocity = moveDir * currentSpeed
+
+		-- keep orientation aligned with camera for stable feel
+		bg.CFrame = CFrame.new(humanoidRootPart.Position, humanoidRootPart.Position + cam.CFrame.LookVector)
+	end)
+
+	-- return cleanup function
+	return function()
+		if renderConn then
+			safeDisconnect(renderConn)
+			renderConn = nil
+		end
+		if bv and bv.Parent then bv:Destroy() end
+		if bg and bg.Parent then bg:Destroy() end
+	end
+end
+
+-- Manage character, humanoid, and death
+local currentCleanup
+local function onCharacterAdded(char)
+	-- disconnect previous cleanup
+	if currentCleanup then
+		currentCleanup()
+		currentCleanup = nil
+	end
+
+	local hrp = char:WaitForChild("HumanoidRootPart", 5)
+	local humanoid = char:WaitForChild("Humanoid", 5)
+
+	-- ensure flying is turned off on death
+	local diedConn
+	if humanoid then
+		diedConn = humanoid.Died:Connect(function()
+			flying = false
+			if renderConn then
+				safeDisconnect(renderConn)
+				renderConn = nil
+			end
+		end)
+		table.insert(connections, diedConn)
+	end
+
+	-- create mover when enabling fly
+	currentCleanup = function()
+		-- nothing extra here; mover cleanup handled elsewhere
+	end
+
+	-- return hrp for immediate use
+	return hrp
+end
+
+-- Initial character
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Toggle fly behavior
+local moverCleanup
 toggleBtn.MouseButton1Click:Connect(function()
+	-- update speed variable from textbox
+	local parsed = tonumber(speedBox.Text)
+	if parsed then speed = parsed end
+
+	flying = not flying
 	if flying then
-		stopFlying()
-		toggleBtn.Text = "Enable"
-		toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
-	else
-		startFlying()
-		toggleBtn.Text = "Disable"
+		toggleBtn.Text = "Disable Fly"
 		toggleBtn.BackgroundColor3 = Color3.fromRGB(255,85,85)
+		-- create mover for current HRP
+		local char = player.Character
+		if not char then
+			char = player.CharacterAdded:Wait()
+		end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			moverCleanup = createMover(hrp)
+		end
+	else
+		toggleBtn.Text = "Enable Fly"
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
+		-- cleanup mover
+		if moverCleanup then
+			moverCleanup()
+			moverCleanup = nil
+		end
 	end
 end)
 
-player.CharacterAdded:Connect(function(char)
-	stopFlying()
-	character = char
-	hrp = char:WaitForChild("HumanoidRootPart")
-	humanoid = char:WaitForChild("Humanoid")
-	toggleBtn.Text = "Enable"
-	toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
+-- Input connections
+table.insert(connections, UserInputService.InputBegan:Connect(onInputBegan))
+table.insert(connections, UserInputService.InputEnded:Connect(onInputEnded))
+
+-- Keep behavior consistent across respawns
+table.insert(connections, player.CharacterAdded:Connect(function(char)
+	-- ensure flying is disabled on respawn to avoid leftover forces
+	flying = false
+	if renderConn then
+		safeDisconnect(renderConn)
+		renderConn = nil
+	end
+	-- small delay to wait for HRP
+	local hrp = char:WaitForChild("HumanoidRootPart", 5)
+	-- nothing else required; user can re-enable fly manually
+end))
+
+-- Clean up if the script is destroyed
+script.Destroying:Connect(function()
+	flying = false
+	if renderConn then safeDisconnect(renderConn) end
+	for _,c in pairs(connections) do safeDisconnect(c) end
+	connections = {}
 end)
 
-ContextActionService:BindAction("ToggleFly", function(_, state)
-	if state == Enum.UserInputState.Begin then
-		toggleBtn:Activate()
-	end
-end, false, Enum.KeyCode.F)
-
-print("Fly system loaded.")
+-- End of script
