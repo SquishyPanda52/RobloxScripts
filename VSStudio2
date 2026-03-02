@@ -166,41 +166,55 @@ miniOpen.Parent = miniBox
 -- Draggable behavior for frame and miniBox
 local function makeDraggable(guiFrame)
 	local dragging = false
-	local dragInput, dragStart, startPos
+	local dragStart, startPos
 
-	local function update(input)
-		local delta = input.Position - dragStart
-		guiFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	local function isWithinGui(pos)
+		local absPos = guiFrame.AbsolutePosition
+		local absSize = guiFrame.AbsoluteSize
+		return pos.X >= absPos.X and pos.X <= absPos.X + absSize.X and pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
 	end
 
-	guiFrame.InputBegan:Connect(function(input)
+	-- Start drag when clicking anywhere inside the frame or its children
+	local beganConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = true
-			dragStart = input.Position
-			startPos = guiFrame.Position
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
-			end)
+			local mousePos = input.Position
+			if isWithinGui(mousePos) then
+				dragging = true
+				dragStart = mousePos
+				startPos = guiFrame.Position
+				input.Changed:Connect(function()
+					if input.UserInputState == Enum.UserInputState.End then
+						dragging = false
+					end
+				end)
+			end
 		end
 	end)
 
-	guiFrame.InputChanged:Connect(function(input)
+	local dragInput
+	UserInputService.InputChanged:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			dragInput = input
 		end
 	end)
 
-	UserInputService.InputChanged:Connect(function(input)
-		if input == dragInput and dragging then
-			update(input)
+	local changedConn = UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging and dragStart and startPos then
+			local delta = input.Position - dragStart
+			guiFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 		end
 	end)
+
+	-- Return connections so they can be cleaned up if needed
+	return {beganConn, changedConn}
 end
 
-makeDraggable(frame)
-makeDraggable(miniBox)
+-- Apply draggable to both frames; store returned connections for cleanup
+local dragConnsFrame = makeDraggable(frame)
+local dragConnsMini = makeDraggable(miniBox)
+for _,c in pairs(dragConnsFrame) do table.insert(connections, c) end
+for _,c in pairs(dragConnsMini) do table.insert(connections, c) end
 
 -- Minimize animation: scale down to miniBox
 local function minimizeUI()
@@ -340,15 +354,15 @@ end
 
 -- Manage character, humanoid, and death
 local currentCleanup
-local function onCharacterAdded(char)
+local function _onCharacterAdded(char) -- prefixed to silence unused warning if not referenced elsewhere
 	-- disconnect previous cleanup
 	if currentCleanup then
 		currentCleanup()
 		currentCleanup = nil
 	end
 
-	local hrp = char:WaitForChild("HumanoidRootPart", 5)
-	local humanoid = char:WaitForChild("Humanoid", 5)
+	local _hrp = char:WaitForChild("HumanoidRootPart", 5)
+	local humanoid = char:FindFirstChild("Humanoid")
 
 	-- ensure flying is turned off on death
 	local diedConn
@@ -363,18 +377,16 @@ local function onCharacterAdded(char)
 		table.insert(connections, diedConn)
 	end
 
-	-- create mover when enabling fly
 	currentCleanup = function()
-		-- nothing extra here; mover cleanup handled elsewhere
+		-- placeholder for any future cleanup
 	end
 
-	-- return hrp for immediate use
-	return hrp
+	return _hrp
 end
 
 -- Initial character
 local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local _humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
 
 -- Toggle fly behavior
 local moverCleanup
@@ -420,7 +432,7 @@ table.insert(connections, player.CharacterAdded:Connect(function(char)
 		renderConn = nil
 	end
 	-- small delay to wait for HRP
-	local hrp = char:WaitForChild("HumanoidRootPart", 5)
+	local _hrp = char:WaitForChild("HumanoidRootPart", 5)
 	-- nothing else required; user can re-enable fly manually
 end))
 
@@ -431,5 +443,3 @@ script.Destroying:Connect(function()
 	for _,c in pairs(connections) do safeDisconnect(c) end
 	connections = {}
 end)
-
--- End of script
