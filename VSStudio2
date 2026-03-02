@@ -1,445 +1,430 @@
 -- LocalScript (place in StarterPlayerScripts)
--- Client-only fly UI and controls. No server dependencies.
+
+--// Services
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
 
--- State
-local flying = false
-local speed = 50
-local forward = 0
-local right = 0
-local up = 0
-local connections = {}
-local renderConn
+--// Character / HumanoidRootPart tracking
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
--- Utility: safe disconnect
-local function safeDisconnect(conn)
-	if conn and conn.Disconnect then
-		conn:Disconnect()
-	elseif conn and conn.disconnect then
-		conn:disconnect()
-	end
+local function bindCharacter(char)
+	character = char
+	humanoid = character:WaitForChild("Humanoid")
+	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+	-- Turn off fly on death
+	humanoid.Died:Connect(function()
+		if flying then
+			stopFlying()
+		end
+	end)
 end
 
--- Create UI entirely by code
+player.CharacterAdded:Connect(function(char)
+	bindCharacter(char)
+end)
+
+--// UI Creation (all runtime, local only)
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FlyToggleUI"
+screenGui.Name = "LocalFlyUI"
 screenGui.ResetOnSpawn = false
-screenGui.Parent = playerGui
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = player:WaitForChild("PlayerGui")
 
 -- Main frame
-local frame = Instance.new("Frame")
-frame.Name = "MainFrame"
-frame.Size = UDim2.new(0, 320, 0, 160)
-frame.Position = UDim2.new(0.5, -160, 0.2, 0)
-frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
-frame.Active = true -- for dragging
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "FlyFrame"
+mainFrame.Size = UDim2.new(0, 260, 0, 150)
+mainFrame.Position = UDim2.new(0.5, -130, 0.3, -75)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
 
--- Title bar
-local titleBar = Instance.new("Frame")
-titleBar.Name = "TitleBar"
-titleBar.Size = UDim2.new(1, 0, 0, 28)
-titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-titleBar.BorderSizePixel = 0
-titleBar.Parent = frame
+-- Top bar
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Size = UDim2.new(1, 0, 0, 24)
+topBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
 
+-- Title
 local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
 titleLabel.Size = UDim2.new(1, -60, 1, 0)
 titleLabel.Position = UDim2.new(0, 8, 0, 0)
 titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Fly Controller"
-titleLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+titleLabel.Text = "Local Fly"
 titleLabel.Font = Enum.Font.GothamBold
 titleLabel.TextSize = 14
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = titleBar
+titleLabel.Parent = topBar
 
--- Minimize and Close buttons
-local btnMin = Instance.new("TextButton")
-btnMin.Name = "Minimize"
-btnMin.Size = UDim2.new(0, 24, 0, 24)
-btnMin.Position = UDim2.new(1, -56, 0, 2)
-btnMin.Text = "–"
-btnMin.Font = Enum.Font.GothamBold
-btnMin.TextSize = 18
-btnMin.TextColor3 = Color3.fromRGB(200,200,200)
-btnMin.BackgroundColor3 = Color3.fromRGB(40,40,40)
-btnMin.BorderSizePixel = 0
-btnMin.Parent = titleBar
+-- Close (X) button
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 24, 0, 24)
+closeButton.Position = UDim2.new(1, -24, 0, 0)
+closeButton.BackgroundTransparency = 1
+closeButton.Text = "X"
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 16
+closeButton.TextColor3 = Color3.fromRGB(255, 80, 80)
+closeButton.Parent = topBar
 
-local btnClose = Instance.new("TextButton")
-btnClose.Name = "Close"
-btnClose.Size = UDim2.new(0, 24, 0, 24)
-btnClose.Position = UDim2.new(1, -28, 0, 2)
-btnClose.Text = "X"
-btnClose.Font = Enum.Font.GothamBold
-btnClose.TextSize = 14
-btnClose.TextColor3 = Color3.fromRGB(255,120,120)
-btnClose.BackgroundColor3 = Color3.fromRGB(40,40,40)
-btnClose.BorderSizePixel = 0
-btnClose.Parent = titleBar
+-- Minimize (-) button
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Name = "MinimizeButton"
+minimizeButton.Size = UDim2.new(0, 24, 0, 24)
+minimizeButton.Position = UDim2.new(1, -48, 0, 0)
+minimizeButton.BackgroundTransparency = 1
+minimizeButton.Text = "-"
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.TextSize = 18
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.Parent = topBar
 
 -- Content area
-local content = Instance.new("Frame")
-content.Name = "Content"
-content.Size = UDim2.new(1, 0, 1, -28)
-content.Position = UDim2.new(0, 0, 0, 28)
-content.BackgroundTransparency = 1
-content.Parent = frame
-
--- Speed label and textbox
-local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(0, 120, 0, 24)
-speedLabel.Position = UDim2.new(0, 8, 0, 8)
-speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "Speed:"
-speedLabel.TextColor3 = Color3.fromRGB(220,220,220)
-speedLabel.Font = Enum.Font.Gotham
-speedLabel.TextSize = 14
-speedLabel.TextXAlignment = Enum.TextXAlignment.Left
-speedLabel.Parent = content
-
-local speedBox = Instance.new("TextBox")
-speedBox.Name = "SpeedBox"
-speedBox.Size = UDim2.new(0, 120, 0, 28)
-speedBox.Position = UDim2.new(0, 8, 0, 36)
-speedBox.Text = tostring(speed)
-speedBox.ClearTextOnFocus = false
-speedBox.Font = Enum.Font.Gotham
-speedBox.TextSize = 14
-speedBox.TextColor3 = Color3.fromRGB(20,20,20)
-speedBox.BackgroundColor3 = Color3.fromRGB(230,230,230)
-speedBox.Parent = content
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "Content"
+contentFrame.Size = UDim2.new(1, -16, 1, -32)
+contentFrame.Position = UDim2.new(0, 8, 0, 28)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
 
 -- Toggle fly button
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Name = "ToggleFly"
-toggleBtn.Size = UDim2.new(0, 120, 0, 36)
-toggleBtn.Position = UDim2.new(0, 8, 0, 72)
-toggleBtn.Text = "Enable Fly"
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 16
-toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-toggleBtn.BorderSizePixel = 0
-toggleBtn.Parent = content
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleFlyButton"
+toggleButton.Size = UDim2.new(0, 120, 0, 40)
+toggleButton.Position = UDim2.new(0, 0, 0, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 18
+toggleButton.Text = "Start Fly"
+toggleButton.AutoButtonColor = true
+toggleButton.Parent = contentFrame
 
--- Instruction label
-local instr = Instance.new("TextLabel")
-instr.Size = UDim2.new(1, -16, 0, 36)
-instr.Position = UDim2.new(0, 8, 0, 116)
-instr.BackgroundTransparency = 1
-instr.Text = "WASD to move, Space to go up, LeftShift to go down"
-instr.TextColor3 = Color3.fromRGB(180,180,180)
-instr.Font = Enum.Font.Gotham
-instr.TextSize = 12
-instr.TextWrapped = true
-instr.Parent = content
+-- Speed label
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Name = "SpeedLabel"
+speedLabel.Size = UDim2.new(0, 80, 0, 30)
+speedLabel.Position = UDim2.new(0, 0, 0, 50)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Speed:"
+speedLabel.Font = Enum.Font.Gotham
+speedLabel.TextSize = 16
+speedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = contentFrame
 
--- Minimized small box (hidden initially)
-local miniBox = Instance.new("Frame")
-miniBox.Name = "MiniBox"
-miniBox.Size = UDim2.new(0, 48, 0, 28)
-miniBox.Position = UDim2.new(0.5, -24, 0.2, 0)
-miniBox.BackgroundColor3 = Color3.fromRGB(30,30,30)
-miniBox.BorderSizePixel = 0
-miniBox.Visible = false
-miniBox.Active = true
-miniBox.Parent = screenGui
+-- Speed textbox
+local speedBox = Instance.new("TextBox")
+speedBox.Name = "SpeedBox"
+speedBox.Size = UDim2.new(0, 120, 0, 30)
+speedBox.Position = UDim2.new(0, 80, 0, 50)
+speedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+speedBox.BorderSizePixel = 0
+speedBox.Text = "50"
+speedBox.PlaceholderText = "Speed"
+speedBox.Font = Enum.Font.Gotham
+speedBox.TextSize = 16
+speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedBox.ClearTextOnFocus = false
+speedBox.Parent = contentFrame
 
-local miniOpen = Instance.new("TextButton")
-miniOpen.Size = UDim2.new(1, 0, 1, 0)
-miniOpen.BackgroundTransparency = 1
-miniOpen.Text = "+"
-miniOpen.Font = Enum.Font.GothamBold
-miniOpen.TextSize = 20
-miniOpen.TextColor3 = Color3.fromRGB(200,200,200)
-miniOpen.Parent = miniBox
+-- Info label
+local infoLabel = Instance.new("TextLabel")
+infoLabel.Name = "InfoLabel"
+infoLabel.Size = UDim2.new(1, 0, 0, 30)
+infoLabel.Position = UDim2.new(0, 0, 0, 90)
+infoLabel.BackgroundTransparency = 1
+infoLabel.Text = "Use WASD + Space/Shift while flying."
+infoLabel.Font = Enum.Font.Gotham
+infoLabel.TextSize = 14
+infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+infoLabel.TextWrapped = true
+infoLabel.Parent = contentFrame
 
--- Draggable behavior for frame and miniBox
-local function makeDraggable(guiFrame)
-	local dragging = false
-	local dragStart, startPos
+-- Minimized box (+)
+local miniFrame = Instance.new("Frame")
+miniFrame.Name = "MiniFrame"
+miniFrame.Size = UDim2.new(0, 40, 0, 40)
+miniFrame.Position = mainFrame.Position
+miniFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+miniFrame.BorderSizePixel = 0
+miniFrame.Visible = false
+miniFrame.Active = true
+miniFrame.Draggable = true
+miniFrame.Parent = screenGui
 
-	local function isWithinGui(pos)
-		local absPos = guiFrame.AbsolutePosition
-		local absSize = guiFrame.AbsoluteSize
-		return pos.X >= absPos.X and pos.X <= absPos.X + absSize.X and pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
+local miniPlus = Instance.new("TextButton")
+miniPlus.Name = "MiniPlus"
+miniPlus.Size = UDim2.new(1, 0, 1, 0)
+miniPlus.Position = UDim2.new(0, 0, 0, 0)
+miniPlus.BackgroundTransparency = 1
+miniPlus.Text = "+"
+miniPlus.Font = Enum.Font.GothamBold
+miniPlus.TextSize = 24
+miniPlus.TextColor3 = Color3.fromRGB(0, 255, 150)
+miniPlus.Parent = miniFrame
+
+--// Fly logic
+local flying = false
+local speed = 50
+local bodyGyro
+local bodyVelocity
+local flyConnection
+
+local moveDirection = Vector3.new()
+local keysDown = {
+	W = false,
+	A = false,
+	S = false,
+	D = false,
+	Space = false,
+	Shift = false,
+}
+
+local function updateMoveDirection()
+	local dir = Vector3.new()
+	if keysDown.W then dir = dir + Vector3.new(0, 0, -1) end
+	if keysDown.S then dir = dir + Vector3.new(0, 0, 1) end
+	if keysDown.A then dir = dir + Vector3.new(-1, 0, 0) end
+	if keysDown.D then dir = dir + Vector3.new(1, 0, 0) end
+	if keysDown.Space then dir = dir + Vector3.new(0, 1, 0) end
+	if keysDown.Shift then dir = dir + Vector3.new(0, -1, 0) end
+	if dir.Magnitude > 0 then
+		dir = dir.Unit
 	end
-
-	-- Start drag when clicking anywhere inside the frame or its children
-	local beganConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then return end
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			local mousePos = input.Position
-			if isWithinGui(mousePos) then
-				dragging = true
-				dragStart = mousePos
-				startPos = guiFrame.Position
-				input.Changed:Connect(function()
-					if input.UserInputState == Enum.UserInputState.End then
-						dragging = false
-					end
-				end)
-			end
-		end
-	end)
-
-	local dragInput
-	UserInputService.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			dragInput = input
-		end
-	end)
-
-	local changedConn = UserInputService.InputChanged:Connect(function(input)
-		if input == dragInput and dragging and dragStart and startPos then
-			local delta = input.Position - dragStart
-			guiFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-		end
-	end)
-
-	-- Return connections so they can be cleaned up if needed
-	return {beganConn, changedConn}
+	moveDirection = dir
 end
 
--- Apply draggable to both frames; store returned connections for cleanup
-local dragConnsFrame = makeDraggable(frame)
-local dragConnsMini = makeDraggable(miniBox)
-for _,c in pairs(dragConnsFrame) do table.insert(connections, c) end
-for _,c in pairs(dragConnsMini) do table.insert(connections, c) end
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == Enum.KeyCode.W then keysDown.W = true
+	elseif input.KeyCode == Enum.KeyCode.S then keysDown.S = true
+	elseif input.KeyCode == Enum.KeyCode.A then keysDown.A = true
+	elseif input.KeyCode == Enum.KeyCode.D then keysDown.D = true
+	elseif input.KeyCode == Enum.KeyCode.Space then keysDown.Space = true
+	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then keysDown.Shift = true
+	end
+	updateMoveDirection()
+end)
 
--- Minimize animation: scale down to miniBox
+UserInputService.InputEnded:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == Enum.KeyCode.W then keysDown.W = false
+	elseif input.KeyCode == Enum.KeyCode.S then keysDown.S = false
+	elseif input.KeyCode == Enum.KeyCode.A then keysDown.A = false
+	elseif input.KeyCode == Enum.KeyCode.D then keysDown.D = false
+	elseif input.KeyCode == Enum.KeyCode.Space then keysDown.Space = false
+	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then keysDown.Shift = false
+	end
+	updateMoveDirection()
+end)
+
+local function startFlying()
+	if flying then return end
+	flying = true
+
+	-- Validate speed from textbox
+	local num = tonumber(speedBox.Text)
+	if num and num > 0 then
+		speed = num
+	else
+		speedBox.Text = tostring(speed)
+	end
+
+	if not humanoidRootPart or not humanoid or humanoid.Health <= 0 then
+		flying = false
+		return
+	end
+
+	bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.P = 9e4
+	bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+	bodyGyro.CFrame = humanoidRootPart.CFrame
+	bodyGyro.Parent = humanoidRootPart
+
+	bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.Velocity = Vector3.zero
+	bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+	bodyVelocity.Parent = humanoidRootPart
+
+	-- Disable default physics influence on movement
+	humanoid.PlatformStand = true
+
+	if flyConnection then
+		flyConnection:Disconnect()
+	end
+
+	flyConnection = RunService.RenderStepped:Connect(function()
+		if not flying or not humanoidRootPart then return end
+
+		local cam = workspace.CurrentCamera
+		if not cam then return end
+
+		bodyGyro.CFrame = cam.CFrame
+
+		local camCF = cam.CFrame
+		local forward = camCF.LookVector
+		local right = camCF.RightVector
+		local up = Vector3.new(0, 1, 0)
+
+		local moveVec = Vector3.new()
+		moveVec = moveVec + forward * (keysDown.W and 1 or 0)
+		moveVec = moveVec - forward * (keysDown.S and 1 or 0)
+		moveVec = moveVec - right * (keysDown.A and 1 or 0)
+		moveVec = moveVec + right * (keysDown.D and 1 or 0)
+		moveVec = moveVec + up * (keysDown.Space and 1 or 0)
+		moveVec = moveVec - up * (keysDown.Shift and 1 or 0)
+
+		if moveVec.Magnitude > 0 then
+			moveVec = moveVec.Unit * speed
+		end
+
+		bodyVelocity.Velocity = moveVec
+	end)
+
+	toggleButton.Text = "Stop Fly"
+	toggleButton.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
+end
+
+function stopFlying()
+	if not flying then return end
+	flying = false
+
+	if flyConnection then
+		flyConnection:Disconnect()
+		flyConnection = nil
+	end
+
+	if bodyGyro then
+		bodyGyro:Destroy()
+		bodyGyro = nil
+	end
+
+	if bodyVelocity then
+		bodyVelocity:Destroy()
+		bodyVelocity = nil
+	end
+
+	if humanoid then
+		humanoid.PlatformStand = false
+	end
+
+	toggleButton.Text = "Start Fly"
+	toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+end
+
+-- Ensure character binding and death handling
+bindCharacter(character)
+
+--// UI interactions
+
+-- Toggle fly button
+toggleButton.MouseButton1Click:Connect(function()
+	if flying then
+		stopFlying()
+	else
+		startFlying()
+	end
+end)
+
+-- Speed box change (optional live update)
+speedBox.FocusLost:Connect(function(enterPressed)
+	local num = tonumber(speedBox.Text)
+	if num and num > 0 then
+		speed = num
+	else
+		speedBox.Text = tostring(speed)
+	end
+end)
+
+-- Minimize animation
+local minimized = false
+local originalSize = mainFrame.Size
+local originalPosition = mainFrame.Position
+
 local function minimizeUI()
-	if not frame or not miniBox then return end
-	local targetPos = miniBox.Position
-	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	local posTween = TweenService:Create(frame, tweenInfo, {Position = targetPos})
-	local sizeTween = TweenService:Create(frame, tweenInfo, {Size = miniBox.Size})
-	posTween:Play()
-	sizeTween:Play()
-	posTween.Completed:Wait()
-	frame.Visible = false
-	miniBox.Visible = true
+	if minimized then return end
+	minimized = true
+
+	originalSize = mainFrame.Size
+	originalPosition = mainFrame.Position
+
+	local tweenOut = TweenService:Create(
+		mainFrame,
+		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Size = UDim2.new(0, 40, 0, 40)}
+	)
+	tweenOut:Play()
+	tweenOut.Completed:Wait()
+
+	contentFrame.Visible = false
+	topBar.Visible = false
+	mainFrame.Visible = false
+
+	miniFrame.Position = mainFrame.Position
+	miniFrame.Visible = true
 end
 
 local function restoreUI()
-	if not frame or not miniBox then return end
-	frame.Visible = true
-	miniBox.Visible = false
-	-- animate back to original size/position
-	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	local posTween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -160, 0.2, 0)})
-	local sizeTween = TweenService:Create(frame, tweenInfo, {Size = UDim2.new(0, 320, 0, 160)})
-	posTween:Play()
-	sizeTween:Play()
+	if not minimized then return end
+	minimized = false
+
+	miniFrame.Visible = false
+
+	mainFrame.Size = UDim2.new(0, 40, 0, 40)
+	mainFrame.Position = miniFrame.Position
+	mainFrame.Visible = true
+	topBar.Visible = true
+	contentFrame.Visible = true
+
+	local tweenIn = TweenService:Create(
+		mainFrame,
+		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Size = originalSize}
+	)
+	tweenIn:Play()
 end
 
-btnMin.MouseButton1Click:Connect(function()
-	-- scale animation for a quick "close" feel then minimize
-	local sInfo = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true, 0)
-	local sTween = TweenService:Create(frame, sInfo, {Size = UDim2.new(0, 300, 0, 150)})
-	sTween:Play()
-	sTween.Completed:Wait()
-	minimizeUI()
+minimizeButton.MouseButton1Click:Connect(function()
+	if minimized then
+		restoreUI()
+	else
+		minimizeUI()
+	end
 end)
 
-miniOpen.MouseButton1Click:Connect(function()
+miniPlus.MouseButton1Click:Connect(function()
 	restoreUI()
 end)
 
--- Close button: completely delete UI and disconnect everything
-btnClose.MouseButton1Click:Connect(function()
-	-- cleanup
-	flying = false
-	if renderConn then
-		safeDisconnect(renderConn)
-		renderConn = nil
+-- Close UI completely (X)
+closeButton.MouseButton1Click:Connect(function()
+	-- Turn off fly if active
+	if flying then
+		stopFlying()
 	end
-	for _,c in pairs(connections) do
-		safeDisconnect(c)
+
+	-- Destroy all UI and connections
+	if flyConnection then
+		flyConnection:Disconnect()
+		flyConnection = nil
 	end
-	connections = {}
-	if screenGui and screenGui.Parent then
+
+	if screenGui then
 		screenGui:Destroy()
 	end
-end)
-
--- Input handling for movement
-local function onInputBegan(input, gameProcessed)
-	if gameProcessed then return end
-	if input.UserInputType == Enum.UserInputType.Keyboard then
-		local key = input.KeyCode
-		if key == Enum.KeyCode.W then forward = 1 end
-		if key == Enum.KeyCode.S then forward = -1 end
-		if key == Enum.KeyCode.A then right = -1 end
-		if key == Enum.KeyCode.D then right = 1 end
-		if key == Enum.KeyCode.Space then up = 1 end
-		if key == Enum.KeyCode.LeftShift then up = -1 end
-	end
-end
-
-local function onInputEnded(input, gameProcessed)
-	if input.UserInputType == Enum.UserInputType.Keyboard then
-		local key = input.KeyCode
-		if key == Enum.KeyCode.W or key == Enum.KeyCode.S then forward = 0 end
-		if key == Enum.KeyCode.A or key == Enum.KeyCode.D then right = 0 end
-		if key == Enum.KeyCode.Space or key == Enum.KeyCode.LeftShift then up = 0 end
-	end
-end
-
--- Fly implementation (client-side)
-local function createMover(humanoidRootPart)
-	-- Clean previous
-	if renderConn then
-		safeDisconnect(renderConn)
-		renderConn = nil
-	end
-
-	local bv = Instance.new("BodyVelocity")
-	bv.Name = "FlyBodyVelocity"
-	bv.MaxForce = Vector3.new(9e5, 9e5, 9e5)
-	bv.Velocity = Vector3.new(0,0,0)
-	bv.P = 1250
-	bv.Parent = humanoidRootPart
-
-	local bg = Instance.new("BodyGyro")
-	bg.Name = "FlyBodyGyro"
-	bg.MaxTorque = Vector3.new(9e5, 9e5, 9e5)
-	bg.CFrame = workspace.CurrentCamera.CFrame
-	bg.P = 1250
-	bg.Parent = humanoidRootPart
-
-	-- Smooth movement using RenderStepped
-	renderConn = RunService.RenderStepped:Connect(function(dt)
-		if not flying then return end
-		local cam = workspace.CurrentCamera
-		if not cam then return end
-		-- direction relative to camera
-		local look = cam.CFrame.LookVector
-		local rightVec = cam.CFrame.RightVector
-		local upVec = Vector3.new(0,1,0)
-
-		local moveDir = (look * forward) + (rightVec * right) + (upVec * up)
-		if moveDir.Magnitude > 0 then
-			moveDir = moveDir.Unit
-		end
-
-		-- apply velocity
-		local currentSpeed = tonumber(speedBox.Text) or speed
-		currentSpeed = math.clamp(currentSpeed, 5, 500)
-		bv.Velocity = moveDir * currentSpeed
-
-		-- keep orientation aligned with camera for stable feel
-		bg.CFrame = CFrame.new(humanoidRootPart.Position, humanoidRootPart.Position + cam.CFrame.LookVector)
-	end)
-
-	-- return cleanup function
-	return function()
-		if renderConn then
-			safeDisconnect(renderConn)
-			renderConn = nil
-		end
-		if bv and bv.Parent then bv:Destroy() end
-		if bg and bg.Parent then bg:Destroy() end
-	end
-end
-
--- Manage character, humanoid, and death
-local currentCleanup
-local function _onCharacterAdded(char) -- prefixed to silence unused warning if not referenced elsewhere
-	-- disconnect previous cleanup
-	if currentCleanup then
-		currentCleanup()
-		currentCleanup = nil
-	end
-
-	local _hrp = char:WaitForChild("HumanoidRootPart", 5)
-	local humanoid = char:FindFirstChild("Humanoid")
-
-	-- ensure flying is turned off on death
-	local diedConn
-	if humanoid then
-		diedConn = humanoid.Died:Connect(function()
-			flying = false
-			if renderConn then
-				safeDisconnect(renderConn)
-				renderConn = nil
-			end
-		end)
-		table.insert(connections, diedConn)
-	end
-
-	currentCleanup = function()
-		-- placeholder for any future cleanup
-	end
-
-	return _hrp
-end
-
--- Initial character
-local character = player.Character or player.CharacterAdded:Wait()
-local _humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-
--- Toggle fly behavior
-local moverCleanup
-toggleBtn.MouseButton1Click:Connect(function()
-	-- update speed variable from textbox
-	local parsed = tonumber(speedBox.Text)
-	if parsed then speed = parsed end
-
-	flying = not flying
-	if flying then
-		toggleBtn.Text = "Disable Fly"
-		toggleBtn.BackgroundColor3 = Color3.fromRGB(255,85,85)
-		-- create mover for current HRP
-		local char = player.Character
-		if not char then
-			char = player.CharacterAdded:Wait()
-		end
-		local hrp = char:FindFirstChild("HumanoidRootPart")
-		if hrp then
-			moverCleanup = createMover(hrp)
-		end
-	else
-		toggleBtn.Text = "Enable Fly"
-		toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,255)
-		-- cleanup mover
-		if moverCleanup then
-			moverCleanup()
-			moverCleanup = nil
-		end
-	end
-end)
-
--- Input connections
-table.insert(connections, UserInputService.InputBegan:Connect(onInputBegan))
-table.insert(connections, UserInputService.InputEnded:Connect(onInputEnded))
-
--- Keep behavior consistent across respawns
-table.insert(connections, player.CharacterAdded:Connect(function(char)
-	-- ensure flying is disabled on respawn to avoid leftover forces
-	flying = false
-	if renderConn then
-		safeDisconnect(renderConn)
-		renderConn = nil
-	end
-	-- small delay to wait for HRP
-	local _hrp = char:WaitForChild("HumanoidRootPart", 5)
-	-- nothing else required; user can re-enable fly manually
-end))
-
--- Clean up if the script is destroyed
-script.Destroying:Connect(function()
-	flying = false
-	if renderConn then safeDisconnect(renderConn) end
-	for _,c in pairs(connections) do safeDisconnect(c) end
-	connections = {}
 end)
