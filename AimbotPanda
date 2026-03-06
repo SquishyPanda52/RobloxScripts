@@ -124,29 +124,6 @@ btnToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
 btnToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 btnToggle.Parent = mainFrame
 
--- NEW Keybind Reminder Labels
-local lblKeybind1 = Instance.new("TextLabel")
-lblKeybind1.Size = UDim2.new(1, -10, 0, 16)
-lblKeybind1.Position = UDim2.new(0, 5, 0, 68)
-lblKeybind1.BackgroundTransparency = 1
-lblKeybind1.Text = "Press Q to type username"
-lblKeybind1.Font = Enum.Font.SourceSans
-lblKeybind1.TextSize = 14
-lblKeybind1.TextColor3 = Color3.fromRGB(200,200,200)
-lblKeybind1.TextXAlignment = Enum.TextXAlignment.Left
-lblKeybind1.Parent = mainFrame
-
-local lblKeybind2 = Instance.new("TextLabel")
-lblKeybind2.Size = UDim2.new(1, -10, 0, 16)
-lblKeybind2.Position = UDim2.new(0, 5, 0, 84)
-lblKeybind2.BackgroundTransparency = 1
-lblKeybind2.Text = "Press X to toggle aimbot"
-lblKeybind2.Font = Enum.Font.SourceSans
-lblKeybind2.TextSize = 14
-lblKeybind2.TextColor3 = Color3.fromRGB(200,200,200)
-lblKeybind2.TextXAlignment = Enum.TextXAlignment.Left
-lblKeybind2.Parent = mainFrame
-
 -- Helper: Find player by partial name
 local function findPlayerByPartial(partial)
     partial = partial:lower()
@@ -182,7 +159,7 @@ local function startAimbot()
     end)
 end
 
--- Toggle function
+-- Toggle function (used by button + keybind)
 local function toggleAimbot()
     aimbotEnabled = not aimbotEnabled
     btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
@@ -198,10 +175,11 @@ local function toggleAimbot()
     end
 end
 
+-- Button click
 btnToggle.MouseButton1Click:Connect(toggleAimbot)
 
 --------------------------------------------------------------------
--- Keybinds
+-- Q focus textbox | Enter unfocus | X toggle aimbot
 --------------------------------------------------------------------
 
 UserInput.InputBegan:Connect(function(input, gp)
@@ -217,6 +195,7 @@ UserInput.InputBegan:Connect(function(input, gp)
         end
     end
 
+    -- Mobile emulator compatible
     if input.KeyCode == Enum.KeyCode.X then
         toggleAimbot()
     end
