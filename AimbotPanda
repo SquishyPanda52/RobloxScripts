@@ -193,26 +193,3 @@ UserInput.InputBegan:Connect(function(input, gp)
         end
     end
 end)
-
---------------------------------------------------------------------
--- NEW FEATURE: Keyboard toggle for aimbot (LeftShift)
---------------------------------------------------------------------
-
-UserInput.InputBegan:Connect(function(input, gp)
-    if gp then return end
-
-    -- LeftShift toggles the aimbot (ignored while typing in the textbox)
-    if input.KeyCode == Enum.KeyCode.LeftShift and not txtUser:IsFocused() then
-        aimbotEnabled = not aimbotEnabled
-        btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
-        btnToggle.BackgroundColor3 = aimbotEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
-        if aimbotEnabled then
-            startAimbot()
-        else
-            if aimConnection then
-                aimConnection:Disconnect()
-                aimConnection = nil
-            end
-        end
-    end
-end)
