@@ -173,3 +173,23 @@ btnToggle.MouseButton1Click:Connect(function()
         end
     end
 end)
+
+--------------------------------------------------------------------
+-- NEW FEATURE: Q to focus textbox, Enter to unfocus
+--------------------------------------------------------------------
+
+UserInput.InputBegan:Connect(function(input, gp)
+    if gp then return end
+
+    -- Press Q to focus the textbox
+    if input.KeyCode == Enum.KeyCode.Q then
+        txtUser:CaptureFocus()
+    end
+
+    -- Press Enter to unfocus the textbox
+    if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+        if txtUser:IsFocused() then
+            txtUser:ReleaseFocus()
+        end
+    end
+end)
