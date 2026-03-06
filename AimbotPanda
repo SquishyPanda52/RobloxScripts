@@ -159,11 +159,12 @@ local function startAimbot()
     end)
 end
 
--- Toggle button handler
-btnToggle.MouseButton1Click:Connect(function()
+-- Toggle function (used by button + keybind)
+local function toggleAimbot()
     aimbotEnabled = not aimbotEnabled
     btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
     btnToggle.BackgroundColor3 = aimbotEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+
     if aimbotEnabled then
         startAimbot()
     else
@@ -172,29 +173,30 @@ btnToggle.MouseButton1Click:Connect(function()
             aimConnection = nil
         end
     end
-end)
+end
+
+-- Button click
+btnToggle.MouseButton1Click:Connect(toggleAimbot)
 
 --------------------------------------------------------------------
--- NEW FEATURE: Q to focus textbox, Enter to unfocus, X to toggle aimbot
+-- Q focus textbox | Enter unfocus | X toggle aimbot
 --------------------------------------------------------------------
 
 UserInput.InputBegan:Connect(function(input, gp)
     if gp then return end
 
-    -- Press Q to focus the textbox
     if input.KeyCode == Enum.KeyCode.Q then
         txtUser:CaptureFocus()
     end
 
-    -- Press Enter to unfocus the textbox
     if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
         if txtUser:IsFocused() then
             txtUser:ReleaseFocus()
         end
     end
 
-    -- Press X to toggle aimbot
+    -- Mobile emulator compatible
     if input.KeyCode == Enum.KeyCode.X then
-        btnToggle:Activate()
+        toggleAimbot()
     end
 end)
