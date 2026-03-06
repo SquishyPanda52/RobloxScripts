@@ -181,10 +181,12 @@ end)
 UserInput.InputBegan:Connect(function(input, gp)
     if gp then return end
 
+    -- Press Q to focus the textbox
     if input.KeyCode == Enum.KeyCode.Q then
         txtUser:CaptureFocus()
     end
 
+    -- Press Enter to unfocus the textbox
     if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
         if txtUser:IsFocused() then
             txtUser:ReleaseFocus()
@@ -193,24 +195,14 @@ UserInput.InputBegan:Connect(function(input, gp)
 end)
 
 --------------------------------------------------------------------
--- NEW FEATURE: CTRL + E toggles aimbot
+-- NEW FEATURE: Keyboard toggle for aimbot (Ctrl + E)
 --------------------------------------------------------------------
 
 UserInput.InputBegan:Connect(function(input, gp)
     if gp then return end
 
+    -- Ctrl + E toggles the aimbot button
     if input.KeyCode == Enum.KeyCode.E and UserInput:IsKeyDown(Enum.KeyCode.LeftControl) then
-        aimbotEnabled = not aimbotEnabled
-        btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
-        btnToggle.BackgroundColor3 = aimbotEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
-
-        if aimbotEnabled then
-            startAimbot()
-        else
-            if aimConnection then
-                aimConnection:Disconnect()
-                aimConnection = nil
-            end
-        end
+        btnToggle:MouseButton1Click()
     end
 end)
