@@ -175,7 +175,7 @@ btnToggle.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------------------------
--- NEW FEATURE: Q to focus textbox, Enter to unfocus
+-- NEW FEATURE: Q to focus textbox, Enter to unfocus, X to toggle aimbot
 --------------------------------------------------------------------
 
 UserInput.InputBegan:Connect(function(input, gp)
@@ -191,5 +191,10 @@ UserInput.InputBegan:Connect(function(input, gp)
         if txtUser:IsFocused() then
             txtUser:ReleaseFocus()
         end
+    end
+
+    -- Press X to toggle aimbot
+    if input.KeyCode == Enum.KeyCode.X then
+        btnToggle:Activate()
     end
 end)
