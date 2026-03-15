@@ -1,37 +1,45 @@
+-- Spin command / runtime script
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
 
-    local spinSpeed = 20
-    if args[1] and isNumber(args[1]) then
-        spinSpeed = tonumber(args[1])
-    end
+-- Change this if you want a default speed
+local SPIN_SPEED = 20
 
-    -- Function that applies spin to the current character
-    local function applySpin(char)
-        local root = getRoot(char)
-        if not root then return end
+-- Get root part safely
+local function getRoot(char)
+	if not char then return nil end
+	return char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("UpperTorso")
+end
 
-        -- Remove old spinners
-        for _,v in pairs(root:GetChildren()) do
-            if v.Name == "Spinning" then
-                v:Destroy()
-            end
-        end
+-- Apply spin to a character
+local function applySpin(char)
+	local root = getRoot(char)
+	if not root then return end
 
-        -- Create new spinner
-        local Spin = Instance.new("BodyAngularVelocity")
-        Spin.Name = "Spinning"
-        Spin.Parent = root
-        Spin.MaxTorque = Vector3.new(0, math.huge, 0)
-        Spin.AngularVelocity = Vector3.new(0, spinSpeed, 0)
-    end
+	-- Remove old spinners
+	for _, v in ipairs(root:GetChildren()) do
+		if v:IsA("BodyAngularVelocity") and v.Name == "Spinning" then
+			v:Destroy()
+		end
+	end
 
-    -- Apply immediately to current character
-    if speaker.Character then
-        applySpin(speaker.Character)
-    end
+	-- Create new spinner
+	local bav = Instance.new("BodyAngularVelocity")
+	bav.Name = "Spinning"
+	bav.MaxTorque = Vector3.new(0, math.huge, 0)
+	bav.AngularVelocity = Vector3.new(0, SPIN_SPEED, 0)
+	bav.Parent = root
+end
 
-    -- Re-apply after respawn
-    speaker.CharacterAdded:Connect(function(char)
-        char:WaitForChild("HumanoidRootPart")
-        applySpin(char)
-    end)
+-- Apply to current character if exists
+if player.Character then
+	applySpin(player.Character)
+end
+
+-- Reapply after respawn
+player.CharacterAdded:Connect(function(char)
+	char:WaitForChild("HumanoidRootPart")
+	applySpin(char)
 end)
