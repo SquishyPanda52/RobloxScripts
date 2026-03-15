@@ -1,0 +1,94 @@
+-- ULTIMATE CLIENT OPTIMIZER (Runtime LocalScript)
+-- Strips EVERYTHING except UI, constantly.
+
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+---------------------------------------------------------------------
+-- FUNCTIONS
+---------------------------------------------------------------------
+
+local function stripObject(obj)
+    -- Remove visual junk
+    if obj:IsA("Decal") or obj:IsA("Texture") then
+        obj.Transparency = 1
+
+    elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+        obj.Enabled = false
+
+    elseif obj:IsA("MeshPart") then
+        obj.TextureID = ""
+        obj.Material = Enum.Material.SmoothPlastic
+
+    elseif obj:IsA("SpecialMesh") then
+        obj.TextureId = ""
+
+    elseif obj:IsA("BasePart") then
+        obj.Material = Enum.Material.SmoothPlastic
+        obj.Reflectance = 0
+    end
+end
+
+local function stripCharacter(char)
+    for _, obj in ipairs(char:GetDescendants()) do
+        stripObject(obj)
+        if obj:IsA("Accessory") then
+            obj:Destroy()
+        end
+    end
+end
+
+local function stripWorkspace()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        stripObject(obj)
+    end
+end
+
+local function stripLighting()
+    Lighting.GlobalShadows = false
+    Lighting.Brightness = 1
+    Lighting.EnvironmentDiffuseScale = 0
+    Lighting.EnvironmentSpecularScale = 0
+    Lighting.FogEnd = 9e9
+
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("PostEffect") then
+            v.Enabled = false
+        end
+    end
+end
+
+---------------------------------------------------------------------
+-- RESPAWN HANDLER
+---------------------------------------------------------------------
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char:WaitForChild("HumanoidRootPart")
+    stripCharacter(char)
+end)
+
+---------------------------------------------------------------------
+-- INITIAL STRIP
+---------------------------------------------------------------------
+
+stripLighting()
+stripWorkspace()
+if LocalPlayer.Character then
+    stripCharacter(LocalPlayer.Character)
+end
+
+---------------------------------------------------------------------
+-- CONSTANT STRIPPING LOOP
+---------------------------------------------------------------------
+
+RunService.Heartbeat:Connect(function()
+    stripLighting()
+    stripWorkspace()
+
+    local char = LocalPlayer.Character
+    if char then
+        stripCharacter(char)
+    end
+end)
