@@ -1,0 +1,37 @@
+
+    local spinSpeed = 20
+    if args[1] and isNumber(args[1]) then
+        spinSpeed = tonumber(args[1])
+    end
+
+    -- Function that applies spin to the current character
+    local function applySpin(char)
+        local root = getRoot(char)
+        if not root then return end
+
+        -- Remove old spinners
+        for _,v in pairs(root:GetChildren()) do
+            if v.Name == "Spinning" then
+                v:Destroy()
+            end
+        end
+
+        -- Create new spinner
+        local Spin = Instance.new("BodyAngularVelocity")
+        Spin.Name = "Spinning"
+        Spin.Parent = root
+        Spin.MaxTorque = Vector3.new(0, math.huge, 0)
+        Spin.AngularVelocity = Vector3.new(0, spinSpeed, 0)
+    end
+
+    -- Apply immediately to current character
+    if speaker.Character then
+        applySpin(speaker.Character)
+    end
+
+    -- Re-apply after respawn
+    speaker.CharacterAdded:Connect(function(char)
+        char:WaitForChild("HumanoidRootPart")
+        applySpin(char)
+    end)
+end)
