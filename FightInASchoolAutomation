@@ -1,207 +1,136 @@
--- Auto G LocalScript (place in StarterPlayerScripts or run as a LocalScript)
+-- LocalScript
+-- Put this inside StarterPlayer > StarterPlayerScripts
+-- Everything is generated at runtime and survives respawns.
+
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ContextActionService = game:GetService("ContextActionService")
-local VirtualUser = nil
-pcall(function() VirtualUser = game:GetService("VirtualUser") end)
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ensure script runs as a true LocalScript under PlayerGui for reliability
-if not script:IsDescendantOf(playerGui) then
-    script.Parent = playerGui
+-- Prevent duplicates after respawn
+if playerGui:FindFirstChild("AutoG_UI") then
+	return
 end
-print("AutoG LocalScript parent:", script.Parent.ClassName)
 
--- UI (created entirely at runtime)
+local enabled = false
+local destroyed = false
+
+-- Create ScreenGui
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AutoG_UI"
 screenGui.ResetOnSpawn = false
-screenGui.DisplayOrder = 999
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
-local main = Instance.new("Frame")
-main.Name = "Main"
-main.Size = UDim2.new(0, 260, 0, 92)
-main.Position = UDim2.new(0.02, 0, 0.02, 0)
-main.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
-main.BorderSizePixel = 0
-main.AnchorPoint = Vector2.new(0, 0)
-main.Parent = screenGui
+-- Main Frame
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 220, 0, 110)
+frame.Position = UDim2.new(0.5, -110, 0.5, -55)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
 
-local uic = Instance.new("UICorner", main)
-uic.CornerRadius = UDim.new(0, 8)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = frame
 
-local title = Instance.new("TextLabel", main)
-title.Size = UDim2.new(1, -72, 0, 28)
-title.Position = UDim2.new(0, 12, 0, 8)
+-- Title
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -35, 0, 30)
+title.Position = UDim2.new(0, 10, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "Auto G"
-title.TextColor3 = Color3.fromRGB(235,235,235)
-title.Font = Enum.Font.GothamSemibold
+title.Text = "Auto G Press"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextSize = 18
+title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = frame
 
-local btnMin = Instance.new("TextButton", main)
-btnMin.Size = UDim2.new(0, 26, 0, 26)
-btnMin.Position = UDim2.new(1, -56, 0, 8)
-btnMin.BackgroundColor3 = Color3.fromRGB(40,40,40)
-btnMin.Text = "—"
-btnMin.TextColor3 = Color3.fromRGB(210,210,210)
-btnMin.Font = Enum.Font.Gotham
-btnMin.TextSize = 18
-btnMin.BorderSizePixel = 0
-local minCorner = Instance.new("UICorner", btnMin)
-minCorner.CornerRadius = UDim.new(0,6)
+-- Delete Button
+local deleteButton = Instance.new("TextButton")
+deleteButton.Size = UDim2.new(0, 25, 0, 25)
+deleteButton.Position = UDim2.new(1, -30, 0, 5)
+deleteButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+deleteButton.BorderSizePixel = 0
+deleteButton.Text = "X"
+deleteButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+deleteButton.TextSize = 16
+deleteButton.Font = Enum.Font.GothamBold
+deleteButton.Parent = frame
 
-local btnClose = Instance.new("TextButton", main)
-btnClose.Size = UDim2.new(0, 26, 0, 26)
-btnClose.Position = UDim2.new(1, -28, 0, 8)
-btnClose.BackgroundColor3 = Color3.fromRGB(40,40,40)
-btnClose.Text = "✕"
-btnClose.TextColor3 = Color3.fromRGB(210,210,210)
-btnClose.Font = Enum.Font.Gotham
-btnClose.TextSize = 14
-btnClose.BorderSizePixel = 0
-local closeCorner = Instance.new("UICorner", btnClose)
-closeCorner.CornerRadius = UDim.new(0,6)
+local deleteCorner = Instance.new("UICorner")
+deleteCorner.CornerRadius = UDim.new(0, 6)
+deleteCorner.Parent = deleteButton
 
-local toggle = Instance.new("TextButton", main)
-toggle.Size = UDim2.new(0, 120, 0, 36)
-toggle.Position = UDim2.new(0, 12, 0, 48)
-toggle.BackgroundColor3 = Color3.fromRGB(0,170,255)
-toggle.Text = "Enable"
-toggle.TextColor3 = Color3.fromRGB(255,255,255)
-toggle.Font = Enum.Font.GothamSemibold
-toggle.TextSize = 16
-toggle.BorderSizePixel = 0
-local togCorner = Instance.new("UICorner", toggle)
-togCorner.CornerRadius = UDim.new(0,6)
+-- Toggle Button
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 180, 0, 40)
+toggleButton.Position = UDim2.new(0.5, -90, 0.5, -5)
+toggleButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+toggleButton.BorderSizePixel = 0
+toggleButton.Text = "OFF"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextSize = 18
+toggleButton.Font = Enum.Font.GothamMedium
+toggleButton.Parent = frame
 
-local info = Instance.new("TextLabel", main)
-info.Size = UDim2.new(0, 120, 0, 36)
-info.Position = UDim2.new(0, 144, 0, 48)
-info.BackgroundTransparency = 1
-info.Text = "Interval: 15.5s"
-info.TextColor3 = Color3.fromRGB(170,170,170)
-info.Font = Enum.Font.Gotham
-info.TextSize = 14
-info.TextXAlignment = Enum.TextXAlignment.Left
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 8)
+toggleCorner.Parent = toggleButton
 
--- state
-local enabled = false
-local running = true
-local interval = 15.5
-screenGui.ResetOnSpawn = false
+-- Status Label
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, 0, 0, 20)
+status.Position = UDim2.new(0, 0, 1, -25)
+status.BackgroundTransparency = 1
+status.Text = "Press interval: 15.5s"
+status.TextColor3 = Color3.fromRGB(170, 170, 170)
+status.TextSize = 13
+status.Font = Enum.Font.Gotham
+status.Parent = frame
 
--- function to attempt to "press" G locally
-local function sendG()
-    -- VirtualUser attempt
-    if VirtualUser then
-        pcall(function()
-            VirtualUser:CaptureController()
-            -- try both common signatures
-            if VirtualUser.SendKeyEvent then
-                pcall(function() VirtualUser:SendKeyEvent(true, Enum.KeyCode.G, false, game) end)
-                pcall(function() VirtualUser:SendKeyEvent(false, Enum.KeyCode.G, false, game) end)
-            else
-                pcall(function() VirtualUser:SendKeyEvent(true, "G", false, game) end)
-                pcall(function() VirtualUser:SendKeyEvent(false, "G", false, game) end)
-            end
-        end)
-    end
-    -- RemoteEvent heuristics
-    local candidates = {"GKey","GPress","KeyG","PressG"}
-    for _,name in ipairs(candidates) do
-        local ev = ReplicatedStorage:FindFirstChild(name)
-        if ev and ev:IsA("RemoteEvent") then
-            pcall(function() ev:FireServer() end)
-        end
-    end
-    -- ContextActionService temporary bind (no-op) to try trigger local handlers
-    pcall(function()
-        local function tmpAction() end
-        ContextActionService:BindAction("AutoG_Temp", tmpAction, false, Enum.KeyCode.G)
-        ContextActionService:UnbindAction("AutoG_Temp")
-    end)
+-- Toggle logic
+local function updateButton()
+	if enabled then
+		toggleButton.Text = "ON"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+	else
+		toggleButton.Text = "OFF"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	end
 end
 
--- loop coroutine
-local loop
-local function startLoop()
-    if loop then return end
-    loop = coroutine.create(function()
-        while running do
-            if enabled then
-                pcall(sendG)
-            end
-            local t = 0
-            while t < interval and running do
-                local dt = RunService.Heartbeat:Wait()
-                t = t + dt
-            end
-        end
-    end)
-    coroutine.resume(loop)
+updateButton()
+
+toggleButton.MouseButton1Click:Connect(function()
+	enabled = not enabled
+	updateButton()
+end)
+
+-- Delete everything permanently
+local function destroyAll()
+	destroyed = true
+	enabled = false
+	screenGui:Destroy()
+	script:Destroy()
 end
 
--- UI behavior
-toggle.MouseButton1Click:Connect(function()
-    enabled = not enabled
-    if enabled then
-        toggle.Text = "Disable"
-        toggle.BackgroundColor3 = Color3.fromRGB(255,85,85)
-    else
-        toggle.Text = "Enable"
-        toggle.BackgroundColor3 = Color3.fromRGB(0,170,255)
-    end
-end)
+deleteButton.MouseButton1Click:Connect(destroyAll)
 
-local minimized = false
-btnMin.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    if minimized then
-        main.Size = UDim2.new(0, 140, 0, 40)
-        title.Visible = false
-        toggle.Visible = false
-        info.Visible = false
-        btnMin.Text = "+"
-    else
-        main.Size = UDim2.new(0, 260, 0, 92)
-        title.Visible = true
-        toggle.Visible = true
-        info.Visible = true
-        btnMin.Text = "—"
-    end
+-- Auto key press loop
+task.spawn(function()
+	while not destroyed do
+		if enabled then
+			pcall(function()
+				-- Simulate pressing G key
+				VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
+				task.wait(0.05)
+				VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
+			end)
+		end
+		
+		task.wait(15.5)
+	end
 end)
-
-btnClose.MouseButton1Click:Connect(function()
-    enabled = false
-    running = false
-    pcall(function() screenGui:Destroy() end)
-    pcall(function() script:Destroy() end)
-end)
-
--- ensure UI persists after respawn
-player.CharacterAdded:Connect(function()
-    if not screenGui.Parent then
-        screenGui.Parent = playerGui
-    end
-    screenGui.ResetOnSpawn = false
-end)
-
--- safety: if PlayerGui is replaced (rare), reparent
-playerGui.ChildRemoved:Connect(function(child)
-    if child == screenGui then
-        wait(0.1)
-        if not screenGui.Parent then
-            screenGui.Parent = player:FindFirstChild("PlayerGui") or playerGui
-        end
-    end
-end)
-
-startLoop()
-print("AutoG running. UI created. Interval:", interval)
