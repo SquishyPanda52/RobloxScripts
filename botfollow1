@@ -209,6 +209,12 @@ local function stopFollow()
     end
     toggle.Text = "FOLLOW: OFF (V)"
     toggle.BackgroundColor3 = Color3.fromRGB(170,40,40)
+
+    local myChar = getCharacter(LocalPlayer)
+    local humanoid = getHumanoid(myChar)
+    if humanoid then
+        humanoid.AutoRotate = true
+    end
 end
 
 local function startFollow()
@@ -229,6 +235,12 @@ local function startFollow()
 
         if not myRoot or not humanoid then return end
 
+        -- make sure we can actually move
+        if humanoid.WalkSpeed < 2 then
+            humanoid.WalkSpeed = 16
+        end
+        humanoid.AutoRotate = false
+
         local target = getNearestTarget()
         if not target then return end
 
@@ -243,24 +255,18 @@ local function startFollow()
         local distance = (myRoot.Position - targetRoot.Position).Magnitude
 
         if distance > 3 then
-            local direction = (targetRoot.Position - myRoot.Position)
-            local unit = direction.Unit
+            -- use MoveTo for smoother, rig-agnostic movement
+            humanoid:MoveTo(targetRoot.Position)
 
-            -- R6 + R15 compatible movement
-            humanoid:Move(unit, false)
-            humanoid.WalkToPoint = targetRoot.Position
-
-            -- Rotate root manually
+            -- rotate root manually (R6 + R15 + shiftlock safe)
             local lookPos = Vector3.new(
                 targetRoot.Position.X,
                 myRoot.Position.Y,
                 targetRoot.Position.Z
             )
-
             myRoot.CFrame = CFrame.lookAt(myRoot.Position, lookPos)
         else
             humanoid:Move(Vector3.new(0,0,0), false)
-            humanoid.WalkToPoint = myRoot.Position
         end
     end)
 end
