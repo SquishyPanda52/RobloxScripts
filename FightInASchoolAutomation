@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -15,6 +16,58 @@ end
 
 local enabled = false
 local destroyed = false
+
+---------------------------------------------------------------------
+-- SPECIAL KEY MAP (SHIFT, CTRL, ALT, TAB, SPACE, ETC.)
+---------------------------------------------------------------------
+
+local keyMap = {
+    ["shift"] = Enum.KeyCode.LeftShift,
+    ["lshift"] = Enum.KeyCode.LeftShift,
+    ["rshift"] = Enum.KeyCode.RightShift,
+
+    ["ctrl"] = Enum.KeyCode.LeftControl,
+    ["control"] = Enum.KeyCode.LeftControl,
+    ["lctrl"] = Enum.KeyCode.LeftControl,
+    ["rctrl"] = Enum.KeyCode.RightControl,
+
+    ["alt"] = Enum.KeyCode.LeftAlt,
+    ["lalt"] = Enum.KeyCode.LeftAlt,
+    ["ralt"] = Enum.KeyCode.RightAlt,
+
+    ["tab"] = Enum.KeyCode.Tab,
+    ["caps"] = Enum.KeyCode.CapsLock,
+    ["capslock"] = Enum.KeyCode.CapsLock,
+
+    ["enter"] = Enum.KeyCode.Return,
+    ["return"] = Enum.KeyCode.Return,
+
+    ["backspace"] = Enum.KeyCode.Backspace,
+    ["delete"] = Enum.KeyCode.Delete,
+
+    ["space"] = Enum.KeyCode.Space,
+}
+
+local function resolveKey(text)
+    if not text or text == "" then
+        return nil
+    end
+
+    text = string.lower(text)
+
+    -- Special keys
+    if keyMap[text] then
+        return keyMap[text]
+    end
+
+    -- Normal keys (A, B, C, G, Q, etc.)
+    local upper = string.upper(text)
+    if Enum.KeyCode[upper] then
+        return Enum.KeyCode[upper]
+    end
+
+    return nil
+end
 
 ---------------------------------------------------------------------
 -- CREATE UI
@@ -194,20 +247,21 @@ local function startLoop(row)
         row.loop:Disconnect()
     end
 
-    local key = row.key.Text
+    local keyText = row.key.Text
     local interval = tonumber(row.interval.Text)
     local hold = tonumber(row.hold.Text)
 
-    if key == "" or not interval or not hold then
+    local keyCode = resolveKey(keyText)
+    if not keyCode or not interval or not hold then
         return
     end
 
-    row.loop = game:GetService("RunService").Heartbeat:Connect(function()
+    row.loop = RunService.Heartbeat:Connect(function()
         if enabled then
             task.spawn(function()
-                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[key], false, game)
+                VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
                 task.wait(hold)
-                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[key], false, game)
+                VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
             end)
             task.wait(interval)
         end
