@@ -26,7 +26,7 @@ gui.ResetOnSpawn = false
 gui.Parent = PlayerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 270, 0, 190)
+frame.Size = UDim2.new(0, 270, 0, 190) -- increased height for WS box
 frame.Position = UDim2.new(0.5, -135, 0.5, -95)
 frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
 frame.BorderSizePixel = 0
@@ -65,7 +65,7 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0,6)
 closeCorner.Parent = close
 
--- TEXTBOX (PLAYER NAMES)
+-- TEXTBOX (PLAYERS)
 
 local box = Instance.new("TextBox")
 box.Size = UDim2.new(1,-20,0,40)
@@ -83,9 +83,7 @@ local boxCorner = Instance.new("UICorner")
 boxCorner.CornerRadius = UDim.new(0,8)
 boxCorner.Parent = box
 
---////////////////////////////////////////////////////
 -- WALKSPEED TEXTBOX
---////////////////////////////////////////////////////
 
 local wsBox = Instance.new("TextBox")
 wsBox.Size = UDim2.new(1,-20,0,40)
@@ -103,11 +101,11 @@ local wsCorner = Instance.new("UICorner")
 wsCorner.CornerRadius = UDim.new(0,8)
 wsCorner.Parent = wsBox
 
--- MOVE FOLLOW BUTTON DOWN
+-- TOGGLE BUTTON
 
 local toggle = Instance.new("TextButton")
 toggle.Size = UDim2.new(1,-20,0,40)
-toggle.Position = UDim2.new(0,10,0,135)
+toggle.Position = UDim2.new(0,10,0,135) -- moved down
 toggle.Text = "FOLLOW: OFF (V)"
 toggle.TextColor3 = Color3.new(1,1,1)
 toggle.BackgroundColor3 = Color3.fromRGB(170,40,40)
@@ -284,9 +282,11 @@ local function startFollow()
             local direction = (targetRoot.Position - myRoot.Position)
             local unit = direction.Unit
 
+            -- R6 + R15 compatible movement
             humanoid:Move(unit, false)
             humanoid.WalkToPoint = targetRoot.Position
 
+            -- Rotate root manually
             local lookPos = Vector3.new(
                 targetRoot.Position.X,
                 myRoot.Position.Y,
@@ -341,4 +341,10 @@ close.MouseButton1Click:Connect(function()
     end
 
     gui:Destroy()
+
+    frame = nil
+    box = nil
+    wsBox = nil
+    toggle = nil
+    close = nil
 end)
