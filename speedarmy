@@ -1,0 +1,69 @@
+--// Create UI
+local player = game.Players.LocalPlayer
+local gui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+gui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 200, 0, 120)
+frame.Position = UDim2.new(0.05, 0, 0.4, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+
+local textbox = Instance.new("TextBox", frame)
+textbox.Size = UDim2.new(0, 180, 0, 40)
+textbox.Position = UDim2.new(0, 10, 0, 10)
+textbox.PlaceholderText = "WalkSpeed"
+textbox.Text = ""
+textbox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+textbox.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+local toggle = Instance.new("TextButton", frame)
+toggle.Size = UDim2.new(0, 180, 0, 40)
+toggle.Position = UDim2.new(0, 10, 0, 60)
+toggle.Text = "Turn ON"
+toggle.BackgroundColor3 = Color3.fromRGB(60, 0, 0)
+toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+--// Logic
+local enforcing = false
+
+toggle.MouseButton1Click:Connect(function()
+    enforcing = not enforcing
+    if enforcing then
+        toggle.Text = "Turn OFF"
+        toggle.BackgroundColor3 = Color3.fromRGB(0, 60, 0)
+    else
+        toggle.Text = "Turn ON"
+        toggle.BackgroundColor3 = Color3.fromRGB(60, 0, 0)
+    end
+end)
+
+--// Enforcer Loop
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+
+        if enforcing then
+            local char = player.Character
+            local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+
+            if hum then
+                local desired = tonumber(textbox.Text)
+                if desired and hum.WalkSpeed ~= desired then
+                    hum.WalkSpeed = desired
+                end
+            end
+        end
+    end
+end)
+
+--// Respawn support
+player.CharacterAdded:Connect(function(char)
+    task.wait(0.2)
+    if enforcing then
+        local hum = char:WaitForChild("Humanoid")
+        local desired = tonumber(textbox.Text)
+        if desired then
+            hum.WalkSpeed = desired
+        end
+    end
+end)
