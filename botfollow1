@@ -1,280 +1,256 @@
--- LocalScript — place inside StarterPlayerScripts
+--// LocalScript
+--// Put in StarterPlayerScripts or run with an executor
+--// Everything generated at runtime
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
-local localPlayer = Players.LocalPlayer
-local playerGui = localPlayer:WaitForChild("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
----------------------------------------------------------------------
--- PREVENT DUPLICATES
----------------------------------------------------------------------
-if playerGui:FindFirstChild("FollowUI") then
-    return
+-- Prevent duplicates
+if PlayerGui:FindFirstChild("FollowUI") then
+	PlayerGui.FollowUI:Destroy()
 end
 
----------------------------------------------------------------------
--- VARIABLES
----------------------------------------------------------------------
-local following = false
-local followThread = nil
-local destroyed = false
-local blockMovement = false
-
----------------------------------------------------------------------
+--////////////////////////////////////////////////////
 -- UI
----------------------------------------------------------------------
+--////////////////////////////////////////////////////
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FollowUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = playerGui
+local gui = Instance.new("ScreenGui")
+gui.Name = "FollowUI"
+gui.ResetOnSpawn = false
+gui.Parent = PlayerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 300, 0, 120)
-frame.Position = UDim2.new(0.4, 0, 0.3, 0)
-frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.Size = UDim2.new(0, 260, 0, 140)
+frame.Position = UDim2.new(0.5, -130, 0.5, -70)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
 frame.BorderSizePixel = 0
-frame.Parent = screenGui
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
 
-local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 24)
-titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-titleBar.Parent = frame
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0,10)
+corner.Parent = frame
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -30, 1, 0)
-title.Position = UDim2.new(0, 5, 0, 0)
+title.Size = UDim2.new(1,0,0,30)
 title.BackgroundTransparency = 1
-title.Text = "Forced Follow"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = titleBar
+title.Text = "Strong Follow Script"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 22
+title.Parent = frame
 
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 24, 0, 24)
-closeBtn.Position = UDim2.new(1, -24, 0, 0)
-closeBtn.Text = "X"
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 18
-closeBtn.BackgroundColor3 = Color3.fromRGB(50, 0, 0)
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.Parent = titleBar
+local box = Instance.new("TextBox")
+box.Size = UDim2.new(1,-20,0,40)
+box.Position = UDim2.new(0,10,0,40)
+box.PlaceholderText = "Player1, Player2"
+box.Text = ""
+box.TextColor3 = Color3.new(1,1,1)
+box.BackgroundColor3 = Color3.fromRGB(40,40,40)
+box.ClearTextOnFocus = false
+box.Font = Enum.Font.SourceSans
+box.TextSize = 20
+box.Parent = frame
 
-local txtUser = Instance.new("TextBox")
-txtUser.Size = UDim2.new(1, -10, 0, 30)
-txtUser.Position = UDim2.new(0, 5, 0, 34)
-txtUser.PlaceholderText = "Type usernames (comma separated)..."
-txtUser.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-txtUser.TextColor3 = Color3.fromRGB(255, 255, 255)
-txtUser.ClearTextOnFocus = false
-txtUser.Font = Enum.Font.SourceSans
-txtUser.TextSize = 16
-txtUser.Parent = frame
+local boxCorner = Instance.new("UICorner")
+boxCorner.CornerRadius = UDim.new(0,8)
+boxCorner.Parent = box
 
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(0, 120, 0, 30)
-toggleBtn.Position = UDim2.new(0.5, -60, 0, 70)
-toggleBtn.Text = "FOLLOW: OFF"
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 16
-toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
-toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleBtn.Parent = frame
+local toggle = Instance.new("TextButton")
+toggle.Size = UDim2.new(1,-20,0,40)
+toggle.Position = UDim2.new(0,10,0,90)
+toggle.Text = "FOLLOW: OFF"
+toggle.TextColor3 = Color3.new(1,1,1)
+toggle.BackgroundColor3 = Color3.fromRGB(170,40,40)
+toggle.Font = Enum.Font.SourceSansBold
+toggle.TextSize = 22
+toggle.Parent = frame
 
----------------------------------------------------------------------
--- DRAGGING
----------------------------------------------------------------------
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0,8)
+toggleCorner.Parent = toggle
 
-local dragging = false
-local dragStart
-local startPos
+--////////////////////////////////////////////////////
+-- FUNCTIONS
+--////////////////////////////////////////////////////
 
-titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = frame.Position
-    end
-end)
+local following = false
+local followConnection
 
-titleBar.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
----------------------------------------------------------------------
--- MULTI‑PLAYER PARSING
----------------------------------------------------------------------
-
-local function getTargetPlayers(text)
-    local results = {}
-    local parts = string.split(text, ",")
-
-    for _, raw in ipairs(parts) do
-        local partial = raw:lower():gsub("%s+", "")
-        if partial ~= "" then
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= localPlayer and plr.Name:lower():find(partial, 1, true) then
-                    table.insert(results, plr)
-                end
-            end
-        end
-    end
-
-    return results
+local function getCharacter(player)
+	return player.Character
 end
 
-txtUser.FocusLost:Connect(function()
-    local list = getTargetPlayers(txtUser.Text)
-    if #list > 0 then
-        txtUser.BackgroundColor3 = Color3.fromRGB(25, 50, 25)
-    else
-        txtUser.BackgroundColor3 = Color3.fromRGB(50, 25, 25)
-    end
+local function getRoot(char)
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function splitNames(text)
+	local result = {}
+
+	for name in string.gmatch(text, "[^,]+") do
+		name = string.gsub(name, "^%s+", "")
+		name = string.gsub(name, "%s+$", "")
+
+		if name ~= "" then
+			table.insert(result, string.lower(name))
+		end
+	end
+
+	return result
+end
+
+local function findMatchingPlayers()
+	local targets = {}
+	local names = splitNames(box.Text)
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			for _, search in ipairs(names) do
+				if string.find(string.lower(plr.Name), search, 1, true)
+				or string.find(string.lower(plr.DisplayName), search, 1, true) then
+					table.insert(targets, plr)
+					break
+				end
+			end
+		end
+	end
+
+	return targets
+end
+
+local function getNearestTarget()
+	local myChar = getCharacter(LocalPlayer)
+	local myRoot = getRoot(myChar)
+
+	if not myRoot then
+		return nil
+	end
+
+	local closest
+	local closestDist = math.huge
+
+	for _, plr in ipairs(findMatchingPlayers()) do
+		local char = getCharacter(plr)
+		local root = getRoot(char)
+
+		if root then
+			local dist = (myRoot.Position - root.Position).Magnitude
+
+			if dist < closestDist then
+				closestDist = dist
+				closest = plr
+			end
+		end
+	end
+
+	return closest
+end
+
+--////////////////////////////////////////////////////
+-- FOLLOW LOGIC
+--////////////////////////////////////////////////////
+
+local function startFollow()
+
+	if followConnection then
+		followConnection:Disconnect()
+	end
+
+	followConnection = RunService.RenderStepped:Connect(function()
+
+		if not following then
+			return
+		end
+
+		local myChar = getCharacter(LocalPlayer)
+		local myRoot = getRoot(myChar)
+
+		if not myChar or not myRoot then
+			return
+		end
+
+		local humanoid = myChar:FindFirstChildOfClass("Humanoid")
+
+		if not humanoid then
+			return
+		end
+
+		local target = getNearestTarget()
+
+		if not target then
+			return
+		end
+
+		local targetChar = getCharacter(target)
+		local targetRoot = getRoot(targetChar)
+
+		if not targetRoot then
+			return
+		end
+
+		local distance = (myRoot.Position - targetRoot.Position).Magnitude
+
+		-- Strong forced follow
+		if distance > 3 then
+
+			-- constantly force movement
+			humanoid:MoveTo(targetRoot.Position)
+
+			-- force facing direction
+			myRoot.CFrame = CFrame.lookAt(
+				myRoot.Position,
+				Vector3.new(
+					targetRoot.Position.X,
+					myRoot.Position.Y,
+					targetRoot.Position.Z
+				)
+			)
+
+		end
+	end)
+end
+
+--////////////////////////////////////////////////////
+-- TOGGLE
+--////////////////////////////////////////////////////
+
+toggle.MouseButton1Click:Connect(function()
+
+	following = not following
+
+	if following then
+		toggle.Text = "FOLLOW: ON"
+		toggle.BackgroundColor3 = Color3.fromRGB(40,170,40)
+
+		startFollow()
+
+	else
+		toggle.Text = "FOLLOW: OFF"
+		toggle.BackgroundColor3 = Color3.fromRGB(170,40,40)
+
+		if followConnection then
+			followConnection:Disconnect()
+			followConnection = nil
+		end
+	end
 end)
 
----------------------------------------------------------------------
--- BLOCK PLAYER MOVEMENT (WASD, SPACE, SHIFT)
----------------------------------------------------------------------
+--////////////////////////////////////////////////////
+-- OPTIONAL HOTKEY
+-- Press R to toggle
+--////////////////////////////////////////////////////
 
 UserInputService.InputBegan:Connect(function(input, gp)
-    if blockMovement and not gp then
-        if input.KeyCode == Enum.KeyCode.W
-        or input.KeyCode == Enum.KeyCode.A
-        or input.KeyCode == Enum.KeyCode.S
-        or input.KeyCode == Enum.KeyCode.D
-        or input.KeyCode == Enum.KeyCode.Space
-        or input.KeyCode == Enum.KeyCode.LeftShift
-        or input.KeyCode == Enum.KeyCode.RightShift then
-            return Enum.ContextActionResult.Sink
-        end
-    end
-end)
 
----------------------------------------------------------------------
--- FORCED FOLLOW LOOP (FASTEST POSSIBLE)
----------------------------------------------------------------------
+	if gp then return end
 
-local function stopFollowThread()
-    followThread = nil
-end
-
-local function startFollowThread()
-    stopFollowThread()
-
-    followThread = task.spawn(function()
-        while following and not destroyed do
-
-            local myChar = localPlayer.Character
-            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-            local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-
-            if not (myHum and myHRP) then
-                task.wait()
-                continue
-            end
-
-            -- Force unsit
-            if myHum.SeatPart then
-                myHum.Sit = false
-                task.wait(0.05)
-            end
-
-            local candidates = getTargetPlayers(txtUser.Text)
-            if #candidates == 0 then
-                task.wait()
-                continue
-            end
-
-            -- Find closest
-            local closestHRP = nil
-            local closestDist = math.huge
-
-            for _, plr in ipairs(candidates) do
-                local char = plr.Character
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local dist = (hrp.Position - myHRP.Position).Magnitude
-                    if dist < closestDist then
-                        closestDist = dist
-                        closestHRP = hrp
-                    end
-                end
-            end
-
-            -- FORCE MOVEMENT (dominates all input)
-            if closestHRP then
-                myHum:MoveTo(closestHRP.Position)
-                myHum:Move(Vector3.new(0,0,0), true)
-            end
-
-            task.wait() -- fastest safe loop
-        end
-    end)
-end
-
----------------------------------------------------------------------
--- TOGGLE FOLLOW
----------------------------------------------------------------------
-
-local function updateToggleVisual()
-    toggleBtn.Text = "FOLLOW: " .. (following and "ON" or "OFF")
-    toggleBtn.BackgroundColor3 = following and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
-end
-
-local function toggleFollow()
-    following = not following
-    blockMovement = following
-    updateToggleVisual()
-
-    if following then
-        startFollowThread()
-    else
-        stopFollowThread()
-    end
-end
-
-toggleBtn.MouseButton1Click:Connect(toggleFollow)
-
--- V key toggles follow
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.V then
-        toggleFollow()
-    end
-end)
-
-updateToggleVisual()
-
----------------------------------------------------------------------
--- CLOSE BUTTON (FULL CLEANUP)
----------------------------------------------------------------------
-
-closeBtn.MouseButton1Click:Connect(function()
-    destroyed = true
-    following = false
-    blockMovement = false
-    stopFollowThread()
-
-    if screenGui then
-        screenGui:Destroy()
-    end
-
-    script:Destroy()
+	if input.KeyCode == Enum.KeyCode.R then
+		toggle:Activate()
+	end
 end)
