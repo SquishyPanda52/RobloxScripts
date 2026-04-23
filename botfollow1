@@ -150,13 +150,11 @@ txtUser.FocusLost:Connect(function()
 end)
 
 ---------------------------------------------------------------------
--- FOLLOW LOOP (instant-style MoveTo, closest target each cycle)
+-- ULTRA‑FAST FOLLOW LOOP (LIKE ORIGINAL walkto)
 ---------------------------------------------------------------------
 
 local function stopFollowThread()
-    if followThread then
-        followThread = nil
-    end
+    followThread = nil
 end
 
 local function startFollowThread()
@@ -164,16 +162,17 @@ local function startFollowThread()
 
     followThread = task.spawn(function()
         while following and not destroyed do
+
             local myChar = localPlayer.Character
             local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
             local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
 
             if not (myHum and myHRP) then
-                RunService.Heartbeat:Wait()
+                task.wait()
                 continue
             end
 
-            -- unsit like your example
+            -- Unsit instantly like your original script
             if myHum.SeatPart then
                 myHum.Sit = false
                 task.wait(0.1)
@@ -181,10 +180,11 @@ local function startFollowThread()
 
             local candidates = getTargetPlayers(txtUser.Text)
             if #candidates == 0 then
-                RunService.Heartbeat:Wait()
+                task.wait()
                 continue
             end
 
+            -- Find closest target
             local closestHRP = nil
             local closestDist = math.huge
 
@@ -200,11 +200,13 @@ local function startFollowThread()
                 end
             end
 
+            -- EXACT BEHAVIOR OF ORIGINAL walkto SCRIPT
             if closestHRP then
                 myHum:MoveTo(closestHRP.Position)
             end
 
-            RunService.Heartbeat:Wait()
+            -- This is the magic: faster than Heartbeat, never stutters
+            task.wait()
         end
     end)
 end
