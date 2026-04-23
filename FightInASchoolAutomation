@@ -48,6 +48,22 @@ title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = frame
 
+-- Minimize Button
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 25, 0, 25)
+minimizeButton.Position = UDim2.new(1, -60, 0, 5)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+minimizeButton.BorderSizePixel = 0
+minimizeButton.Text = "-"
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.TextSize = 18
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.Parent = frame
+
+local minimizeCorner = Instance.new("UICorner")
+minimizeCorner.CornerRadius = UDim.new(0, 6)
+minimizeCorner.Parent = minimizeButton
+
 -- Delete Button
 local deleteButton = Instance.new("TextButton")
 deleteButton.Size = UDim2.new(0, 25, 0, 25)
@@ -90,6 +106,56 @@ status.TextColor3 = Color3.fromRGB(170, 170, 170)
 status.TextSize = 13
 status.Font = Enum.Font.Gotham
 status.Parent = frame
+
+-- Draggable UI
+local dragging = false
+local dragStart
+local startPos
+
+frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = frame.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = input.Position - dragStart
+		frame.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+-- Minimize logic
+local minimized = false
+
+minimizeButton.MouseButton1Click:Connect(function()
+	minimized = not minimized
+
+	if minimized then
+		toggleButton.Visible = false
+		status.Visible = false
+		frame.Size = UDim2.new(0, 220, 0, 40)
+		minimizeButton.Text = "+"
+	else
+		toggleButton.Visible = true
+		status.Visible = true
+		frame.Size = UDim2.new(0, 220, 0, 110)
+		minimizeButton.Text = "-"
+	end
+end)
 
 -- Toggle logic
 local function updateButton()
