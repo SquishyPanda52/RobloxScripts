@@ -86,8 +86,8 @@ screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 380) -- increased height
-frame.Position = UDim2.new(0.5, -175, 0.5, -190)
+frame.Size = UDim2.new(0, 350, 0, 360) -- increased height for 7 rows
+frame.Position = UDim2.new(0.5, -175, 0.5, -180)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.Parent = screenGui
@@ -110,7 +110,6 @@ minimizeButton.Size = UDim2.new(0, 25, 0, 25)
 minimizeButton.Position = UDim2.new(1, -60, 0, 5)
 minimizeButton.Text = "-"
 minimizeButton.Parent = frame
-
 Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 6)
 
 local deleteButton = Instance.new("TextButton")
@@ -118,7 +117,6 @@ deleteButton.Size = UDim2.new(0, 25, 0, 25)
 deleteButton.Position = UDim2.new(1, -30, 0, 5)
 deleteButton.Text = "X"
 deleteButton.Parent = frame
-
 Instance.new("UICorner", deleteButton).CornerRadius = UDim.new(0, 6)
 
 local toggleButton = Instance.new("TextButton")
@@ -126,7 +124,6 @@ toggleButton.Size = UDim2.new(0, 120, 0, 35)
 toggleButton.Position = UDim2.new(0.5, -60, 0, 45)
 toggleButton.Text = "OFF"
 toggleButton.Parent = frame
-
 Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
 
 ---------------------------------------------------------------------
@@ -188,7 +185,6 @@ local function startLoop(row)
                 task.wait(hold)
                 VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
             end)
-
             task.wait(interval)
         end
     end)
@@ -200,20 +196,36 @@ local function createRow(i)
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 60, 0, 30)
     keyBox.Position = UDim2.new(0, 10, 0, y)
-    keyBox.PlaceholderText = "Key"
     keyBox.Parent = frame
 
     local intervalBox = Instance.new("TextBox")
     intervalBox.Size = UDim2.new(0, 80, 0, 30)
     intervalBox.Position = UDim2.new(0, 80, 0, y)
-    intervalBox.PlaceholderText = "Interval"
     intervalBox.Parent = frame
 
     local holdBox = Instance.new("TextBox")
     holdBox.Size = UDim2.new(0, 80, 0, 30)
     holdBox.Position = UDim2.new(0, 170, 0, y)
-    holdBox.PlaceholderText = "Hold"
     holdBox.Parent = frame
+
+    -- DEFAULTS FOR FIRST 4 ROWS
+    if i == 1 then
+        keyBox.Text = "1"
+        intervalBox.Text = "11"
+        holdBox.Text = "1"
+    elseif i == 2 then
+        keyBox.Text = "2"
+        intervalBox.Text = "3"
+        holdBox.Text = "1"
+    elseif i == 3 then
+        keyBox.Text = "shift"
+        intervalBox.Text = "5"
+        holdBox.Text = "5"
+    elseif i == 4 then
+        keyBox.Text = "4"
+        intervalBox.Text = "7"
+        holdBox.Text = "1"
+    end
 
     rows[i] = {
         key = keyBox,
@@ -222,6 +234,10 @@ local function createRow(i)
         loop = nil
     }
 
+    -- Start loop immediately
+    startLoop(rows[i])
+
+    -- Update when user edits
     local function update()
         if not destroyed then
             startLoop(rows[i])
@@ -233,7 +249,7 @@ local function createRow(i)
     holdBox.FocusLost:Connect(update)
 end
 
--- 7 rows now instead of 4
+-- CREATE 7 ROWS
 for i = 1, 7 do
     createRow(i)
 end
@@ -251,11 +267,12 @@ toggleButton.MouseButton1Click:Connect(function()
     updateToggle()
 end)
 
--- G key toggles ON/OFF
+-- X key toggles ON/OFF
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
+    if UserInputService:GetFocusedTextBox() then return end
 
-    if input.KeyCode == Enum.KeyCode.G then
+    if input.KeyCode == Enum.KeyCode.X then
         enabled = not enabled
         updateToggle()
     end
@@ -264,14 +281,13 @@ end)
 updateToggle()
 
 ---------------------------------------------------------------------
--- DELETE (FULL CLEANUP FIX)
+-- DELETE (FULL CLEANUP)
 ---------------------------------------------------------------------
 
 deleteButton.MouseButton1Click:Connect(function()
     destroyed = true
     enabled = false
 
-    -- stop all loops
     for _, row in ipairs(rows) do
         if row.loop then
             row.loop:Disconnect()
@@ -279,11 +295,9 @@ deleteButton.MouseButton1Click:Connect(function()
         end
     end
 
-    -- destroy UI
     if screenGui then
         screenGui:Destroy()
     end
 
-    -- destroy script
     script:Destroy()
 end)
