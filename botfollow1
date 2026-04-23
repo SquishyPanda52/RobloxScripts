@@ -1,0 +1,220 @@
+-- LocalScript — place inside StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+---------------------------------------------------------------------
+-- PREVENT DUPLICATES
+---------------------------------------------------------------------
+if playerGui:FindFirstChild("FollowUI") then
+    return
+end
+
+---------------------------------------------------------------------
+-- VARIABLES
+---------------------------------------------------------------------
+local following = false
+local followConnection = nil
+
+---------------------------------------------------------------------
+-- UI
+---------------------------------------------------------------------
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FollowUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 300, 0, 120)
+frame.Position = UDim2.new(0.4, 0, 0.3, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 24)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -30, 1, 0)
+title.Position = UDim2.new(0, 5, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Follow Closest Player"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 24, 0, 24)
+closeBtn.Position = UDim2.new(1, -24, 0, 0)
+closeBtn.Text = "X"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 18
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 0, 0)
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Parent = titleBar
+
+local txtUser = Instance.new("TextBox")
+txtUser.Size = UDim2.new(1, -10, 0, 30)
+txtUser.Position = UDim2.new(0, 5, 0, 34)
+txtUser.PlaceholderText = "Type usernames (comma separated)..."
+txtUser.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+txtUser.TextColor3 = Color3.fromRGB(255, 255, 255)
+txtUser.ClearTextOnFocus = false
+txtUser.Font = Enum.Font.SourceSans
+txtUser.TextSize = 16
+txtUser.Parent = frame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 120, 0, 30)
+toggleBtn.Position = UDim2.new(0.5, -60, 0, 70)
+toggleBtn.Text = "FOLLOW: OFF"
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 16
+toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Parent = frame
+
+---------------------------------------------------------------------
+-- DRAGGING
+---------------------------------------------------------------------
+
+local dragging = false
+local dragStart
+local startPos
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
+end)
+
+titleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+---------------------------------------------------------------------
+-- MULTI‑PLAYER PARSING
+---------------------------------------------------------------------
+
+local function getTargetPlayers(text)
+    local results = {}
+    local parts = string.split(text, ",")
+
+    for _, raw in ipairs(parts) do
+        local partial = raw:lower():gsub("%s+", "")
+        if partial ~= "" then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer and plr.Name:lower():find(partial, 1, true) then
+                    table.insert(results, plr)
+                end
+            end
+        end
+    end
+
+    return results
+end
+
+txtUser.FocusLost:Connect(function()
+    local list = getTargetPlayers(txtUser.Text)
+    if #list > 0 then
+        txtUser.BackgroundColor3 = Color3.fromRGB(25, 50, 25)
+    else
+        txtUser.BackgroundColor3 = Color3.fromRGB(50, 25, 25)
+    end
+end)
+
+---------------------------------------------------------------------
+-- FOLLOW LOOP (closest target wins)
+---------------------------------------------------------------------
+
+local function startFollowing()
+    if followConnection then return end
+
+    followConnection = RunService.Heartbeat:Connect(function()
+        if not following then return end
+
+        local candidates = getTargetPlayers(txtUser.Text)
+        if #candidates == 0 then return end
+
+        local myChar = localPlayer.Character
+        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not (myHum and myHRP) then return end
+
+        local closest = nil
+        local closestDist = math.huge
+
+        for _, plr in ipairs(candidates) do
+            local char = plr.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (hrp.Position - myHRP.Position).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    closest = hrp
+                end
+            end
+        end
+
+        if closest then
+            myHum:MoveTo(closest.Position)
+        end
+    end)
+end
+
+---------------------------------------------------------------------
+-- TOGGLE FOLLOW
+---------------------------------------------------------------------
+
+local function toggleFollow()
+    following = not following
+    toggleBtn.Text = "FOLLOW: " .. (following and "ON" or "OFF")
+    toggleBtn.BackgroundColor3 = following and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+
+    if following then
+        startFollowing()
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(toggleFollow)
+
+---------------------------------------------------------------------
+-- CLOSE BUTTON (FULL CLEANUP)
+---------------------------------------------------------------------
+
+closeBtn.MouseButton1Click:Connect(function()
+    following = false
+
+    if followConnection then
+        followConnection:Disconnect()
+        followConnection = nil
+    end
+
+    screenGui:Destroy()
+    script:Destroy()
+end)
