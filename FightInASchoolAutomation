@@ -197,12 +197,13 @@ end
 
 deleteButton.MouseButton1Click:Connect(destroyAll)
 
--- Auto key press loop
+---------------------------------------------------------------------
+-- AUTO G PRESS LOOP (15.5s)
+---------------------------------------------------------------------
 task.spawn(function()
     while not destroyed do
         if enabled then
             pcall(function()
-                -- Simulate pressing G key
                 VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
                 task.wait(0.05)
                 VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
@@ -210,5 +211,22 @@ task.spawn(function()
         end
         
         task.wait(15.5)
+    end
+end)
+
+---------------------------------------------------------------------
+-- AUTO Q PRESS LOOP (10s)
+---------------------------------------------------------------------
+task.spawn(function()
+    while not destroyed do
+        if enabled then
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+            end)
+        end
+
+        task.wait(10)
     end
 end)
