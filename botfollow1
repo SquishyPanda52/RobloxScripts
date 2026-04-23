@@ -26,8 +26,8 @@ gui.ResetOnSpawn = false
 gui.Parent = PlayerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 270, 0, 190) -- increased height for WS box
-frame.Position = UDim2.new(0.5, -135, 0.5, -95)
+frame.Size = UDim2.new(0, 270, 0, 145)
+frame.Position = UDim2.new(0.5, -135, 0.5, -72)
 frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
 frame.BorderSizePixel = 0
 frame.Active = true
@@ -65,7 +65,7 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0,6)
 closeCorner.Parent = close
 
--- TEXTBOX (PLAYERS)
+-- TEXTBOX
 
 local box = Instance.new("TextBox")
 box.Size = UDim2.new(1,-20,0,40)
@@ -83,29 +83,11 @@ local boxCorner = Instance.new("UICorner")
 boxCorner.CornerRadius = UDim.new(0,8)
 boxCorner.Parent = box
 
--- WALKSPEED TEXTBOX
-
-local wsBox = Instance.new("TextBox")
-wsBox.Size = UDim2.new(1,-20,0,40)
-wsBox.Position = UDim2.new(0,10,0,85)
-wsBox.PlaceholderText = "WalkSpeed (Default 16)"
-wsBox.Text = "16"
-wsBox.TextColor3 = Color3.new(1,1,1)
-wsBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
-wsBox.ClearTextOnFocus = false
-wsBox.Font = Enum.Font.SourceSans
-wsBox.TextSize = 20
-wsBox.Parent = frame
-
-local wsCorner = Instance.new("UICorner")
-wsCorner.CornerRadius = UDim.new(0,8)
-wsCorner.Parent = wsBox
-
 -- TOGGLE BUTTON
 
 local toggle = Instance.new("TextButton")
 toggle.Size = UDim2.new(1,-20,0,40)
-toggle.Position = UDim2.new(0,10,0,135) -- moved down
+toggle.Position = UDim2.new(0,10,0,92)
 toggle.Text = "FOLLOW: OFF (V)"
 toggle.TextColor3 = Color3.new(1,1,1)
 toggle.BackgroundColor3 = Color3.fromRGB(170,40,40)
@@ -124,7 +106,6 @@ toggleCorner.Parent = toggle
 local following = false
 local destroyed = false
 local followConnection
-local wsConnection
 
 local TARGET_SWITCH_RADIUS = 60
 
@@ -215,23 +196,6 @@ local function getNearestTarget()
 
     return nearest
 end
-
---////////////////////////////////////////////////////
--- WALKSPEED ENFORCER
---////////////////////////////////////////////////////
-
-wsConnection = RunService.RenderStepped:Connect(function()
-    if destroyed then return end
-
-    local char = getCharacter(LocalPlayer)
-    local hum = getHumanoid(char)
-    if not hum then return end
-
-    local desired = tonumber(wsBox.Text)
-    if desired and hum.WalkSpeed ~= desired then
-        hum.WalkSpeed = desired
-    end
-end)
 
 --////////////////////////////////////////////////////
 -- FOLLOW
@@ -335,16 +299,11 @@ close.MouseButton1Click:Connect(function()
         followConnection:Disconnect()
         followConnection = nil
     end
-    if wsConnection then
-        wsConnection:Disconnect()
-        wsConnection = nil
-    end
 
     gui:Destroy()
 
     frame = nil
     box = nil
-    wsBox = nil
     toggle = nil
     close = nil
 end)
