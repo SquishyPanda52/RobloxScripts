@@ -11,7 +11,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Prevent duplicates after respawn
 if playerGui:FindFirstChild("AutoG_UI") then
-	return
+    return
 end
 
 local enabled = false
@@ -107,96 +107,108 @@ status.TextSize = 13
 status.Font = Enum.Font.Gotham
 status.Parent = frame
 
--- Draggable UI
+---------------------------------------------------------------------
+-- DRAGGABLE UI (IMPROVED)
+---------------------------------------------------------------------
 local dragging = false
 local dragStart
 local startPos
 
-frame.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = true
-		dragStart = input.Position
-		startPos = frame.Position
+local function beginDrag(input)
+    dragging = true
+    dragStart = input.Position
+    startPos = frame.Position
+end
 
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
-	end
+local function endDrag()
+    dragging = false
+end
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        beginDrag(input)
+    end
+end)
+
+frame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        endDrag()
+    end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-		local delta = input.Position - dragStart
-		frame.Position = UDim2.new(
-			startPos.X.Scale,
-			startPos.X.Offset + delta.X,
-			startPos.Y.Scale,
-			startPos.Y.Offset + delta.Y
-		)
-	end
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
 end)
+
+---------------------------------------------------------------------
 
 -- Minimize logic
 local minimized = false
 
 minimizeButton.MouseButton1Click:Connect(function()
-	minimized = not minimized
+    minimized = not minimized
 
-	if minimized then
-		toggleButton.Visible = false
-		status.Visible = false
-		frame.Size = UDim2.new(0, 220, 0, 40)
-		minimizeButton.Text = "+"
-	else
-		toggleButton.Visible = true
-		status.Visible = true
-		frame.Size = UDim2.new(0, 220, 0, 110)
-		minimizeButton.Text = "-"
-	end
+    if minimized then
+        toggleButton.Visible = false
+        status.Visible = false
+        frame.Size = UDim2.new(0, 220, 0, 40)
+        minimizeButton.Text = "+"
+    else
+        toggleButton.Visible = true
+        status.Visible = true
+        frame.Size = UDim2.new(0, 220, 0, 110)
+        minimizeButton.Text = "-"
+    end
 end)
 
 -- Toggle logic
 local function updateButton()
-	if enabled then
-		toggleButton.Text = "ON"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
-	else
-		toggleButton.Text = "OFF"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-	end
+    if enabled then
+        toggleButton.Text = "ON"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+    else
+        toggleButton.Text = "OFF"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    end
 end
 
 updateButton()
 
 toggleButton.MouseButton1Click:Connect(function()
-	enabled = not enabled
-	updateButton()
+    enabled = not enabled
+    updateButton()
 end)
 
 -- Delete everything permanently
 local function destroyAll()
-	destroyed = true
-	enabled = false
-	screenGui:Destroy()
-	script:Destroy()
+    destroyed = true
+    enabled = false
+    screenGui:Destroy()
+    script:Destroy()
 end
 
 deleteButton.MouseButton1Click:Connect(destroyAll)
 
 -- Auto key press loop
 task.spawn(function()
-	while not destroyed do
-		if enabled then
-			pcall(function()
-				-- Simulate pressing G key
-				VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
-				task.wait(0.05)
-				VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
-			end)
-		end
-		
-		task.wait(15.5)
-	end
+    while not destroyed do
+        if enabled then
+            pcall(function()
+                -- Simulate pressing G key
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
+            end)
+        end
+        
+        task.wait(15.5)
+    end
 end)
