@@ -60,6 +60,19 @@ local function resolveKey(text)
         return keyMap[text]
     end
 
+    ---------------------------------------------------------------------
+    -- 🔥 ADDED: NUMBER KEYS (0–9)
+    ---------------------------------------------------------------------
+    if tonumber(text) and #text == 1 then
+        local num = tonumber(text)
+        if num == 0 then
+            return Enum.KeyCode.Zero
+        else
+            return Enum.KeyCode.One + (num - 1)
+        end
+    end
+    ---------------------------------------------------------------------
+
     -- Normal keys (A, B, C, G, Q, etc.)
     local upper = string.upper(text)
     if Enum.KeyCode[upper] then
