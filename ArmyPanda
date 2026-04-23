@@ -1,12 +1,11 @@
---[[ 
-  Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
-  - Follow and Attack are mutually exclusive.
-  - Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
-  - New: Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
-  - Draggable, compact UI with minimize and hard close.
-  - Re-inject safe: re-running replaces previous instance cleanly.
-  - Added: Team Attack mode (separate attack mode that targets players by team name).
-  - Behavior: All attack modes (user-target and team-target) and follow are toggled off on death/respawn.
+--[[ Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
+- Follow and Attack are mutually exclusive.
+- Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
+- New: Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
+- Draggable, compact UI with minimize and hard close.
+- Re-inject safe: re-running replaces previous instance cleanly.
+- Added: Team Attack mode (separate attack mode that targets players by team name).
+- Behavior: All attack modes (user-target and team-target) and follow are toggled off on death/respawn.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -46,23 +45,28 @@ local rateMinusBtn, rateLabel, ratePlusBtn
 local isMinimized = false
 local followEnabled = false
 local followTargetPlayer = nil
-
 local attackEnabled = false
 local attackNames = {}
 
+-- Team attack state
 local teamAttackEnabled = false
 local teamAttackNames = {}
 
+-- Auto-press binding
 local binding = { kind = "mouse", button = 1 }
 
+-- Connections
 local followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn
 local connections = {}
 
+-- Humanoid/character death connection
 local localHumanoidDiedConn = nil
 local localCharacterRemovingConn = nil
 
 -- Utils
-local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+local function trim(s)
+    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
 
 local function setBtnState(btn, on, label)
     btn.Text = label .. ": " .. (on and "On" or "Off")
@@ -104,25 +108,303 @@ local function parseTeamNames(text)
     end
 end
 
--- (ALL YOUR ORIGINAL FUNCTIONS STAY EXACTLY THE SAME)
--- Follow, Attack, TeamAttack, UI, cleanup, etc...
--- NOTHING WAS CHANGED ABOVE THIS POINT
+local function getHRP(p)
+    local char = p.Character
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart")
+end
 
--- =========================
--- 🔥 ONLY ADDITION (KEYBINDS)
--- =========================
-table.insert(connections, UserInputService.InputBegan:Connect(function(input)
-    
-    -- E = focus Attack textbox instantly
-    if input.KeyCode == Enum.KeyCode.E then
-        if attackBox then
-            attackBox:CaptureFocus()
+local function getHumanoid(p)
+    local char = p.Character
+    if not char then return nil end
+    return char:FindFirstChildOfClass("Humanoid")
+end
+
+-- Follow routine
+local function stopFollow()
+    followEnabled = false
+    followTargetPlayer = nil
+    if followConn then followConn:Disconnect() followConn = nil end
+    setBtnState(followBtn, false, "Follow")
+end
+
+local function startFollow()
+    if followConn then followConn:Disconnect() followConn = nil end
+    followConn = RunService.Heartbeat:Connect(function()
+        if not followEnabled or not followTargetPlayer then return end
+        local myHum = getHumanoid(localPlayer)
+        local myRoot = getHRP(localPlayer)
+        local thHum = getHumanoid(followTargetPlayer)
+        local thRoot = getHRP(followTargetPlayer)
+        if not (myHum and myRoot and thHum and thRoot) or myHum.Health <= 0 or thHum.Health <= 0 then
+            stopFollow()
+            return
         end
-    end
+        local dist = (thRoot.Position - myRoot.Position).Magnitude
+        if dist > FOLLOW_FAR then
+            local dir = (thRoot.Position - myRoot.Position).Unit
+            myHum:MoveTo(thRoot.Position - dir * 2)
+        elseif dist < FOLLOW_NEAR then
+            myHum:Move(Vector3.new())
+        end
+    end)
+    table.insert(connections, followConn)
+end
 
-    -- R = toggle Attack ONLY
-    if input.KeyCode == Enum.KeyCode.R then
-        onAttackToggle()
+-- Attack routine
+local function stopAttack()
+    attackEnabled = false
+    if attackConn then attackConn:Disconnect() attackConn = nil end
+    setBtnState(attackBtn, false, "Attack")
+    if autoPressConn and not (attackEnabled or teamAttackEnabled) then
+        autoPressConn:Disconnect()
+        autoPressConn = nil
     end
+end
 
-end))
+local function doAutoPress()
+    if binding.kind == "mouse" then
+        local mousePos = UserInputService:GetMouseLocation()
+        local btnIndex = (binding.button == 2) and 1 or 0
+        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, true, game, 0)
+        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, false, game, 0)
+    elseif binding.kind == "key" and binding.keyCode then
+        VirtualInputManager:SendKeyEvent(true, binding.keyCode, false, game)
+        VirtualInputManager:SendKeyEvent(false, binding.keyCode, false, game)
+    end
+end
+
+local function startAutoPress()
+    if autoPressConn then autoPressConn:Disconnect() autoPressConn = nil end
+    local last = 0
+    local blockUntil = time() + AUTOPRESS_START_DELAY
+    autoPressConn = RunService.RenderStepped:Connect(function()
+        if not (attackEnabled or teamAttackEnabled) then return end
+        local now = time()
+        if now < blockUntil then return end
+        local interval = 1 / AUTOPRESS_HZ
+        if now - last >= interval then
+            doAutoPress()
+            last = now
+        end
+    end)
+    table.insert(connections, autoPressConn)
+end
+
+-- Team attack helpers
+local function stopTeamAttack()
+    teamAttackEnabled = false
+    if teamAttackConn then teamAttackConn:Disconnect() teamAttackConn = nil end
+    setBtnState(teamAttackBtn, false, "TeamAttack")
+    if autoPressConn and not (attackEnabled or teamAttackEnabled) then
+        autoPressConn:Disconnect()
+        autoPressConn = nil
+    end
+end
+
+local function startTeamAttack()
+    if teamAttackConn then teamAttackConn:Disconnect() teamAttackConn = nil end
+    teamAttackConn = RunService.Heartbeat:Connect(function()
+        if not teamAttackEnabled or #teamAttackNames == 0 then return end
+        local myHum = getHumanoid(localPlayer)
+        local myRoot = getHRP(localPlayer)
+        if not (myHum and myRoot) or myHum.Health <= 0 then return end
+        local closestDist, targetPos
+        for _, tname in ipairs(teamAttackNames) do
+            local frag = trim(tname):lower()
+            if frag ~= "" then
+                for _, pl in ipairs(Players:GetPlayers()) do
+                    if pl ~= localPlayer and pl.Team and pl.Team.Name then
+                        local teamNameLower = tostring(pl.Team.Name):lower()
+                        if teamNameLower:find(frag, 1, true) then
+                            local hrp = getHRP(pl)
+                            if hrp then
+                                local d = (hrp.Position - myRoot.Position).Magnitude
+                                if not closestDist or d < closestDist then
+                                    closestDist, targetPos = d, hrp.Position
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if targetPos then myHum:MoveTo(targetPos) end
+    end)
+    table.insert(connections, teamAttackConn)
+    if not autoPressConn then startAutoPress() end
+end
+
+local function startAttack()
+    if attackConn then attackConn:Disconnect() attackConn = nil end
+    attackConn = RunService.Heartbeat:Connect(function()
+        if not attackEnabled or #attackNames == 0 then return end
+        local myHum = getHumanoid(localPlayer)
+        local myRoot = getHRP(localPlayer)
+        if not (myHum and myRoot) or myHum.Health <= 0 then return end
+        local closestDist, targetPos
+        for _, uname in ipairs(attackNames) do
+            local pl = findClosestPlayer(uname)
+            local hrp = pl and getHRP(pl)
+            if hrp then
+                local d = (hrp.Position - myRoot.Position).Magnitude
+                if not closestDist or d < closestDist then
+                    closestDist, targetPos = d, hrp.Position
+                end
+            end
+        end
+        if targetPos then myHum:MoveTo(targetPos) end
+    end)
+    table.insert(connections, attackConn)
+    if not autoPressConn then startAutoPress() end
+end
+
+-- UI build
+local function buildUI()
+    gui = Instance.new("ScreenGui")
+    gui.Name = "HiltonExecutorUI"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = playerGui
+
+    mainFrame = Instance.new("Frame")
+    mainFrame.Name = "Main"
+    mainFrame.Size = UDim2.new(0, 300, 0, 260)
+    mainFrame.Position = UDim2.new(0, 40, 0, 120)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = gui
+    Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
+    mainFrame.ClipsDescendants = true
+
+    titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.Size = UDim2.new(1, 0, 0, 30)
+    titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = mainFrame
+    titleBar.ClipsDescendants = true
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -80, 1, 0)
+    titleLabel.Position = UDim2.new(0, 10, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Panda Alts 🐼"
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 14
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+    titleLabel.Parent = titleBar
+
+    minBtn = Instance.new("TextButton")
+    minBtn.Size = UDim2.new(0, 26, 0, 22)
+    minBtn.Position = UDim2.new(1, -62, 0.5, -11)
+    minBtn.BackgroundColor3 = Color3.fromRGB(90, 100, 130)
+    minBtn.Text = "—"
+    minBtn.Font = Enum.Font.GothamBold
+    minBtn.TextSize = 14
+    minBtn.TextColor3 = Color3.new(1, 1, 1)
+    minBtn.Parent = titleBar
+    Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 6)
+
+    closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 26, 0, 22)
+    closeBtn.Position = UDim2.new(1, -32, 0.5, -11)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(190, 60, 60)
+    closeBtn.Text = "X"
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 14
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Parent = titleBar
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+    content = Instance.new("Frame")
+    content.Name = "Content"
+    content.Size = UDim2.new(1, -12, 1, -44)
+    content.Position = UDim2.new(0, 6, 0, 36)
+    content.BackgroundTransparency = 1
+    content.Parent = mainFrame
+
+    local vlist = Instance.new("UIListLayout", content)
+    vlist.SortOrder = Enum.SortOrder.LayoutOrder
+    vlist.Padding = UDim.new(0, 8)
+
+    -- Follow row
+    local followRow = Instance.new("Frame")
+    followRow.Size = UDim2.new(1, 0, 0, 30)
+    followRow.BackgroundTransparency = 1
+    followRow.Parent = content
+
+    local fh = Instance.new("UIListLayout", followRow)
+    fh.FillDirection = Enum.FillDirection.Horizontal
+    fh.Padding = UDim.new(0, 6)
+
+    followBtn = Instance.new("TextButton")
+    followBtn.Size = UDim2.new(0, 120, 1, 0)
+    followBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    followBtn.TextColor3 = Color3.new(1, 1, 1)
+    followBtn.Font = Enum.Font.GothamBold
+    followBtn.TextSize = 14
+    followBtn.Text = "Follow: Off"
+    followBtn.Parent = followRow
+    Instance.new("UICorner", followBtn).CornerRadius = UDim.new(0, 6)
+
+    followBox = Instance.new("TextBox")
+    followBox.Size = UDim2.new(1, -126, 1, 0)
+    followBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    followBox.PlaceholderText = "Username (partial ok)"
+    followBox.Text = ""
+    followBox.TextColor3 = Color3.new(1, 1, 1)
+    followBox.Font = Enum.Font.Gotham
+    followBox.TextSize = 14
+    followBox.ClearTextOnFocus = false
+    followBox.Parent = followRow
+    Instance.new("UICorner", followBox).CornerRadius = UDim.new(0, 6)
+
+    -- Attack row
+    local attackRow = Instance.new("Frame")
+    attackRow.Size = UDim2.new(1, 0, 0, 30)
+    attackRow.BackgroundTransparency = 1
+    attackRow.Parent = content
+
+    local ah = Instance.new("UIListLayout", attackRow)
+    ah.FillDirection = Enum.FillDirection.Horizontal
+    ah.Padding = UDim.new(0, 6)
+
+    attackBtn = Instance.new("TextButton")
+    attackBtn.Size = UDim2.new(0, 120, 1, 0)
+    attackBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    attackBtn.TextColor3 = Color3.new(1, 1, 1)
+    attackBtn.Font = Enum.Font.GothamBold
+    attackBtn.TextSize = 14
+    attackBtn.Text = "Attack: Off"
+    attackBtn.Parent = attackRow
+    Instance.new("UICorner", attackBtn).CornerRadius = UDim.new(0, 6)
+
+    attackBox = Instance.new("TextBox")
+    attackBox.Size = UDim2.new(1, -126, 1, 0)
+    attackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    attackBox.PlaceholderText = "User1, User2 (partial ok)"
+    attackBox.Text = ""
+    attackBox.TextColor3 = Color3.new(1, 1, 1)
+    attackBox.Font = Enum.Font.Gotham
+    attackBox.TextSize = 14
+    attackBox.ClearTextOnFocus = false
+    attackBox.Parent = attackRow
+    Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
+
+    -- Team Attack row
+    local teamAttackRow = Instance.new("Frame")
+    teamAttackRow.Size = UDim2.new(1, 0, 0, 30)
+    teamAttackRow.BackgroundTransparency = 1
+    teamAttackRow.Parent = content
+
+    local tah = Instance.new("UIListLayout", teamAttackRow)
+    tah.FillDirection = Enum.FillDirection.Horizontal
+    tah.Padding = UDim.new(0, 6)
+
+    teamAttackBtn = Instance.new("TextButton")
+    teamAttackBtn.Size = UDim2.new(0, 120, 1, 0)
+    teamAttackBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    teamAttackBtn.TextColor3 = Color3.new(1, 1, 1)
