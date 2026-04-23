@@ -1,6 +1,5 @@
 -- LocalScript
--- Put this inside StarterPlayer > StarterPlayerScripts
--- Everything is generated at runtime and survives respawns.
+-- Place inside StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -9,25 +8,27 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Prevent duplicates after respawn
-if playerGui:FindFirstChild("AutoG_UI") then
+-- Prevent duplicates
+if playerGui:FindFirstChild("AutoPress_UI") then
     return
 end
 
 local enabled = false
 local destroyed = false
 
--- Create ScreenGui
+---------------------------------------------------------------------
+-- CREATE UI
+---------------------------------------------------------------------
+
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AutoG_UI"
+screenGui.Name = "AutoPress_UI"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
--- Main Frame
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 220, 0, 110)
-frame.Position = UDim2.new(0.5, -110, 0.5, -55)
+frame.Size = UDim2.new(0, 350, 0, 260)
+frame.Position = UDim2.new(0.5, -175, 0.5, -130)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.Parent = screenGui
@@ -38,12 +39,12 @@ corner.Parent = frame
 
 -- Title
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -35, 0, 30)
+title.Size = UDim2.new(1, -40, 0, 30)
 title.Position = UDim2.new(0, 10, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "Auto G Press"
+title.Text = "Auto Press"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 18
+title.TextSize = 20
 title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = frame
@@ -56,13 +57,13 @@ minimizeButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 minimizeButton.BorderSizePixel = 0
 minimizeButton.Text = "-"
 minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-minimizeButton.TextSize = 18
 minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.TextSize = 18
 minimizeButton.Parent = frame
 
-local minimizeCorner = Instance.new("UICorner")
-minimizeCorner.CornerRadius = UDim.new(0, 6)
-minimizeCorner.Parent = minimizeButton
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minimizeButton
 
 -- Delete Button
 local deleteButton = Instance.new("TextButton")
@@ -72,18 +73,18 @@ deleteButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 deleteButton.BorderSizePixel = 0
 deleteButton.Text = "X"
 deleteButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-deleteButton.TextSize = 16
 deleteButton.Font = Enum.Font.GothamBold
+deleteButton.TextSize = 16
 deleteButton.Parent = frame
 
-local deleteCorner = Instance.new("UICorner")
-deleteCorner.CornerRadius = UDim.new(0, 6)
-deleteCorner.Parent = deleteButton
+local delCorner = Instance.new("UICorner")
+delCorner.CornerRadius = UDim.new(0, 6)
+delCorner.Parent = deleteButton
 
--- Toggle Button
+-- ON/OFF Toggle
 local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.new(0, 180, 0, 40)
-toggleButton.Position = UDim2.new(0.5, -90, 0.5, -5)
+toggleButton.Size = UDim2.new(0, 120, 0, 35)
+toggleButton.Position = UDim2.new(0.5, -60, 0, 45)
 toggleButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 toggleButton.BorderSizePixel = 0
 toggleButton.Text = "OFF"
@@ -96,43 +97,25 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 8)
 toggleCorner.Parent = toggleButton
 
--- Status Label
-local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, 0, 0, 20)
-status.Position = UDim2.new(0, 0, 1, -25)
-status.BackgroundTransparency = 1
-status.Text = "Press interval: 15.5s"
-status.TextColor3 = Color3.fromRGB(170, 170, 170)
-status.TextSize = 13
-status.Font = Enum.Font.Gotham
-status.Parent = frame
+---------------------------------------------------------------------
+-- DRAGGABLE FRAME
+---------------------------------------------------------------------
 
----------------------------------------------------------------------
--- DRAGGABLE UI (IMPROVED)
----------------------------------------------------------------------
 local dragging = false
 local dragStart
 local startPos
 
-local function beginDrag(input)
-    dragging = true
-    dragStart = input.Position
-    startPos = frame.Position
-end
-
-local function endDrag()
-    dragging = false
-end
-
 frame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        beginDrag(input)
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
     end
 end)
 
 frame.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        endDrag()
+        dragging = false
     end
 end)
 
@@ -149,28 +132,115 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 ---------------------------------------------------------------------
+-- CREATE 4 ROWS OF INPUT BOXES
+---------------------------------------------------------------------
 
--- Minimize logic
-local minimized = false
+local rows = {}
 
-minimizeButton.MouseButton1Click:Connect(function()
-    minimized = not minimized
+local function createRow(index)
+    local y = 90 + (index - 1) * 40
 
-    if minimized then
-        toggleButton.Visible = false
-        status.Visible = false
-        frame.Size = UDim2.new(0, 220, 0, 40)
-        minimizeButton.Text = "+"
-    else
-        toggleButton.Visible = true
-        status.Visible = true
-        frame.Size = UDim2.new(0, 220, 0, 110)
-        minimizeButton.Text = "-"
+    local keyBox = Instance.new("TextBox")
+    keyBox.Size = UDim2.new(0, 60, 0, 30)
+    keyBox.Position = UDim2.new(0, 10, 0, y)
+    keyBox.PlaceholderText = "Key"
+    keyBox.Text = ""
+    keyBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    keyBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    keyBox.Font = Enum.Font.Gotham
+    keyBox.TextSize = 14
+    keyBox.Parent = frame
+
+    local intervalBox = Instance.new("TextBox")
+    intervalBox.Size = UDim2.new(0, 80, 0, 30)
+    intervalBox.Position = UDim2.new(0, 80, 0, y)
+    intervalBox.PlaceholderText = "Interval"
+    intervalBox.Text = ""
+    intervalBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    intervalBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    intervalBox.Font = Enum.Font.Gotham
+    intervalBox.TextSize = 14
+    intervalBox.Parent = frame
+
+    local holdBox = Instance.new("TextBox")
+    holdBox.Size = UDim2.new(0, 80, 0, 30)
+    holdBox.Position = UDim2.new(0, 170, 0, y)
+    holdBox.PlaceholderText = "Hold"
+    holdBox.Text = ""
+    holdBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    holdBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    holdBox.Font = Enum.Font.Gotham
+    holdBox.TextSize = 14
+    holdBox.Parent = frame
+
+    rows[index] = {
+        key = keyBox,
+        interval = intervalBox,
+        hold = holdBox,
+        loop = nil
+    }
+end
+
+for i = 1, 4 do
+    createRow(i)
+end
+
+---------------------------------------------------------------------
+-- AUTO PRESS LOOP HANDLER
+---------------------------------------------------------------------
+
+local function startLoop(row)
+    if row.loop then
+        row.loop:Disconnect()
     end
-end)
 
--- Toggle logic
-local function updateButton()
+    local key = row.key.Text
+    local interval = tonumber(row.interval.Text)
+    local hold = tonumber(row.hold.Text)
+
+    if key == "" or not interval or not hold then
+        return
+    end
+
+    row.loop = game:GetService("RunService").Heartbeat:Connect(function()
+        if enabled then
+            task.spawn(function()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[key], false, game)
+                task.wait(hold)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[key], false, game)
+            end)
+            task.wait(interval)
+        end
+    end)
+end
+
+local function bindRowEvents(row)
+    local function update()
+        startLoop(row)
+    end
+
+    row.key.FocusLost:Connect(function(enter)
+        if enter then update() end
+    end)
+
+    row.interval.FocusLost:Connect(function(enter)
+        if enter then update() end
+    end)
+
+    row.hold.FocusLost:Connect(function(enter)
+        if enter then update() end
+    end)
+end
+
+for _, row in ipairs(rows) do
+    bindRowEvents(row)
+end
+
+---------------------------------------------------------------------
+-- TOGGLE BUTTON
+---------------------------------------------------------------------
+
+local function updateToggle()
     if enabled then
         toggleButton.Text = "ON"
         toggleButton.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
@@ -180,53 +250,49 @@ local function updateButton()
     end
 end
 
-updateButton()
-
 toggleButton.MouseButton1Click:Connect(function()
     enabled = not enabled
-    updateButton()
+    updateToggle()
 end)
 
--- Delete everything permanently
-local function destroyAll()
+updateToggle()
+
+---------------------------------------------------------------------
+-- MINIMIZE
+---------------------------------------------------------------------
+
+local minimized = false
+
+minimizeButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+
+    if minimized then
+        for _, row in ipairs(rows) do
+            row.key.Visible = false
+            row.interval.Visible = false
+            row.hold.Visible = false
+        end
+        toggleButton.Visible = false
+        frame.Size = UDim2.new(0, 350, 0, 40)
+        minimizeButton.Text = "+"
+    else
+        for _, row in ipairs(rows) do
+            row.key.Visible = true
+            row.interval.Visible = true
+            row.hold.Visible = true
+        end
+        toggleButton.Visible = true
+        frame.Size = UDim2.new(0, 350, 0, 260)
+        minimizeButton.Text = "-"
+    end
+end)
+
+---------------------------------------------------------------------
+-- DELETE UI
+---------------------------------------------------------------------
+
+deleteButton.MouseButton1Click:Connect(function()
     destroyed = true
-    enabled = false
     screenGui:Destroy()
     script:Destroy()
-end
-
-deleteButton.MouseButton1Click:Connect(destroyAll)
-
----------------------------------------------------------------------
--- AUTO G PRESS LOOP (15.5s)
----------------------------------------------------------------------
-task.spawn(function()
-    while not destroyed do
-        if enabled then
-            pcall(function()
-                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
-                task.wait(0.05)
-                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
-            end)
-        end
-        
-        task.wait(15.5)
-    end
-end)
-
----------------------------------------------------------------------
--- AUTO Q PRESS LOOP (10s)
----------------------------------------------------------------------
-task.spawn(function()
-    while not destroyed do
-        if enabled then
-            pcall(function()
-                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
-                task.wait(0.05)
-                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
-            end)
-        end
-
-        task.wait(10)
-    end
 end)
