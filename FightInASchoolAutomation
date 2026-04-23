@@ -383,4 +383,4 @@ deleteButton.MouseButton1Click:Connect(function()
     if original then
         original:Destroy()
     end
-end)
+end)\
