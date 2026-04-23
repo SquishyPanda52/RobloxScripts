@@ -18,7 +18,8 @@ end
 -- VARIABLES
 ---------------------------------------------------------------------
 local following = false
-local followConnection = nil
+local followThread = nil
+local destroyed = false
 
 ---------------------------------------------------------------------
 -- UI
@@ -149,40 +150,61 @@ txtUser.FocusLost:Connect(function()
 end)
 
 ---------------------------------------------------------------------
--- FOLLOW LOOP (closest target wins)
+-- FOLLOW LOOP (instant-style MoveTo, closest target each cycle)
 ---------------------------------------------------------------------
 
-local function startFollowing()
-    if followConnection then return end
+local function stopFollowThread()
+    if followThread then
+        followThread = nil
+    end
+end
 
-    followConnection = RunService.Heartbeat:Connect(function()
-        if not following then return end
+local function startFollowThread()
+    stopFollowThread()
 
-        local candidates = getTargetPlayers(txtUser.Text)
-        if #candidates == 0 then return end
+    followThread = task.spawn(function()
+        while following and not destroyed do
+            local myChar = localPlayer.Character
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+            local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
 
-        local myChar = localPlayer.Character
-        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if not (myHum and myHRP) then return end
+            if not (myHum and myHRP) then
+                RunService.Heartbeat:Wait()
+                continue
+            end
 
-        local closest = nil
-        local closestDist = math.huge
+            -- unsit like your example
+            if myHum.SeatPart then
+                myHum.Sit = false
+                task.wait(0.1)
+            end
 
-        for _, plr in ipairs(candidates) do
-            local char = plr.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local dist = (hrp.Position - myHRP.Position).Magnitude
-                if dist < closestDist then
-                    closestDist = dist
-                    closest = hrp
+            local candidates = getTargetPlayers(txtUser.Text)
+            if #candidates == 0 then
+                RunService.Heartbeat:Wait()
+                continue
+            end
+
+            local closestHRP = nil
+            local closestDist = math.huge
+
+            for _, plr in ipairs(candidates) do
+                local char = plr.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local dist = (hrp.Position - myHRP.Position).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestHRP = hrp
+                    end
                 end
             end
-        end
 
-        if closest then
-            myHum:MoveTo(closest.Position)
+            if closestHRP then
+                myHum:MoveTo(closestHRP.Position)
+            end
+
+            RunService.Heartbeat:Wait()
         end
     end)
 end
@@ -191,30 +213,46 @@ end
 -- TOGGLE FOLLOW
 ---------------------------------------------------------------------
 
-local function toggleFollow()
-    following = not following
+local function updateToggleVisual()
     toggleBtn.Text = "FOLLOW: " .. (following and "ON" or "OFF")
     toggleBtn.BackgroundColor3 = following and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+end
+
+local function toggleFollow()
+    following = not following
+    updateToggleVisual()
 
     if following then
-        startFollowing()
+        startFollowThread()
+    else
+        stopFollowThread()
     end
 end
 
 toggleBtn.MouseButton1Click:Connect(toggleFollow)
+
+-- V key toggles follow
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.V then
+        toggleFollow()
+    end
+end)
+
+updateToggleVisual()
 
 ---------------------------------------------------------------------
 -- CLOSE BUTTON (FULL CLEANUP)
 ---------------------------------------------------------------------
 
 closeBtn.MouseButton1Click:Connect(function()
+    destroyed = true
     following = false
+    stopFollowThread()
 
-    if followConnection then
-        followConnection:Disconnect()
-        followConnection = nil
+    if screenGui then
+        screenGui:Destroy()
     end
 
-    screenGui:Destroy()
     script:Destroy()
 end)
