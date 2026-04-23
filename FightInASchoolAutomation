@@ -361,11 +361,26 @@ minimizeButton.MouseButton1Click:Connect(function()
 end)
 
 ---------------------------------------------------------------------
--- DELETE UI
+-- DELETE UI (FULL CLEAN DELETE)
 ---------------------------------------------------------------------
 
 deleteButton.MouseButton1Click:Connect(function()
     destroyed = true
-    screenGui:Destroy()
-    script:Destroy()
+
+    -- Delete UI
+    if screenGui then
+        screenGui:Destroy()
+    end
+
+    -- Delete runtime script
+    if script then
+        script:Destroy()
+    end
+
+    -- Delete original script in StarterPlayerScripts
+    local starter = game:GetService("StarterPlayer"):WaitForChild("StarterPlayerScripts")
+    local original = starter:FindFirstChild(script.Name)
+    if original then
+        original:Destroy()
+    end
 end)
