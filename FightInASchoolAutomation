@@ -1,107 +1,105 @@
--- Local automation UI + auto-press G every 15.5s (client-only)
-local player = game:GetService("Players").LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+-- Auto G LocalScript (place in StarterPlayerScripts or run as a LocalScript)
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UIS = game:GetService("UserInputService")
-local CAS = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualUser
+local ContextActionService = game:GetService("ContextActionService")
+local VirtualUser = nil
 pcall(function() VirtualUser = game:GetService("VirtualUser") end)
 
--- ensure script runs as a true LocalScript in PlayerGui
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ensure script runs as a true LocalScript under PlayerGui for reliability
 if not script:IsDescendantOf(playerGui) then
     script.Parent = playerGui
 end
-print("AutoKeyG script parented to:", script.Parent.ClassName)
+print("AutoG LocalScript parent:", script.Parent.ClassName)
 
--- UI creation
+-- UI (created entirely at runtime)
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AutoKeyG_UI"
+screenGui.Name = "AutoG_UI"
 screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 999
+screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
-local main = Instance.new("Frame", screenGui)
+local main = Instance.new("Frame")
 main.Name = "Main"
-main.Size = UDim2.new(0, 260, 0, 90)
+main.Size = UDim2.new(0, 260, 0, 92)
 main.Position = UDim2.new(0.02, 0, 0.02, 0)
-main.BackgroundColor3 = Color3.fromRGB(30,30,30)
+main.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 main.BorderSizePixel = 0
-main.AnchorPoint = Vector2.new(0,0)
-main.Visible = true
-main.ClipsDescendants = true
-main.Active = true
-main.AutoButtonColor = false
-main.BackgroundTransparency = 0.03
-main.LayoutOrder = 1
-main.ZIndex = 10
-main.Name = "AutoGFrame"
-main.Rotation = 0
+main.AnchorPoint = Vector2.new(0, 0)
+main.Parent = screenGui
+
+local uic = Instance.new("UICorner", main)
+uic.CornerRadius = UDim.new(0, 8)
 
 local title = Instance.new("TextLabel", main)
-title.Size = UDim2.new(1, -60, 0, 28)
-title.Position = UDim2.new(0, 8, 0, 8)
+title.Size = UDim2.new(1, -72, 0, 28)
+title.Position = UDim2.new(0, 12, 0, 8)
 title.BackgroundTransparency = 1
 title.Text = "Auto G"
-title.TextColor3 = Color3.fromRGB(230,230,230)
+title.TextColor3 = Color3.fromRGB(235,235,235)
 title.Font = Enum.Font.GothamSemibold
 title.TextSize = 18
 title.TextXAlignment = Enum.TextXAlignment.Left
 
 local btnMin = Instance.new("TextButton", main)
-btnMin.Size = UDim2.new(0, 22, 0, 22)
-btnMin.Position = UDim2.new(1, -52, 0, 8)
-btnMin.BackgroundColor3 = Color3.fromRGB(45,45,45)
+btnMin.Size = UDim2.new(0, 26, 0, 26)
+btnMin.Position = UDim2.new(1, -56, 0, 8)
+btnMin.BackgroundColor3 = Color3.fromRGB(40,40,40)
 btnMin.Text = "—"
-btnMin.TextColor3 = Color3.fromRGB(200,200,200)
+btnMin.TextColor3 = Color3.fromRGB(210,210,210)
 btnMin.Font = Enum.Font.Gotham
 btnMin.TextSize = 18
 btnMin.BorderSizePixel = 0
+local minCorner = Instance.new("UICorner", btnMin)
+minCorner.CornerRadius = UDim.new(0,6)
 
 local btnClose = Instance.new("TextButton", main)
-btnClose.Size = UDim2.new(0, 22, 0, 22)
+btnClose.Size = UDim2.new(0, 26, 0, 26)
 btnClose.Position = UDim2.new(1, -28, 0, 8)
-btnClose.BackgroundColor3 = Color3.fromRGB(45,45,45)
+btnClose.BackgroundColor3 = Color3.fromRGB(40,40,40)
 btnClose.Text = "✕"
-btnClose.TextColor3 = Color3.fromRGB(200,200,200)
+btnClose.TextColor3 = Color3.fromRGB(210,210,210)
 btnClose.Font = Enum.Font.Gotham
 btnClose.TextSize = 14
 btnClose.BorderSizePixel = 0
+local closeCorner = Instance.new("UICorner", btnClose)
+closeCorner.CornerRadius = UDim.new(0,6)
 
 local toggle = Instance.new("TextButton", main)
 toggle.Size = UDim2.new(0, 120, 0, 36)
-toggle.Position = UDim2.new(0, 8, 0, 44)
+toggle.Position = UDim2.new(0, 12, 0, 48)
 toggle.BackgroundColor3 = Color3.fromRGB(0,170,255)
 toggle.Text = "Enable"
 toggle.TextColor3 = Color3.fromRGB(255,255,255)
 toggle.Font = Enum.Font.GothamSemibold
 toggle.TextSize = 16
 toggle.BorderSizePixel = 0
-toggle.AutoButtonColor = true
+local togCorner = Instance.new("UICorner", toggle)
+togCorner.CornerRadius = UDim.new(0,6)
 
 local info = Instance.new("TextLabel", main)
 info.Size = UDim2.new(0, 120, 0, 36)
-info.Position = UDim2.new(0, 140, 0, 44)
+info.Position = UDim2.new(0, 144, 0, 48)
 info.BackgroundTransparency = 1
 info.Text = "Interval: 15.5s"
-info.TextColor3 = Color3.fromRGB(180,180,180)
+info.TextColor3 = Color3.fromRGB(170,170,170)
 info.Font = Enum.Font.Gotham
 info.TextSize = 14
-
--- minimalist styling tweaks
-for _,v in pairs({main, btnMin, btnClose, toggle}) do
-    v.ClipsDescendants = true
-end
+info.TextXAlignment = Enum.TextXAlignment.Left
 
 -- state
 local enabled = false
 local running = true
 local interval = 15.5
-local pressConnection
-local loopThread
+screenGui.ResetOnSpawn = false
 
--- attempt multiple methods to "press" G locally
-local function trySendG()
-    -- 1) VirtualUser (best-effort; may not exist in all environments)
+-- function to attempt to "press" G locally
+local function sendG()
+    -- VirtualUser attempt
     if VirtualUser then
         pcall(function()
             VirtualUser:CaptureController()
@@ -110,13 +108,12 @@ local function trySendG()
                 pcall(function() VirtualUser:SendKeyEvent(true, Enum.KeyCode.G, false, game) end)
                 pcall(function() VirtualUser:SendKeyEvent(false, Enum.KeyCode.G, false, game) end)
             else
-                -- fallback older signature
                 pcall(function() VirtualUser:SendKeyEvent(true, "G", false, game) end)
                 pcall(function() VirtualUser:SendKeyEvent(false, "G", false, game) end)
             end
         end)
     end
-    -- 2) If the game exposes a RemoteEvent named "GKey" or "GPress" in ReplicatedStorage, fire it (best-effort)
+    -- RemoteEvent heuristics
     local candidates = {"GKey","GPress","KeyG","PressG"}
     for _,name in ipairs(candidates) do
         local ev = ReplicatedStorage:FindFirstChild(name)
@@ -124,28 +121,22 @@ local function trySendG()
             pcall(function() ev:FireServer() end)
         end
     end
-    -- 3) Try ContextActionService bound actions: if an action named "G" exists, invoke it locally
-    -- (we can't list bound actions, but try to call a common action name)
-    local success,err = pcall(function()
-        CAS:UnbindAction("AutoG_Temp") -- ensure not bound
-    end)
-    -- Bind a temporary action and immediately call it to emulate local action handlers that use ContextActionService
-    local function tempAction(name, state, input)
-        -- no-op
-    end
+    -- ContextActionService temporary bind (no-op) to try trigger local handlers
     pcall(function()
-        CAS:BindAction("AutoG_Temp", tempAction, false, Enum.KeyCode.G)
-        CAS:UnbindAction("AutoG_Temp")
+        local function tmpAction() end
+        ContextActionService:BindAction("AutoG_Temp", tmpAction, false, Enum.KeyCode.G)
+        ContextActionService:UnbindAction("AutoG_Temp")
     end)
 end
 
--- loop
+-- loop coroutine
+local loop
 local function startLoop()
-    if loopThread then return end
-    loopThread = coroutine.create(function()
+    if loop then return end
+    loop = coroutine.create(function()
         while running do
             if enabled then
-                trySendG()
+                pcall(sendG)
             end
             local t = 0
             while t < interval and running do
@@ -154,14 +145,10 @@ local function startLoop()
             end
         end
     end)
-    coroutine.resume(loopThread)
+    coroutine.resume(loop)
 end
 
-local function stopLoop()
-    running = false
-end
-
--- UI interactions
+-- UI behavior
 toggle.MouseButton1Click:Connect(function()
     enabled = not enabled
     if enabled then
@@ -176,33 +163,45 @@ end)
 local minimized = false
 btnMin.MouseButton1Click:Connect(function()
     minimized = not minimized
-    main.Size = minimized and UDim2.new(0, 120, 0, 36) or UDim2.new(0, 260, 0, 90)
-    title.Visible = not minimized
-    toggle.Visible = not minimized
-    info.Visible = not minimized
-end)
-
-btnClose.MouseButton1Click:Connect(function()
-    -- destroy UI and stop script
-    pcall(function() screenGui:Destroy() end)
-    enabled = false
-    running = false
-    -- attempt to destroy this script object
-    pcall(function() script:Destroy() end)
-end)
-
--- persist UI across respawn
-screenGui.Parent = playerGui
-screenGui.ResetOnSpawn = false
-
--- ensure UI exists after respawn (recreate if needed)
-player.CharacterAdded:Connect(function()
-    if not screenGui.Parent then
-        screenGui.Parent = playerGui
-        screenGui.ResetOnSpawn = false
+    if minimized then
+        main.Size = UDim2.new(0, 140, 0, 40)
+        title.Visible = false
+        toggle.Visible = false
+        info.Visible = false
+        btnMin.Text = "+"
+    else
+        main.Size = UDim2.new(0, 260, 0, 92)
+        title.Visible = true
+        toggle.Visible = true
+        info.Visible = true
+        btnMin.Text = "—"
     end
 end)
 
--- start
+btnClose.MouseButton1Click:Connect(function()
+    enabled = false
+    running = false
+    pcall(function() screenGui:Destroy() end)
+    pcall(function() script:Destroy() end)
+end)
+
+-- ensure UI persists after respawn
+player.CharacterAdded:Connect(function()
+    if not screenGui.Parent then
+        screenGui.Parent = playerGui
+    end
+    screenGui.ResetOnSpawn = false
+end)
+
+-- safety: if PlayerGui is replaced (rare), reparent
+playerGui.ChildRemoved:Connect(function(child)
+    if child == screenGui then
+        wait(0.1)
+        if not screenGui.Parent then
+            screenGui.Parent = player:FindFirstChild("PlayerGui") or playerGui
+        end
+    end
+end)
+
 startLoop()
-print("Auto G started (interval "..tostring(interval).."s). Toggle with UI.")
+print("AutoG running. UI created. Interval:", interval)
