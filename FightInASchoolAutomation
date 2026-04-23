@@ -86,7 +86,7 @@ screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 380) -- UPDATED HEIGHT FOR 7 ROWS
+frame.Size = UDim2.new(0, 350, 0, 380) -- increased height
 frame.Position = UDim2.new(0.5, -175, 0.5, -190)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
@@ -188,6 +188,7 @@ local function startLoop(row)
                 task.wait(hold)
                 VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
             end)
+
             task.wait(interval)
         end
     end)
@@ -199,16 +200,19 @@ local function createRow(i)
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 60, 0, 30)
     keyBox.Position = UDim2.new(0, 10, 0, y)
+    keyBox.PlaceholderText = "Key"
     keyBox.Parent = frame
 
     local intervalBox = Instance.new("TextBox")
     intervalBox.Size = UDim2.new(0, 80, 0, 30)
     intervalBox.Position = UDim2.new(0, 80, 0, y)
+    intervalBox.PlaceholderText = "Interval"
     intervalBox.Parent = frame
 
     local holdBox = Instance.new("TextBox")
     holdBox.Size = UDim2.new(0, 80, 0, 30)
     holdBox.Position = UDim2.new(0, 170, 0, y)
+    holdBox.PlaceholderText = "Hold"
     holdBox.Parent = frame
 
     rows[i] = {
@@ -229,7 +233,7 @@ local function createRow(i)
     holdBox.FocusLost:Connect(update)
 end
 
--- UPDATED: 7 ROWS
+-- 7 rows now instead of 4
 for i = 1, 7 do
     createRow(i)
 end
@@ -250,6 +254,7 @@ end)
 -- G key toggles ON/OFF
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
+
     if input.KeyCode == Enum.KeyCode.G then
         enabled = not enabled
         updateToggle()
