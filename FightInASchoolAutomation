@@ -11,7 +11,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- Prevent duplicates
 if playerGui:FindFirstChild("AutoPress_UI") then
-	return
+    return
 end
 
 local enabled = false
@@ -22,57 +22,57 @@ local destroyed = false
 ---------------------------------------------------------------------
 
 local keyMap = {
-	["shift"] = Enum.KeyCode.LeftShift,
-	["lshift"] = Enum.KeyCode.LeftShift,
-	["rshift"] = Enum.KeyCode.RightShift,
+    ["shift"] = Enum.KeyCode.LeftShift,
+    ["lshift"] = Enum.KeyCode.LeftShift,
+    ["rshift"] = Enum.KeyCode.RightShift,
 
-	["ctrl"] = Enum.KeyCode.LeftControl,
-	["control"] = Enum.KeyCode.LeftControl,
-	["lctrl"] = Enum.KeyCode.LeftControl,
-	["rctrl"] = Enum.KeyCode.RightControl,
+    ["ctrl"] = Enum.KeyCode.LeftControl,
+    ["control"] = Enum.KeyCode.LeftControl,
+    ["lctrl"] = Enum.KeyCode.LeftControl,
+    ["rctrl"] = Enum.KeyCode.RightControl,
 
-	["alt"] = Enum.KeyCode.LeftAlt,
-	["lalt"] = Enum.KeyCode.LeftAlt,
-	["ralt"] = Enum.KeyCode.RightAlt,
+    ["alt"] = Enum.KeyCode.LeftAlt,
+    ["lalt"] = Enum.KeyCode.LeftAlt,
+    ["ralt"] = Enum.KeyCode.RightAlt,
 
-	["tab"] = Enum.KeyCode.Tab,
-	["caps"] = Enum.KeyCode.CapsLock,
+    ["tab"] = Enum.KeyCode.Tab,
+    ["caps"] = Enum.KeyCode.CapsLock,
 
-	["enter"] = Enum.KeyCode.Return,
-	["return"] = Enum.KeyCode.Return,
+    ["enter"] = Enum.KeyCode.Return,
+    ["return"] = Enum.KeyCode.Return,
 
-	["backspace"] = Enum.KeyCode.Backspace,
-	["delete"] = Enum.KeyCode.Delete,
+    ["backspace"] = Enum.KeyCode.Backspace,
+    ["delete"] = Enum.KeyCode.Delete,
 
-	["space"] = Enum.KeyCode.Space,
+    ["space"] = Enum.KeyCode.Space,
 }
 
 local numberKeyMap = {
-	["0"] = Enum.KeyCode.Zero,
-	["1"] = Enum.KeyCode.One,
-	["2"] = Enum.KeyCode.Two,
-	["3"] = Enum.KeyCode.Three,
-	["4"] = Enum.KeyCode.Four,
-	["5"] = Enum.KeyCode.Five,
-	["6"] = Enum.KeyCode.Six,
-	["7"] = Enum.KeyCode.Seven,
-	["8"] = Enum.KeyCode.Eight,
-	["9"] = Enum.KeyCode.Nine,
+    ["0"] = Enum.KeyCode.Zero,
+    ["1"] = Enum.KeyCode.One,
+    ["2"] = Enum.KeyCode.Two,
+    ["3"] = Enum.KeyCode.Three,
+    ["4"] = Enum.KeyCode.Four,
+    ["5"] = Enum.KeyCode.Five,
+    ["6"] = Enum.KeyCode.Six,
+    ["7"] = Enum.KeyCode.Seven,
+    ["8"] = Enum.KeyCode.Eight,
+    ["9"] = Enum.KeyCode.Nine,
 }
 
 local function resolveKey(text)
-	if not text or text == "" then return nil end
-	text = string.lower(text)
+    if not text or text == "" then return nil end
+    text = string.lower(text)
 
-	if keyMap[text] then return keyMap[text] end
-	if numberKeyMap[text] then return numberKeyMap[text] end
+    if keyMap[text] then return keyMap[text] end
+    if numberKeyMap[text] then return numberKeyMap[text] end
 
-	local upper = string.upper(text)
-	if Enum.KeyCode[upper] then
-		return Enum.KeyCode[upper]
-	end
+    local upper = string.upper(text)
+    if Enum.KeyCode[upper] then
+        return Enum.KeyCode[upper]
+    end
 
-	return nil
+    return nil
 end
 
 ---------------------------------------------------------------------
@@ -138,29 +138,29 @@ local dragStart
 local startPos
 
 frame.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = true
-		dragStart = input.Position
-		startPos = frame.Position
-	end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
 end)
 
 frame.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = false
-	end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-		local delta = input.Position - dragStart
-		frame.Position = UDim2.new(
-			startPos.X.Scale,
-			startPos.X.Offset + delta.X,
-			startPos.Y.Scale,
-			startPos.Y.Offset + delta.Y
-		)
-	end
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
 end)
 
 ---------------------------------------------------------------------
@@ -170,67 +170,67 @@ end)
 local rows = {}
 
 local function startLoop(row)
-	if row.loop then
-		row.loop:Disconnect()
-		row.loop = nil
-	end
+    if row.loop then
+        row.loop:Disconnect()
+        row.loop = nil
+    end
 
-	local keyCode = resolveKey(row.key.Text)
-	local interval = tonumber(row.interval.Text)
-	local hold = tonumber(row.hold.Text)
+    local keyCode = resolveKey(row.key.Text)
+    local interval = tonumber(row.interval.Text)
+    local hold = tonumber(row.hold.Text)
 
-	if not keyCode or not interval or not hold then return end
+    if not keyCode or not interval or not hold then return end
 
-	row.loop = RunService.Heartbeat:Connect(function()
-		if enabled and not destroyed then
-			task.spawn(function()
-				VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-				task.wait(hold)
-				VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-			end)
-			task.wait(interval)
-		end
-	end)
+    row.loop = RunService.Heartbeat:Connect(function()
+        if enabled and not destroyed then
+            task.spawn(function()
+                VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+                task.wait(hold)
+                VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+            end)
+            task.wait(interval)
+        end
+    end)
 end
 
 local function createRow(i)
-	local y = 90 + (i - 1) * 40
+    local y = 90 + (i - 1) * 40
 
-	local keyBox = Instance.new("TextBox")
-	keyBox.Size = UDim2.new(0, 60, 0, 30)
-	keyBox.Position = UDim2.new(0, 10, 0, y)
-	keyBox.Parent = frame
+    local keyBox = Instance.new("TextBox")
+    keyBox.Size = UDim2.new(0, 60, 0, 30)
+    keyBox.Position = UDim2.new(0, 10, 0, y)
+    keyBox.Parent = frame
 
-	local intervalBox = Instance.new("TextBox")
-	intervalBox.Size = UDim2.new(0, 80, 0, 30)
-	intervalBox.Position = UDim2.new(0, 80, 0, y)
-	intervalBox.Parent = frame
+    local intervalBox = Instance.new("TextBox")
+    intervalBox.Size = UDim2.new(0, 80, 0, 30)
+    intervalBox.Position = UDim2.new(0, 80, 0, y)
+    intervalBox.Parent = frame
 
-	local holdBox = Instance.new("TextBox")
-	holdBox.Size = UDim2.new(0, 80, 0, 30)
-	holdBox.Position = UDim2.new(0, 170, 0, y)
-	holdBox.Parent = frame
+    local holdBox = Instance.new("TextBox")
+    holdBox.Size = UDim2.new(0, 80, 0, 30)
+    holdBox.Position = UDim2.new(0, 170, 0, y)
+    holdBox.Parent = frame
 
-	rows[i] = {
-		key = keyBox,
-		interval = intervalBox,
-		hold = holdBox,
-		loop = nil
-	}
+    rows[i] = {
+        key = keyBox,
+        interval = intervalBox,
+        hold = holdBox,
+        loop = nil
+    }
 
-	local function update()
-		if not destroyed then
-			startLoop(rows[i])
-		end
-	end
+    local function update()
+        if not destroyed then
+            startLoop(rows[i])
+        end
+    end
 
-	keyBox.FocusLost:Connect(update)
-	intervalBox.FocusLost:Connect(update)
-	holdBox.FocusLost:Connect(update)
+    keyBox.FocusLost:Connect(update)
+    intervalBox.FocusLost:Connect(update)
+    holdBox.FocusLost:Connect(update)
 end
 
 for i = 1, 4 do
-	createRow(i)
+    createRow(i)
 end
 
 ---------------------------------------------------------------------
@@ -238,12 +238,21 @@ end
 ---------------------------------------------------------------------
 
 local function updateToggle()
-	toggleButton.Text = enabled and "ON" or "OFF"
+    toggleButton.Text = enabled and "ON" or "OFF"
 end
 
 toggleButton.MouseButton1Click:Connect(function()
-	enabled = not enabled
-	updateToggle()
+    enabled = not enabled
+    updateToggle()
+end)
+
+-- G key toggles ON/OFF
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.G then
+        enabled = not enabled
+        updateToggle()
+    end
 end)
 
 updateToggle()
@@ -253,22 +262,22 @@ updateToggle()
 ---------------------------------------------------------------------
 
 deleteButton.MouseButton1Click:Connect(function()
-	destroyed = true
-	enabled = false
+    destroyed = true
+    enabled = false
 
-	-- stop all loops
-	for _, row in ipairs(rows) do
-		if row.loop then
-			row.loop:Disconnect()
-			row.loop = nil
-		end
-	end
+    -- stop all loops
+    for _, row in ipairs(rows) do
+        if row.loop then
+            row.loop:Disconnect()
+            row.loop = nil
+        end
+    end
 
-	-- destroy UI
-	if screenGui then
-		screenGui:Destroy()
-	end
+    -- destroy UI
+    if screenGui then
+        screenGui:Destroy()
+    end
 
-	-- destroy script
-	script:Destroy()
+    -- destroy script
+    script:Destroy()
 end)
