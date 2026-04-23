@@ -86,8 +86,8 @@ screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 260)
-frame.Position = UDim2.new(0.5, -175, 0.5, -130)
+frame.Size = UDim2.new(0, 350, 0, 380) -- UPDATED HEIGHT FOR 7 ROWS
+frame.Position = UDim2.new(0.5, -175, 0.5, -190)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.Parent = screenGui
@@ -229,7 +229,8 @@ local function createRow(i)
     holdBox.FocusLost:Connect(update)
 end
 
-for i = 1, 4 do
+-- UPDATED: 7 ROWS
+for i = 1, 7 do
     createRow(i)
 end
 
