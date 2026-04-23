@@ -108,6 +108,7 @@ local destroyed = false
 local followConnection
 
 local TARGET_SWITCH_RADIUS = 60
+local MAX_VERTICAL_DIFF = 12 -- prevents extreme floating
 
 --////////////////////////////////////////////////////
 -- FUNCTIONS
@@ -241,25 +242,20 @@ local function startFollow()
         end
 
         local distance = (myRoot.Position - targetRoot.Position).Magnitude
+        local verticalDiff = math.abs(myRoot.Position.Y - targetRoot.Position.Y)
 
-        if distance > 3 then
-            local direction = (targetRoot.Position - myRoot.Position)
-            local unit = direction.Unit
+        if distance > 3 and verticalDiff < MAX_VERTICAL_DIFF then
+            local flatTarget = Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z)
+            local direction = (flatTarget - myRoot.Position).Unit
 
-            -- R6 + R15 compatible movement
-            humanoid:Move(unit, false)
-            humanoid.WalkToPoint = targetRoot.Position
+            -- Does NOT override SHIFT or other keys
+            humanoid:Move(direction, true)
 
-            -- Rotate root manually
-            local lookPos = Vector3.new(
-                targetRoot.Position.X,
-                myRoot.Position.Y,
-                targetRoot.Position.Z
-            )
+            humanoid.WalkToPoint = flatTarget
 
-            myRoot.CFrame = CFrame.lookAt(myRoot.Position, lookPos)
+            myRoot.CFrame = CFrame.lookAt(myRoot.Position, flatTarget)
         else
-            humanoid:Move(Vector3.new(0,0,0), false)
+            humanoid:Move(Vector3.zero, true)
             humanoid.WalkToPoint = myRoot.Position
         end
     end)
