@@ -208,7 +208,7 @@ local function createRow(i)
     holdBox.Position = UDim2.new(0, 170, 0, y)
     holdBox.Parent = frame
 
-    -- DEFAULT VALUES
+    -- DEFAULT VALUES THAT ACTUALLY START LOOPS
     if i == 1 then
         keyBox.Text = "1"
         intervalBox.Text = "11"
@@ -234,6 +234,10 @@ local function createRow(i)
         loop = nil
     }
 
+    -- Start loop immediately using defaults
+    startLoop(rows[i])
+
+    -- Update when user edits
     local function update()
         if not destroyed then
             startLoop(rows[i])
