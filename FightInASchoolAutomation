@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -17,7 +18,7 @@ local enabled = false
 local destroyed = false
 
 ---------------------------------------------------------------------
--- SPECIAL KEY MAP
+-- SPECIAL KEY MAP (SHIFT, CTRL, ALT, TAB, SPACE, ETC.)
 ---------------------------------------------------------------------
 
 local keyMap = {
@@ -47,6 +48,7 @@ local keyMap = {
     ["space"] = Enum.KeyCode.Space,
 }
 
+-- Number keys 0–9
 local numberKeyMap = {
     ["0"] = Enum.KeyCode.Zero,
     ["1"] = Enum.KeyCode.One,
@@ -67,16 +69,18 @@ local function resolveKey(text)
 
     text = string.lower(text)
 
+    -- Special keys
     if keyMap[text] then
         return keyMap[text]
     end
 
+    -- Number keys 0–9
     if numberKeyMap[text] then
         return numberKeyMap[text]
     end
 
+    -- Normal keys (A, B, C, G, Q, etc.)
     local upper = string.upper(text)
-
     if Enum.KeyCode[upper] then
         return Enum.KeyCode[upper]
     end
@@ -106,7 +110,6 @@ corner.CornerRadius = UDim.new(0, 10)
 corner.Parent = frame
 
 -- Title
-
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -40, 0, 30)
 title.Position = UDim2.new(0, 10, 0, 5)
@@ -119,7 +122,6 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = frame
 
 -- Minimize Button
-
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Size = UDim2.new(0, 25, 0, 25)
 minimizeButton.Position = UDim2.new(1, -60, 0, 5)
@@ -136,7 +138,6 @@ minCorner.CornerRadius = UDim.new(0, 6)
 minCorner.Parent = minimizeButton
 
 -- Delete Button
-
 local deleteButton = Instance.new("TextButton")
 deleteButton.Size = UDim2.new(0, 25, 0, 25)
 deleteButton.Position = UDim2.new(1, -30, 0, 5)
@@ -152,8 +153,7 @@ local delCorner = Instance.new("UICorner")
 delCorner.CornerRadius = UDim.new(0, 6)
 delCorner.Parent = deleteButton
 
--- Toggle Button
-
+-- ON/OFF Toggle
 local toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0, 120, 0, 35)
 toggleButton.Position = UDim2.new(0.5, -60, 0, 45)
@@ -194,7 +194,6 @@ end)
 UserInputService.InputChanged:Connect(function(input)
     if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
         local delta = input.Position - dragStart
-
         frame.Position = UDim2.new(
             startPos.X.Scale,
             startPos.X.Offset + delta.X,
@@ -205,13 +204,13 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 ---------------------------------------------------------------------
--- CREATE ROWS
+-- CREATE 4 ROWS OF INPUT BOXES
 ---------------------------------------------------------------------
 
 local rows = {}
 
 local function createRow(index)
-    local y = 90 + ((index - 1) * 40)
+    local y = 90 + (index - 1) * 40
 
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 60, 0, 30)
@@ -259,15 +258,12 @@ for i = 1, 4 do
 end
 
 ---------------------------------------------------------------------
--- LOOP HANDLER
+-- AUTO PRESS LOOP HANDLER
 ---------------------------------------------------------------------
 
 local function startLoop(row)
-
-    -- stop old loop
     if row.loop then
         row.loop:Disconnect()
-        row.loop = nil
     end
 
     local keyText = row.key.Text
@@ -275,58 +271,37 @@ local function startLoop(row)
     local hold = tonumber(row.hold.Text)
 
     local keyCode = resolveKey(keyText)
-
     if not keyCode or not interval or not hold then
         return
     end
 
-    local running = true
-
-    row.loop = {
-        Disconnect = function()
-            running = false
-        end
-    }
-
-    task.spawn(function()
-
-        while running and not destroyed do
-
-            if enabled then
+    row.loop = RunService.Heartbeat:Connect(function()
+        if enabled then
+            task.spawn(function()
                 VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-
                 task.wait(hold)
-
                 VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-            end
-
+            end)
             task.wait(interval)
         end
     end)
 end
 
 local function bindRowEvents(row)
-
     local function update()
         startLoop(row)
     end
 
     row.key.FocusLost:Connect(function(enter)
-        if enter then
-            update()
-        end
+        if enter then update() end
     end)
 
     row.interval.FocusLost:Connect(function(enter)
-        if enter then
-            update()
-        end
+        if enter then update() end
     end)
 
     row.hold.FocusLost:Connect(function(enter)
-        if enter then
-            update()
-        end
+        if enter then update() end
     end)
 end
 
@@ -362,35 +337,25 @@ updateToggle()
 local minimized = false
 
 minimizeButton.MouseButton1Click:Connect(function()
-
     minimized = not minimized
 
     if minimized then
-
         for _, row in ipairs(rows) do
             row.key.Visible = false
             row.interval.Visible = false
             row.hold.Visible = false
         end
-
         toggleButton.Visible = false
-
         frame.Size = UDim2.new(0, 350, 0, 40)
-
         minimizeButton.Text = "+"
-
     else
-
         for _, row in ipairs(rows) do
             row.key.Visible = true
             row.interval.Visible = true
             row.hold.Visible = true
         end
-
         toggleButton.Visible = true
-
         frame.Size = UDim2.new(0, 350, 0, 260)
-
         minimizeButton.Text = "-"
     end
 end)
@@ -400,21 +365,7 @@ end)
 ---------------------------------------------------------------------
 
 deleteButton.MouseButton1Click:Connect(function()
-
     destroyed = true
-    enabled = false
-
-    -- disconnect all loops
-    for _, row in ipairs(rows) do
-        if row.loop then
-            row.loop:Disconnect()
-            row.loop = nil
-        end
-    end
-
-    -- destroy ui
     screenGui:Destroy()
-
-    -- destroy script
     script:Destroy()
 end)
