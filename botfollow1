@@ -1,9 +1,10 @@
 --// LocalScript
---// Put in StarterPlayerScripts or execute at runtime
+--// R6 + R15 Strong Follow Script
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local PathfindingService = game:GetService("PathfindingService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -34,13 +35,11 @@ frame.Active = true
 frame.Draggable = true
 frame.Parent = gui
 
-local frameCorner = Instance.new("UICorner")
-frameCorner.CornerRadius = UDim.new(0,10)
-frameCorner.Parent = frame
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0,10)
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -35, 0, 30)
-title.Position = UDim2.new(0, 10, 0, 0)
+title.Size = UDim2.new(1,-35,0,30)
+title.Position = UDim2.new(0,10,0,0)
 title.BackgroundTransparency = 1
 title.Text = "Strong Follow Script"
 title.TextColor3 = Color3.new(1,1,1)
@@ -49,41 +48,31 @@ title.TextSize = 22
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = frame
 
--- X BUTTON
-
 local close = Instance.new("TextButton")
-close.Size = UDim2.new(0, 25, 0, 25)
-close.Position = UDim2.new(1, -30, 0, 5)
+close.Size = UDim2.new(0,25,0,25)
+close.Position = UDim2.new(1,-30,0,5)
 close.Text = "X"
+close.TextColor3 = Color3.new(1,1,1)
 close.Font = Enum.Font.SourceSansBold
 close.TextSize = 20
-close.TextColor3 = Color3.new(1,1,1)
 close.BackgroundColor3 = Color3.fromRGB(170,40,40)
 close.Parent = frame
 
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0,6)
-closeCorner.Parent = close
-
--- TEXTBOX
+Instance.new("UICorner", close).CornerRadius = UDim.new(0,6)
 
 local box = Instance.new("TextBox")
 box.Size = UDim2.new(1,-20,0,40)
 box.Position = UDim2.new(0,10,0,40)
 box.PlaceholderText = "Player1, Player2"
 box.Text = ""
+box.ClearTextOnFocus = false
 box.TextColor3 = Color3.new(1,1,1)
 box.BackgroundColor3 = Color3.fromRGB(40,40,40)
-box.ClearTextOnFocus = false
 box.Font = Enum.Font.SourceSans
 box.TextSize = 20
 box.Parent = frame
 
-local boxCorner = Instance.new("UICorner")
-boxCorner.CornerRadius = UDim.new(0,8)
-boxCorner.Parent = box
-
--- TOGGLE BUTTON
+Instance.new("UICorner", box).CornerRadius = UDim.new(0,8)
 
 local toggle = Instance.new("TextButton")
 toggle.Size = UDim2.new(1,-20,0,40)
@@ -95,9 +84,7 @@ toggle.Font = Enum.Font.SourceSansBold
 toggle.TextSize = 22
 toggle.Parent = frame
 
-local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0,8)
-toggleCorner.Parent = toggle
+Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
 
 --////////////////////////////////////////////////////
 -- VARIABLES
@@ -105,13 +92,12 @@ toggleCorner.Parent = toggle
 
 local following = false
 local destroyed = false
-local followConnection
+local connection
 
--- bigger swap radius
 local TARGET_SWITCH_RADIUS = 60
 
 --////////////////////////////////////////////////////
--- FUNCTIONS
+-- HELPERS
 --////////////////////////////////////////////////////
 
 local function getCharacter(player)
@@ -119,7 +105,11 @@ local function getCharacter(player)
 end
 
 local function getRoot(char)
-	return char and char:FindFirstChild("HumanoidRootPart")
+	if not char then return nil end
+
+	return char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("UpperTorso")
 end
 
 local function getHumanoid(char)
@@ -128,46 +118,48 @@ end
 
 local function splitNames(text)
 
-	local result = {}
+	local tbl = {}
 
-	for name in string.gmatch(text, "[^,]+") do
+	for str in string.gmatch(text, "[^,]+") do
 
-		name = string.gsub(name, "^%s+", "")
-		name = string.gsub(name, "%s+$", "")
+		str = str:gsub("^%s+", "")
+		str = str:gsub("%s+$", "")
 
-		if name ~= "" then
-			table.insert(result, string.lower(name))
+		if str ~= "" then
+			table.insert(tbl, string.lower(str))
 		end
 	end
 
-	return result
+	return tbl
 end
 
-local function findTargets()
+local function getTargets()
 
-	local targets = {}
-	local names = splitNames(box.Text)
+	local results = {}
+	local searches = splitNames(box.Text)
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 
 		if plr ~= LocalPlayer then
 
-			for _, search in ipairs(names) do
+			for _, search in ipairs(searches) do
 
-				if string.find(string.lower(plr.Name), search, 1, true)
-				or string.find(string.lower(plr.DisplayName), search, 1, true) then
+				local lowerName = string.lower(plr.Name)
+				local lowerDisplay = string.lower(plr.DisplayName)
 
-					table.insert(targets, plr)
+				if string.find(lowerName, search, 1, true)
+				or string.find(lowerDisplay, search, 1, true) then
+
+					table.insert(results, plr)
 					break
 				end
 			end
 		end
 	end
 
-	return targets
+	return results
 end
 
--- finds nearest valid target
 local function getNearestTarget()
 
 	local myChar = getCharacter(LocalPlayer)
@@ -177,20 +169,19 @@ local function getNearestTarget()
 		return nil
 	end
 
-	local nearest
+	local nearest = nil
 	local nearestDistance = math.huge
 
-	for _, plr in ipairs(findTargets()) do
+	for _, plr in ipairs(getTargets()) do
 
 		local char = getCharacter(plr)
 		local root = getRoot(char)
-		local humanoid = getHumanoid(char)
+		local hum = getHumanoid(char)
 
-		if root and humanoid and humanoid.Health > 0 then
+		if root and hum and hum.Health > 0 then
 
 			local dist = (myRoot.Position - root.Position).Magnitude
 
-			-- larger switch radius
 			if dist <= TARGET_SWITCH_RADIUS and dist < nearestDistance then
 				nearestDistance = dist
 				nearest = plr
@@ -198,16 +189,17 @@ local function getNearestTarget()
 		end
 	end
 
-	-- fallback if nobody in radius
+	-- fallback to closest overall
+
 	if not nearest then
 
-		for _, plr in ipairs(findTargets()) do
+		for _, plr in ipairs(getTargets()) do
 
 			local char = getCharacter(plr)
 			local root = getRoot(char)
-			local humanoid = getHumanoid(char)
+			local hum = getHumanoid(char)
 
-			if root and humanoid and humanoid.Health > 0 then
+			if root and hum and hum.Health > 0 then
 
 				local dist = (myRoot.Position - root.Position).Magnitude
 
@@ -223,16 +215,16 @@ local function getNearestTarget()
 end
 
 --////////////////////////////////////////////////////
--- FOLLOW
+-- FOLLOW SYSTEM
 --////////////////////////////////////////////////////
 
 local function stopFollow()
 
 	following = false
 
-	if followConnection then
-		followConnection:Disconnect()
-		followConnection = nil
+	if connection then
+		connection:Disconnect()
+		connection = nil
 	end
 
 	toggle.Text = "FOLLOW: OFF (V)"
@@ -241,8 +233,8 @@ end
 
 local function startFollow()
 
-	if followConnection then
-		followConnection:Disconnect()
+	if connection then
+		connection:Disconnect()
 	end
 
 	following = true
@@ -250,7 +242,7 @@ local function startFollow()
 	toggle.Text = "FOLLOW: ON (V)"
 	toggle.BackgroundColor3 = Color3.fromRGB(40,170,40)
 
-	followConnection = RunService.RenderStepped:Connect(function()
+	connection = RunService.Heartbeat:Connect(function()
 
 		if destroyed or not following then
 			return
@@ -258,9 +250,9 @@ local function startFollow()
 
 		local myChar = getCharacter(LocalPlayer)
 		local myRoot = getRoot(myChar)
-		local humanoid = getHumanoid(myChar)
+		local myHumanoid = getHumanoid(myChar)
 
-		if not myRoot or not humanoid then
+		if not myChar or not myRoot or not myHumanoid then
 			return
 		end
 
@@ -274,7 +266,8 @@ local function startFollow()
 		local targetRoot = getRoot(targetChar)
 		local targetHumanoid = getHumanoid(targetChar)
 
-		-- auto refocus after respawn/death
+		-- target respawn/death support
+
 		if not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
 			return
 		end
@@ -283,26 +276,31 @@ local function startFollow()
 
 		if distance > 3 then
 
-			-- stronger movement force
-			humanoid:Move(
-				(targetRoot.Position - myRoot.Position).Unit,
-				false
-			)
+			-- R6 + R15 COMPATIBLE MOVEMENT
 
-			humanoid:MoveTo(targetRoot.Position)
+			local direction = (targetRoot.Position - myRoot.Position).Unit
 
-			-- FIX SHIFTLOCK
-			-- directly rotate character
-			local lookPos = Vector3.new(
-				targetRoot.Position.X,
-				myRoot.Position.Y,
-				targetRoot.Position.Z
-			)
+			-- force walking
+			myHumanoid:Move(direction, false)
 
+			-- force path target
+			myHumanoid:MoveTo(targetRoot.Position)
+
+			-- strong reposition correction
+			myRoot.AssemblyLinearVelocity = direction * 16
+
+			-- face target (shiftlock fix)
 			myRoot.CFrame = CFrame.lookAt(
 				myRoot.Position,
-				lookPos
+				Vector3.new(
+					targetRoot.Position.X,
+					myRoot.Position.Y,
+					targetRoot.Position.Z
+				)
 			)
+
+		else
+			myHumanoid:Move(Vector3.zero, false)
 		end
 	end)
 end
@@ -326,11 +324,11 @@ end
 
 toggle.MouseButton1Click:Connect(toggleFollow)
 
--- KEYBIND = V
+-- V KEYBIND
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+UserInputService.InputBegan:Connect(function(input, processed)
 
-	if gameProcessed or destroyed then
+	if processed or destroyed then
 		return
 	end
 
@@ -340,7 +338,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 --////////////////////////////////////////////////////
--- DESTROY / TERMINATE
+-- DESTROY
 --////////////////////////////////////////////////////
 
 close.MouseButton1Click:Connect(function()
@@ -349,16 +347,10 @@ close.MouseButton1Click:Connect(function()
 
 	stopFollow()
 
-	if followConnection then
-		followConnection:Disconnect()
-		followConnection = nil
+	if connection then
+		connection:Disconnect()
+		connection = nil
 	end
 
 	gui:Destroy()
-
-	-- destroy references
-	frame = nil
-	box = nil
-	toggle = nil
-	close = nil
 end)
