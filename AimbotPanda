@@ -7,7 +7,6 @@ local UserInput      = game:GetService("UserInputService")
 local localPlayer    = Players.LocalPlayer
 local camera         = workspace.CurrentCamera
 local aimbotEnabled  = false
-local targetPlayer   = nil
 local aimConnection  = nil
 
 --// Create ScreenGui
@@ -102,7 +101,7 @@ end)
 -- Username TextBox
 local txtUser = Instance.new("TextBox")
 txtUser.Name = "TxtUser"
-txtUser.PlaceholderText = "Type username..."
+txtUser.PlaceholderText = "Type usernames (comma separated)..."
 txtUser.Font = Enum.Font.SourceSans
 txtUser.TextSize = 16
 txtUser.ClearTextOnFocus = false
@@ -124,42 +123,82 @@ btnToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
 btnToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 btnToggle.Parent = mainFrame
 
--- Helper: Find player by partial name
-local function findPlayerByPartial(partial)
-    partial = partial:lower()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Name:lower():find(partial, 1, true) then
-            return plr
+--------------------------------------------------------------------
+-- MULTI‑PLAYER TARGETING SYSTEM
+--------------------------------------------------------------------
+
+-- Returns all players matching comma‑separated partial names
+local function getTargetPlayers(text)
+    local results = {}
+    local parts = string.split(text, ",")
+
+    for _, raw in ipairs(parts) do
+        local partial = raw:lower():gsub("%s+", "")
+        if partial ~= "" then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer and plr.Name:lower():find(partial, 1, true) then
+                    table.insert(results, plr)
+                end
+            end
         end
     end
-    return nil
+
+    return results
 end
 
--- Update target whenever text changes
+-- Update textbox color based on matches
 txtUser.FocusLost:Connect(function()
-    local input = txtUser.Text
-    targetPlayer = findPlayerByPartial(input)
-    if targetPlayer then
+    local list = getTargetPlayers(txtUser.Text)
+    if #list > 0 then
         txtUser.BackgroundColor3 = Color3.fromRGB(25, 50, 25)
     else
         txtUser.BackgroundColor3 = Color3.fromRGB(50, 25, 25)
     end
 end)
 
--- Aimbot loop
+--------------------------------------------------------------------
+-- AIMBOT LOOP (closest target wins)
+--------------------------------------------------------------------
+
 local function startAimbot()
     if aimConnection then return end
+
     aimConnection = RunService.RenderStepped:Connect(function()
-        if aimbotEnabled and targetPlayer and targetPlayer.Character then
-            local hrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                camera.CFrame = CFrame.new(camera.CFrame.Position, hrp.Position)
+        if not aimbotEnabled then return end
+
+        local candidates = getTargetPlayers(txtUser.Text)
+        if #candidates == 0 then return end
+
+        local myChar = localPlayer.Character
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return end
+
+        local closestHRP = nil
+        local closestDist = math.huge
+
+        for _, plr in ipairs(candidates) do
+            if plr.Character then
+                local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local dist = (hrp.Position - myHRP.Position).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestHRP = hrp
+                    end
+                end
             end
+        end
+
+        if closestHRP then
+            camera.CFrame = CFrame.new(camera.CFrame.Position, closestHRP.Position)
         end
     end)
 end
 
--- Toggle function (used by button + keybind)
+--------------------------------------------------------------------
+-- TOGGLE AIMBOT
+--------------------------------------------------------------------
+
 local function toggleAimbot()
     aimbotEnabled = not aimbotEnabled
     btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
@@ -175,11 +214,13 @@ local function toggleAimbot()
     end
 end
 
--- Button click
 btnToggle.MouseButton1Click:Connect(toggleAimbot)
 
 --------------------------------------------------------------------
--- Q focus textbox | Enter unfocus | X toggle aimbot
+-- KEYBINDS
+-- Q = focus textbox
+-- Enter = unfocus
+-- X = toggle aimbot
 --------------------------------------------------------------------
 
 UserInput.InputBegan:Connect(function(input, gp)
@@ -195,7 +236,6 @@ UserInput.InputBegan:Connect(function(input, gp)
         end
     end
 
-    -- Mobile emulator compatible
     if input.KeyCode == Enum.KeyCode.X then
         toggleAimbot()
     end
