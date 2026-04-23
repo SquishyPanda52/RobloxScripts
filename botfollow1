@@ -198,7 +198,7 @@ local function getNearestTarget()
 end
 
 --////////////////////////////////////////////////////
--- FOLLOW (CFrame-based, shiftlock-proof)
+-- FOLLOW (CFrame-based + animation fix)
 --////////////////////////////////////////////////////
 
 local function stopFollow()
@@ -230,13 +230,17 @@ local function startFollow()
         if not myRoot or not humanoid then return end
 
         local target = getNearestTarget()
-        if not target then return end
+        if not target then 
+            humanoid:ChangeState(Enum.HumanoidStateType.Idle)
+            return 
+        end
 
         local targetChar = getCharacter(target)
         local targetRoot = getRoot(targetChar)
         local targetHumanoid = getHumanoid(targetChar)
 
         if not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
+            humanoid:ChangeState(Enum.HumanoidStateType.Idle)
             return
         end
 
@@ -246,7 +250,7 @@ local function startFollow()
             local direction = (targetRoot.Position - myRoot.Position).Unit
             local speed = humanoid.WalkSpeed
 
-            -- CFrame movement (bypasses all game controllers)
+            -- CFrame movement
             myRoot.CFrame = myRoot.CFrame + (direction * speed * dt)
 
             -- rotate toward target
@@ -256,6 +260,11 @@ local function startFollow()
                 targetRoot.Position.Z
             )
             myRoot.CFrame = CFrame.lookAt(myRoot.Position, lookPos)
+
+            -- force walking animation
+            humanoid:ChangeState(Enum.HumanoidStateType.Running)
+        else
+            humanoid:ChangeState(Enum.HumanoidStateType.Idle)
         end
     end)
 end
