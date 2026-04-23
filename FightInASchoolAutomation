@@ -229,7 +229,8 @@ local function createRow(i)
     holdBox.FocusLost:Connect(update)
 end
 
-for i = 1, 4 do
+-- ONLY CHANGE MADE: 4 → 7
+for i = 1, 7 do
     createRow(i)
 end
 
