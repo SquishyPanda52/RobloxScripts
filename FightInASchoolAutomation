@@ -48,6 +48,20 @@ local keyMap = {
     ["space"] = Enum.KeyCode.Space,
 }
 
+-- Number keys 0–9
+local numberKeyMap = {
+    ["0"] = Enum.KeyCode.Zero,
+    ["1"] = Enum.KeyCode.One,
+    ["2"] = Enum.KeyCode.Two,
+    ["3"] = Enum.KeyCode.Three,
+    ["4"] = Enum.KeyCode.Four,
+    ["5"] = Enum.KeyCode.Five,
+    ["6"] = Enum.KeyCode.Six,
+    ["7"] = Enum.KeyCode.Seven,
+    ["8"] = Enum.KeyCode.Eight,
+    ["9"] = Enum.KeyCode.Nine,
+}
+
 local function resolveKey(text)
     if not text or text == "" then
         return nil
@@ -60,18 +74,10 @@ local function resolveKey(text)
         return keyMap[text]
     end
 
-    ---------------------------------------------------------------------
-    -- 🔥 ADDED: NUMBER KEYS (0–9)
-    ---------------------------------------------------------------------
-    if tonumber(text) and #text == 1 then
-        local num = tonumber(text)
-        if num == 0 then
-            return Enum.KeyCode.Zero
-        else
-            return Enum.KeyCode.One + (num - 1)
-        end
+    -- Number keys 0–9
+    if numberKeyMap[text] then
+        return numberKeyMap[text]
     end
-    ---------------------------------------------------------------------
 
     -- Normal keys (A, B, C, G, Q, etc.)
     local upper = string.upper(text)
