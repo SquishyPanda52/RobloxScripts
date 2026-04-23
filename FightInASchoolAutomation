@@ -110,7 +110,6 @@ minimizeButton.Size = UDim2.new(0, 25, 0, 25)
 minimizeButton.Position = UDim2.new(1, -60, 0, 5)
 minimizeButton.Text = "-"
 minimizeButton.Parent = frame
-
 Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 6)
 
 local deleteButton = Instance.new("TextButton")
@@ -118,7 +117,6 @@ deleteButton.Size = UDim2.new(0, 25, 0, 25)
 deleteButton.Position = UDim2.new(1, -30, 0, 5)
 deleteButton.Text = "X"
 deleteButton.Parent = frame
-
 Instance.new("UICorner", deleteButton).CornerRadius = UDim.new(0, 6)
 
 local toggleButton = Instance.new("TextButton")
@@ -126,8 +124,19 @@ toggleButton.Size = UDim2.new(0, 120, 0, 35)
 toggleButton.Position = UDim2.new(0.5, -60, 0, 45)
 toggleButton.Text = "OFF"
 toggleButton.Parent = frame
-
 Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
+
+---------------------------------------------------------------------
+-- SCROLLING FRAME (ADDED)
+---------------------------------------------------------------------
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -20, 1, -100)
+scroll.Position = UDim2.new(0, 10, 0, 80)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.ScrollBarThickness = 6
+scroll.BackgroundTransparency = 1
+scroll.Parent = frame
 
 ---------------------------------------------------------------------
 -- DRAG
@@ -194,22 +203,22 @@ local function startLoop(row)
 end
 
 local function createRow(i)
-    local y = 90 + (i - 1) * 40
+    local y = (i - 1) * 40
 
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 60, 0, 30)
-    keyBox.Position = UDim2.new(0, 10, 0, y)
-    keyBox.Parent = frame
+    keyBox.Position = UDim2.new(0, 0, 0, y)
+    keyBox.Parent = scroll
 
     local intervalBox = Instance.new("TextBox")
     intervalBox.Size = UDim2.new(0, 80, 0, 30)
-    intervalBox.Position = UDim2.new(0, 80, 0, y)
-    intervalBox.Parent = frame
+    intervalBox.Position = UDim2.new(0, 70, 0, y)
+    intervalBox.Parent = scroll
 
     local holdBox = Instance.new("TextBox")
     holdBox.Size = UDim2.new(0, 80, 0, 30)
-    holdBox.Position = UDim2.new(0, 170, 0, y)
-    holdBox.Parent = frame
+    holdBox.Position = UDim2.new(0, 160, 0, y)
+    holdBox.Parent = scroll
 
     rows[i] = {
         key = keyBox,
@@ -227,9 +236,10 @@ local function createRow(i)
     keyBox.FocusLost:Connect(update)
     intervalBox.FocusLost:Connect(update)
     holdBox.FocusLost:Connect(update)
+
+    scroll.CanvasSize = UDim2.new(0, 0, 0, y + 50)
 end
 
--- ONLY CHANGE MADE: 4 → 7
 for i = 1, 7 do
     createRow(i)
 end
@@ -247,7 +257,6 @@ toggleButton.MouseButton1Click:Connect(function()
     updateToggle()
 end)
 
--- G key toggles ON/OFF
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.G then
@@ -266,7 +275,6 @@ deleteButton.MouseButton1Click:Connect(function()
     destroyed = true
     enabled = false
 
-    -- stop all loops
     for _, row in ipairs(rows) do
         if row.loop then
             row.loop:Disconnect()
@@ -274,11 +282,9 @@ deleteButton.MouseButton1Click:Connect(function()
         end
     end
 
-    -- destroy UI
     if screenGui then
         screenGui:Destroy()
     end
 
-    -- destroy script
     script:Destroy()
 end)
