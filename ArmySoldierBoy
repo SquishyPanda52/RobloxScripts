@@ -184,7 +184,7 @@ table.insert(connections, UserInputService.InputBegan:Connect(function(input, ga
     if UserInputService:GetFocusedTextBox() then return end
 
     -- E = focus Attack textbox
-    if input.KeyCode == Enum.KeyCode.T then
+    if input.KeyCode == Enum.KeyCode.E then
         if attackBox then
             attackBox:CaptureFocus()
         end
