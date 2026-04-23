@@ -198,7 +198,7 @@ local function getNearestTarget()
 end
 
 --////////////////////////////////////////////////////
--- FOLLOW
+-- FOLLOW (CFrame-based, shiftlock-proof)
 --////////////////////////////////////////////////////
 
 local function stopFollow()
@@ -220,7 +220,7 @@ local function startFollow()
     toggle.Text = "FOLLOW: ON (V)"
     toggle.BackgroundColor3 = Color3.fromRGB(40,170,40)
 
-    followConnection = RunService.RenderStepped:Connect(function()
+    followConnection = RunService.RenderStepped:Connect(function(dt)
         if destroyed or not following then return end
 
         local myChar = getCharacter(LocalPlayer)
@@ -243,24 +243,19 @@ local function startFollow()
         local distance = (myRoot.Position - targetRoot.Position).Magnitude
 
         if distance > 3 then
-            local direction = (targetRoot.Position - myRoot.Position)
-            local unit = direction.Unit
+            local direction = (targetRoot.Position - myRoot.Position).Unit
+            local speed = humanoid.WalkSpeed
 
-            -- R6 + R15 compatible movement
-            humanoid:Move(unit, false)
-            humanoid.WalkToPoint = targetRoot.Position
+            -- CFrame movement (bypasses all game controllers)
+            myRoot.CFrame = myRoot.CFrame + (direction * speed * dt)
 
-            -- Rotate root manually
+            -- rotate toward target
             local lookPos = Vector3.new(
                 targetRoot.Position.X,
                 myRoot.Position.Y,
                 targetRoot.Position.Z
             )
-
             myRoot.CFrame = CFrame.lookAt(myRoot.Position, lookPos)
-        else
-            humanoid:Move(Vector3.new(0,0,0), false)
-            humanoid.WalkToPoint = myRoot.Position
         end
     end)
 end
