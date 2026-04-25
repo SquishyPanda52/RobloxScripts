@@ -3,87 +3,132 @@
 ```lua
 --// LocalScript
 --// Execute at runtime
---// This only works if the cooldowns are CLIENT-SIDED.
---// If the game uses SERVER-SIDED cooldown checks, this will NOT bypass them.
+--// Advanced client-side cooldown bypass attempt
+--// Includes debug logs
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+print("[CooldownBypass] Script started")
+
 --////////////////////////////////////////////////////
--- SETTINGS
+-- DEBUG
 --////////////////////////////////////////////////////
 
-local HOTBAR_NAMES = {
-    "Hotbar",
-    "Abilities",
-    "Skills",
-    "ActionBar",
-    "AbilityBar"
+local function log(...)
+    print("[CooldownBypass]", ...)
+end
+
+--////////////////////////////////////////////////////
+-- HOTBAR DETECTION
+--////////////////////////////////////////////////////
+
+local KEY_NAMES = {
+    ["1"] = true,
+    ["2"] = true,
+    ["3"] = true,
+    ["4"] = true,
+    ["5"] = true,
 }
 
---////////////////////////////////////////////////////
--- FUNCTIONS
---////////////////////////////////////////////////////
-
-local function removeCooldownVisuals(obj)
-    -- Hide cooldown overlays
-    if obj:IsA("Frame") or obj:IsA("ImageLabel") or obj:IsA("TextLabel") then
+local function isAbilitySlot(obj)
+    if obj:IsA("TextButton") or obj:IsA("ImageButton") then
         local n = obj.Name:lower()
 
-        if n:find("cooldown")
-        or n:find("cd")
-        or n:find("timer")
-        or n:find("overlay")
-        or n:find("dark") then
-            obj.Visible = false
-            obj.BackgroundTransparency = 1
+        if n:find("slot") or n:find("skill") or n:find("ability") then
+            return true
+        end
 
-            if obj:IsA("ImageLabel") then
-                obj.ImageTransparency = 1
-            end
+        for _, child in ipairs(obj:GetDescendants()) do
+            if child:IsA("TextLabel") then
+                local text = tostring(child.Text)
 
-            if obj:IsA("TextLabel") then
-                obj.TextTransparency = 1
+                if KEY_NAMES[text] then
+                    return true
+                end
             end
         end
     end
+
+    return false
 end
 
-local function forceEnable(button)
-    if button:IsA("ImageButton") or button:IsA("TextButton") then
-        button.Active = true
-        button.AutoButtonColor = true
+--////////////////////////////////////////////////////
+-- COOLDOWN REMOVAL
+--////////////////////////////////////////////////////
 
-        -- remove greying out
-        if button:IsA("ImageButton") then
-            button.ImageTransparency = 0
-        end
+local modified = {}
 
-        if button:IsA("TextButton") then
-            button.TextTransparency = 0
-        end
-
-        button.BackgroundTransparency = 0
+local function bypass(slot)
+    if not modified[slot] then
+        modified[slot] = true
+        log("Found ability slot:", slot:GetFullName())
     end
-end
 
-local function scan(obj)
-    removeCooldownVisuals(obj)
-    forceEnable(obj)
-
-    -- remove cooldown attributes if they exist
+    -- force usable
     pcall(function()
-        if obj:GetAttribute("Cooldown") then
-            obj:SetAttribute("Cooldown", 0)
+        slot.Active = true
+        slot.AutoButtonColor = true
+        slot.Selectable = true
+
+        if slot:IsA("ImageButton") then
+            slot.ImageTransparency = 0
         end
 
-        if obj:GetAttribute("OnCooldown") ~= nil then
-            obj:SetAttribute("OnCooldown", false)
+        slot.BackgroundTransparency = 0
+    end)
+
+    -- remove cooldown attributes
+    pcall(function()
+        for _, attr in ipairs(slot:GetAttributes()) do
+            local lower = string.lower(attr)
+
+            if lower:find("cooldown") or lower:find("cd") then
+                slot:SetAttribute(attr, 0)
+                log("Reset attribute:", attr)
+            end
+
+            if lower:find("oncooldown") then
+                slot:SetAttribute(attr, false)
+                log("Disabled cooldown state:", attr)
+            end
         end
     end)
+
+    -- destroy cooldown visuals
+    for _, child in ipairs(slot:GetDescendants()) do
+        local lower = child.Name:lower()
+
+        if lower:find("cooldown")
+        or lower:find("timer")
+        or lower:find("overlay")
+        or lower:find("dark")
+        or lower:find("shade")
+        or lower:find("lock") then
+
+            pcall(function()
+                child.Visible = false
+            end)
+
+            pcall(function()
+                child:Destroy()
+                log("Destroyed cooldown object:", child.Name)
+            end)
+        end
+
+        if child:IsA("TextLabel") then
+            local txt = tostring(child.Text):lower()
+
+            -- remove cooldown numbers
+            if tonumber(txt) then
+                child.Text = ""
+            end
+        end
+    end
 end
 
 --////////////////////////////////////////////////////
@@ -91,18 +136,14 @@ end
 --////////////////////////////////////////////////////
 
 RunService.RenderStepped:Connect(function()
-    for _, gui in ipairs(playerGui:GetDescendants()) do
-        for _, hotbarName in ipairs(HOTBAR_NAMES) do
-            if gui.Name == hotbarName then
-                for _, obj in ipairs(gui:GetDescendants()) do
-                    scan(obj)
-                end
-            end
+    for _, obj in ipairs(playerGui:GetDescendants()) do
+        if isAbilitySlot(obj) then
+            bypass(obj)
         end
     end
 end)
 
-print("Client-side cooldown remover loaded.")
+log("Cooldown bypass loop running")
 ```
 
 ## Important
