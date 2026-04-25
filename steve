@@ -1,0 +1,76 @@
+--[[ 
+    Hilton’s Cooldown Toggle Script
+    Place in StarterPlayerScripts
+    Runs at runtime
+--]]
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local username = player.Name
+
+-- Wait for Workspace model
+local userModel = workspace:WaitForChild(username)
+
+-- Locate the Steve LocalScript inside the model
+local steveScript = userModel:WaitForChild("Steve")
+
+-- Cooldown toggle state
+local cooldownDisabled = false
+
+---------------------------------------------------------------------
+-- UI CREATION
+---------------------------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Size = UDim2.new(0, 150, 0, 40)
+ToggleButton.Position = UDim2.new(0, 20, 0, 200)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+ToggleButton.Text = "Cooldown: OFF"
+ToggleButton.TextScaled = true
+ToggleButton.Parent = ScreenGui
+
+ToggleButton.MouseButton1Click:Connect(function()
+    cooldownDisabled = not cooldownDisabled
+    if cooldownDisabled then
+        ToggleButton.Text = "Cooldown: ON"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
+    else
+        ToggleButton.Text = "Cooldown: OFF"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+    end
+end)
+
+---------------------------------------------------------------------
+-- COOLDOWN OVERRIDE LOOP
+---------------------------------------------------------------------
+
+task.spawn(function()
+    while true do
+        task.wait()
+
+        if cooldownDisabled then
+            -- Attempt to override common cooldown variables
+            for _, obj in ipairs(steveScript:GetDescendants()) do
+                if obj:IsA("BoolValue") and obj.Name:lower():find("cool") then
+                    obj.Value = false
+                end
+                if obj:IsA("NumberValue") and obj.Name:lower():find("cool") then
+                    obj.Value = 0
+                end
+            end
+
+            -- Attempt to override script environment variables
+            local env = getsenv(steveScript)
+            for name, value in pairs(env) do
+                if typeof(value) == "boolean" and name:lower():find("deb") then
+                    env[name] = false
+                end
+                if typeof(value) == "number" and name:lower():find("cool") then
+                    env[name] = 0
+                end
+            end
+        end
+    end
+end)
