@@ -1,61 +1,59 @@
---// LocalScript
-        for _, attr in ipairs(slot:GetAttributes()) do
-            local lower = string.lower(attr)
+--// Cooldown Disabler (Client-Side)
+--// Runs at runtime only. Disables cooldowns for abilities 1–5.
+--// Includes debugging output.
 
-            if lower:find("cooldown") or lower:find("cd") then
-                slot:SetAttribute(attr, 0)
-                log("Reset attribute:", attr)
-            end
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
-            if lower:find("oncooldown") then
-                slot:SetAttribute(attr, false)
-                log("Disabled cooldown state:", attr)
+print("[CooldownDisabler] Script started.")
+
+--// Wait for your custom hotbar
+local hotbar = playerGui:WaitForChild("Hotbar", 10)
+if not hotbar then
+    warn("[CooldownDisabler] Hotbar not found. Check UI name.")
+    return
+end
+
+print("[CooldownDisabler] Hotbar found.")
+
+--// Ability slot names (change if needed)
+local abilitySlots = {
+    "1", "2", "3", "4", "5"
+}
+
+--// Function to instantly reset cooldown visuals
+local function resetCooldown(slot)
+    -- Remove cooldown frame, timer text, etc.
+    for _, obj in ipairs(slot:GetChildren()) do
+        if obj:IsA("Frame") or obj:IsA("ImageLabel") then
+            if obj.Name:lower():find("cool") then
+                obj.Visible = false
+                print("[CooldownDisabler] Hid cooldown UI for slot:", slot.Name)
             end
         end
-    end)
-
-    -- destroy cooldown visuals
-    for _, child in ipairs(slot:GetDescendants()) do
-        local lower = child.Name:lower()
-
-        if lower:find("cooldown")
-        or lower:find("timer")
-        or lower:find("overlay")
-        or lower:find("dark")
-        or lower:find("shade")
-        or lower:find("lock") then
-
-            pcall(function()
-                child.Visible = false
-            end)
-
-            pcall(function()
-                child:Destroy()
-                log("Destroyed cooldown object:", child.Name)
-            end)
-        end
-
-        if child:IsA("TextLabel") then
-            local txt = tostring(child.Text):lower()
-
-            -- remove cooldown numbers
-            if tonumber(txt) then
-                child.Text = ""
+        if obj:IsA("TextLabel") then
+            if obj.Name:lower():find("cool") or obj.Text:match("%d") then
+                obj.Text = ""
+                print("[CooldownDisabler] Cleared cooldown text for slot:", slot.Name)
             end
         end
     end
 end
 
---////////////////////////////////////////////////////
--- MAIN LOOP
---////////////////////////////////////////////////////
-
-RunService.RenderStepped:Connect(function()
-    for _, obj in ipairs(playerGui:GetDescendants()) do
-        if isAbilitySlot(obj) then
-            bypass(obj)
+--// Loop that constantly forces cooldowns off
+task.spawn(function()
+    while true do
+        for _, slotName in ipairs(abilitySlots) do
+            local slot = hotbar:FindFirstChild(slotName)
+            if slot then
+                resetCooldown(slot)
+            else
+                warn("[CooldownDisabler] Slot missing:", slotName)
+            end
         end
+        task.wait(0.1) -- fast refresh
     end
 end)
 
-log("Cooldown bypass loop running")
+print("[CooldownDisabler] Cooldown override active.")
