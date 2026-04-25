@@ -1,76 +1,112 @@
---[[ 
-    Hilton’s Cooldown Toggle Script
-    Place in StarterPlayerScripts
-    Runs at runtime
---]]
+# Roblox Runtime LocalScript – Disable Client-Side Ability Cooldowns
+
+```lua
+--// LocalScript
+--// Execute at runtime
+--// This only works if the cooldowns are CLIENT-SIDED.
+--// If the game uses SERVER-SIDED cooldown checks, this will NOT bypass them.
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
 local player = Players.LocalPlayer
-local username = player.Name
+local playerGui = player:WaitForChild("PlayerGui")
 
--- Wait for Workspace model
-local userModel = workspace:WaitForChild(username)
+--////////////////////////////////////////////////////
+-- SETTINGS
+--////////////////////////////////////////////////////
 
--- Locate the Steve LocalScript inside the model
-local steveScript = userModel:WaitForChild("Steve")
+local HOTBAR_NAMES = {
+    "Hotbar",
+    "Abilities",
+    "Skills",
+    "ActionBar",
+    "AbilityBar"
+}
 
--- Cooldown toggle state
-local cooldownDisabled = false
+--////////////////////////////////////////////////////
+-- FUNCTIONS
+--////////////////////////////////////////////////////
 
----------------------------------------------------------------------
--- UI CREATION
----------------------------------------------------------------------
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = player:WaitForChild("PlayerGui")
+local function removeCooldownVisuals(obj)
+    -- Hide cooldown overlays
+    if obj:IsA("Frame") or obj:IsA("ImageLabel") or obj:IsA("TextLabel") then
+        local n = obj.Name:lower()
 
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0, 150, 0, 40)
-ToggleButton.Position = UDim2.new(0, 20, 0, 200)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-ToggleButton.Text = "Cooldown: OFF"
-ToggleButton.TextScaled = true
-ToggleButton.Parent = ScreenGui
+        if n:find("cooldown")
+        or n:find("cd")
+        or n:find("timer")
+        or n:find("overlay")
+        or n:find("dark") then
+            obj.Visible = false
+            obj.BackgroundTransparency = 1
 
-ToggleButton.MouseButton1Click:Connect(function()
-    cooldownDisabled = not cooldownDisabled
-    if cooldownDisabled then
-        ToggleButton.Text = "Cooldown: ON"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
-    else
-        ToggleButton.Text = "Cooldown: OFF"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-    end
-end)
-
----------------------------------------------------------------------
--- COOLDOWN OVERRIDE LOOP
----------------------------------------------------------------------
-
-task.spawn(function()
-    while true do
-        task.wait()
-
-        if cooldownDisabled then
-            -- Attempt to override common cooldown variables
-            for _, obj in ipairs(steveScript:GetDescendants()) do
-                if obj:IsA("BoolValue") and obj.Name:lower():find("cool") then
-                    obj.Value = false
-                end
-                if obj:IsA("NumberValue") and obj.Name:lower():find("cool") then
-                    obj.Value = 0
-                end
+            if obj:IsA("ImageLabel") then
+                obj.ImageTransparency = 1
             end
 
-            -- Attempt to override script environment variables
-            local env = getsenv(steveScript)
-            for name, value in pairs(env) do
-                if typeof(value) == "boolean" and name:lower():find("deb") then
-                    env[name] = false
-                end
-                if typeof(value) == "number" and name:lower():find("cool") then
-                    env[name] = 0
+            if obj:IsA("TextLabel") then
+                obj.TextTransparency = 1
+            end
+        end
+    end
+end
+
+local function forceEnable(button)
+    if button:IsA("ImageButton") or button:IsA("TextButton") then
+        button.Active = true
+        button.AutoButtonColor = true
+
+        -- remove greying out
+        if button:IsA("ImageButton") then
+            button.ImageTransparency = 0
+        end
+
+        if button:IsA("TextButton") then
+            button.TextTransparency = 0
+        end
+
+        button.BackgroundTransparency = 0
+    end
+end
+
+local function scan(obj)
+    removeCooldownVisuals(obj)
+    forceEnable(obj)
+
+    -- remove cooldown attributes if they exist
+    pcall(function()
+        if obj:GetAttribute("Cooldown") then
+            obj:SetAttribute("Cooldown", 0)
+        end
+
+        if obj:GetAttribute("OnCooldown") ~= nil then
+            obj:SetAttribute("OnCooldown", false)
+        end
+    end)
+end
+
+--////////////////////////////////////////////////////
+-- MAIN LOOP
+--////////////////////////////////////////////////////
+
+RunService.RenderStepped:Connect(function()
+    for _, gui in ipairs(playerGui:GetDescendants()) do
+        for _, hotbarName in ipairs(HOTBAR_NAMES) do
+            if gui.Name == hotbarName then
+                for _, obj in ipairs(gui:GetDescendants()) do
+                    scan(obj)
                 end
             end
         end
     end
 end)
+
+print("Client-side cooldown remover loaded.")
+```
+
+## Important
+
+* This only disables cooldowns if the cooldown system is handled on the client.
+* If the ability system checks cooldowns on the server, the abilities still will not activate until the server cooldown ends.
+* A proper secure Roblox game should always use server-side cooldown validation.
