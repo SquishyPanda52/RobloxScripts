@@ -10,6 +10,13 @@ local aimbotEnabled  = false      -- normal snap aim
 local predictEnabled = false      -- advanced prediction aim
 local aimConnection  = nil
 
+local predictionStrength = 0.15   -- default prediction base (0.00 - 1.00)
+
+local function round(num, decimals)
+    local mult = 10 ^ (decimals or 0)
+    return math.floor(num * mult + 0.5) / mult
+end
+
 --// Create ScreenGui
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AdminAimbotGUI"
@@ -19,7 +26,7 @@ screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 --// Main Frame
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 300, 0, 100)
+mainFrame.Size = UDim2.new(0, 300, 0, 220)
 mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainFrame.BorderSizePixel = 0
@@ -80,7 +87,7 @@ btnMinimize.Parent = titleBar
 local minimized = false
 btnMinimize.MouseButton1Click:Connect(function()
     minimized = not minimized
-    mainFrame.Size = minimized and UDim2.new(0, 300, 0, 24) or UDim2.new(0, 300, 0, 100)
+    mainFrame.Size = minimized and UDim2.new(0, 300, 0, 24) or UDim2.new(0, 300, 0, 220)
 end)
 
 -- Close Button
@@ -137,6 +144,110 @@ btnPredict.Position = UDim2.new(0, 5, 0, 68)
 btnPredict.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
 btnPredict.TextColor3 = Color3.fromRGB(255, 255, 255)
 btnPredict.Parent = mainFrame
+
+--------------------------------------------------------------------
+-- SCROLLING FRAME + SLIDER (PREDICTION STRENGTH)
+--------------------------------------------------------------------
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Name = "SettingsScroll"
+scrollFrame.Size = UDim2.new(1, -10, 0, 100)
+scrollFrame.Position = UDim2.new(0, 5, 0, 110)
+scrollFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+scrollFrame.BorderSizePixel = 0
+scrollFrame.ScrollBarThickness = 4
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 100)
+scrollFrame.Parent = mainFrame
+
+local sliderLabel = Instance.new("TextLabel")
+sliderLabel.Name = "SliderLabel"
+sliderLabel.Size = UDim2.new(1, -10, 0, 20)
+sliderLabel.Position = UDim2.new(0, 5, 0, 5)
+sliderLabel.BackgroundTransparency = 1
+sliderLabel.Font = Enum.Font.SourceSansBold
+sliderLabel.TextSize = 16
+sliderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+sliderLabel.Text = "Prediction Strength"
+sliderLabel.Parent = scrollFrame
+
+local sliderBar = Instance.new("Frame")
+sliderBar.Name = "SliderBar"
+sliderBar.Size = UDim2.new(1, -60, 0, 8)
+sliderBar.Position = UDim2.new(0, 5, 0, 35)
+sliderBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+sliderBar.BorderSizePixel = 0
+sliderBar.Parent = scrollFrame
+
+local sliderKnob = Instance.new("Frame")
+sliderKnob.Name = "SliderKnob"
+sliderKnob.Size = UDim2.new(0, 10, 0, 14)
+sliderKnob.Position = UDim2.new(0, 0, 0, 31)
+sliderKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+sliderKnob.BorderSizePixel = 0
+sliderKnob.Parent = scrollFrame
+
+local valueLabel = Instance.new("TextLabel")
+valueLabel.Name = "ValueLabel"
+valueLabel.Size = UDim2.new(0, 50, 0, 20)
+valueLabel.Position = UDim2.new(1, -55, 0, 28)
+valueLabel.BackgroundTransparency = 1
+valueLabel.Font = Enum.Font.SourceSansBold
+valueLabel.TextSize = 14
+valueLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+valueLabel.Text = string.format("%.2f", predictionStrength)
+valueLabel.Parent = scrollFrame
+
+local draggingSlider = false
+
+local function updateSliderFromStrength()
+    if not sliderBar or not sliderKnob then return end
+    local barAbsSize = sliderBar.AbsoluteSize.X
+    if barAbsSize <= 0 then return end
+    local t = math.clamp(predictionStrength, 0, 1)
+    local x = t * barAbsSize
+    sliderKnob.Position = UDim2.new(0, sliderBar.Position.X.Offset + x - 5, 0, sliderKnob.Position.Y.Offset)
+    valueLabel.Text = string.format("%.2f", predictionStrength)
+end
+
+local function setStrengthFromX(x)
+    local barPos = sliderBar.AbsolutePosition.X
+    local barSize = sliderBar.AbsoluteSize.X
+    local rel = math.clamp(x - barPos, 0, barSize)
+    local t = rel / barSize
+    predictionStrength = round(t, 2)
+    valueLabel.Text = string.format("%.2f", predictionStrength)
+    sliderKnob.Position = UDim2.new(0, sliderBar.Position.X.Offset + rel - 5, 0, sliderKnob.Position.Y.Offset)
+end
+
+sliderBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+        setStrengthFromX(input.Position.X)
+    end
+end)
+
+sliderKnob.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+    end
+end)
+
+UserInput.InputChanged:Connect(function(input)
+    if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
+        setStrengthFromX(input.Position.X)
+    end
+end)
+
+UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = false
+    end
+end)
+
+-- initialize slider position
+task.defer(updateSliderFromStrength)
 
 --------------------------------------------------------------------
 -- MULTI‑PLAYER TARGETING SYSTEM
@@ -204,7 +315,7 @@ local function startAimbot()
 
         if closestHRP then
             if predictEnabled then
-                -- ADVANCED PREDICTION
+                -- ADVANCED PREDICTION USING SLIDER STRENGTH
                 local targetPos = closestHRP.Position
                 local targetVel = closestHRP.Velocity
 
@@ -212,7 +323,7 @@ local function startAimbot()
                 local dist = rel.Magnitude
                 local speed = targetVel.Magnitude
 
-                local basePrediction = 0.14
+                local basePrediction = predictionStrength -- 0.00 - 1.00 from slider
                 local distanceFactor = math.clamp(dist / 60, 0, 2)
                 local velocityFactor = math.clamp(speed / 20, 0, 2)
 
@@ -291,5 +402,9 @@ UserInput.InputBegan:Connect(function(input, gp)
 
     if input.KeyCode == Enum.KeyCode.X then
         toggleAimbot()
+    end
+
+    if input.KeyCode == Enum.KeyCode.T then
+        togglePredict()
     end
 end)
