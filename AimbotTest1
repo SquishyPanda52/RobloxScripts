@@ -188,8 +188,7 @@ local function startAimbot()
         end
 
         if closestHRP then
-            -- *** SNAPPY INSTANT AIM UPGRADE (LOCAL ONLY) ***
-            camera.CameraType = Enum.CameraType.Scriptable
+            -- *** SNAPPY INSTANT AIM ***
             camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closestHRP.Position)
         end
     end)
@@ -207,9 +206,6 @@ local function toggleAimbot()
     if aimbotEnabled then
         startAimbot()
     else
-        -- *** RESTORE CAMERA WHEN AIMBOT TURNS OFF ***
-        camera.CameraType = Enum.CameraType.Custom
-
         if aimConnection then
             aimConnection:Disconnect()
             aimConnection = nil
