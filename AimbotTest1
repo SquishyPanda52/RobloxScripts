@@ -1,0 +1,242 @@
+--// Services
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UserInput      = game:GetService("UserInputService")
+
+--// Variables
+local localPlayer    = Players.LocalPlayer
+local camera         = workspace.CurrentCamera
+local aimbotEnabled  = false
+local aimConnection  = nil
+
+--// Create ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AdminAimbotGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+--// Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 100)
+mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+--// Title Bar for Drag, Minimize, Close
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 24)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.Parent = mainFrame
+
+-- Drag logic
+do
+    local dragging, dragInput, dragStart, startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    titleBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    UserInput.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            update(input)
+        end
+    end)
+end
+
+-- Minimize Button
+local btnMinimize = Instance.new("TextButton")
+btnMinimize.Name = "BtnMinimize"
+btnMinimize.Text = "-"
+btnMinimize.Font = Enum.Font.SourceSansBold
+btnMinimize.TextSize = 20
+btnMinimize.Size = UDim2.new(0, 24, 0, 24)
+btnMinimize.Position = UDim2.new(1, -48, 0, 0)
+btnMinimize.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnMinimize.Parent = titleBar
+
+local minimized = false
+btnMinimize.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    mainFrame.Size = minimized and UDim2.new(0, 300, 0, 24) or UDim2.new(0, 300, 0, 100)
+end)
+
+-- Close Button
+local btnClose = Instance.new("TextButton")
+btnClose.Name = "BtnClose"
+btnClose.Text = "X"
+btnClose.Font = Enum.Font.SourceSansBold
+btnClose.TextSize = 20
+btnClose.Size = UDim2.new(0, 24, 0, 24)
+btnClose.Position = UDim2.new(1, -24, 0, 0)
+btnClose.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnClose.Parent = titleBar
+
+btnClose.MouseButton1Click:Connect(function()
+    if aimConnection then aimConnection:Disconnect() end
+    screenGui:Destroy()
+end)
+
+-- Username TextBox
+local txtUser = Instance.new("TextBox")
+txtUser.Name = "TxtUser"
+txtUser.PlaceholderText = "Type usernames (comma separated)..."
+txtUser.Font = Enum.Font.SourceSans
+txtUser.TextSize = 16
+txtUser.ClearTextOnFocus = false
+txtUser.Size = UDim2.new(1, -10, 0, 30)
+txtUser.Position = UDim2.new(0, 5, 0, 34)
+txtUser.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+txtUser.TextColor3 = Color3.fromRGB(255, 255, 255)
+txtUser.Parent = mainFrame
+
+-- Aimbot Toggle Button
+local btnToggle = Instance.new("TextButton")
+btnToggle.Name = "BtnToggle"
+btnToggle.Text = "Aimbot: OFF"
+btnToggle.Font = Enum.Font.SourceSansBold
+btnToggle.TextSize = 16
+btnToggle.Size = UDim2.new(0, 100, 0, 30)
+btnToggle.Position = UDim2.new(1, -105, 0, 34)
+btnToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+btnToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnToggle.Parent = mainFrame
+
+--------------------------------------------------------------------
+-- MULTI‑PLAYER TARGETING SYSTEM
+--------------------------------------------------------------------
+
+local function getTargetPlayers(text)
+    local results = {}
+    local parts = string.split(text, ",")
+
+    for _, raw in ipairs(parts) do
+        local partial = raw:lower():gsub("%s+", "")
+        if partial ~= "" then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer and plr.Name:lower():find(partial, 1, true) then
+                    table.insert(results, plr)
+                end
+            end
+        end
+    end
+
+    return results
+end
+
+txtUser.FocusLost:Connect(function()
+    local list = getTargetPlayers(txtUser.Text)
+    if #list > 0 then
+        txtUser.BackgroundColor3 = Color3.fromRGB(25, 50, 25)
+    else
+        txtUser.BackgroundColor3 = Color3.fromRGB(50, 25, 25)
+    end
+end)
+
+--------------------------------------------------------------------
+-- AIMBOT LOOP (closest target wins)
+--------------------------------------------------------------------
+
+local function startAimbot()
+    if aimConnection then return end
+
+    aimConnection = RunService.RenderStepped:Connect(function()
+        if not aimbotEnabled then return end
+
+        local candidates = getTargetPlayers(txtUser.Text)
+        if #candidates == 0 then return end
+
+        local myChar = localPlayer.Character
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return end
+
+        local closestHRP = nil
+        local closestDist = math.huge
+
+        for _, plr in ipairs(candidates) do
+            if plr.Character then
+                local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local dist = (hrp.Position - myHRP.Position).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestHRP = hrp
+                    end
+                end
+            end
+        end
+
+        if closestHRP then
+            -- *** SNAPPY INSTANT AIM UPGRADE (LOCAL ONLY) ***
+            camera.CameraType = Enum.CameraType.Scriptable
+            camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closestHRP.Position)
+        end
+    end)
+end
+
+--------------------------------------------------------------------
+-- TOGGLE AIMBOT
+--------------------------------------------------------------------
+
+local function toggleAimbot()
+    aimbotEnabled = not aimbotEnabled
+    btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
+    btnToggle.BackgroundColor3 = aimbotEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+
+    if aimbotEnabled then
+        startAimbot()
+    else
+        -- *** RESTORE CAMERA WHEN AIMBOT TURNS OFF ***
+        camera.CameraType = Enum.CameraType.Custom
+
+        if aimConnection then
+            aimConnection:Disconnect()
+            aimConnection = nil
+        end
+    end
+end
+
+btnToggle.MouseButton1Click:Connect(toggleAimbot)
+
+--------------------------------------------------------------------
+-- KEYBINDS
+--------------------------------------------------------------------
+
+UserInput.InputBegan:Connect(function(input, gp)
+    if gp then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        txtUser:CaptureFocus()
+    end
+
+    if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+        if txtUser:IsFocused() then
+            txtUser:ReleaseFocus()
+        end
+    end
+
+    if input.KeyCode == Enum.KeyCode.X then
+        toggleAimbot()
+    end
+end)
