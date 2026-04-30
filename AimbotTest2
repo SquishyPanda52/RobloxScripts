@@ -1,0 +1,454 @@
+--// Services
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UserInput      = game:GetService("UserInputService")
+
+--// Variables
+local localPlayer    = Players.LocalPlayer
+local camera         = workspace.CurrentCamera
+
+local aimbotEnabled      = false
+local predictEnabled     = false
+local autoPredictEnabled = false
+
+local aimConnection      = nil
+
+local predictionStrength = 0.15 -- manual slider value (0.00 - 1.00)
+
+local function round(num, decimals)
+    local mult = 10 ^ (decimals or 0)
+    return math.floor(num * mult + 0.5) / mult
+end
+
+--------------------------------------------------------------------
+-- UI CREATION
+--------------------------------------------------------------------
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AdminAimbotGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 220)
+mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+--------------------------------------------------------------------
+-- TITLE BAR + DRAGGING
+--------------------------------------------------------------------
+
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 24)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.Parent = mainFrame
+
+do
+    local dragging, dragInput, dragStart, startPos
+    local function update(input)
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+
+    titleBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+    end)
+
+    UserInput.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
+end
+
+--------------------------------------------------------------------
+-- MINIMIZE + CLOSE BUTTONS
+--------------------------------------------------------------------
+
+local btnMinimize = Instance.new("TextButton")
+btnMinimize.Text = "-"
+btnMinimize.Size = UDim2.new(0, 24, 0, 24)
+btnMinimize.Position = UDim2.new(1, -48, 0, 0)
+btnMinimize.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnMinimize.Font = Enum.Font.SourceSansBold
+btnMinimize.TextSize = 20
+btnMinimize.Parent = titleBar
+
+local minimized = false
+btnMinimize.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    mainFrame.Size = minimized and UDim2.new(0, 300, 0, 24) or UDim2.new(0, 300, 0, 220)
+end)
+
+local btnClose = Instance.new("TextButton")
+btnClose.Text = "X"
+btnClose.Size = UDim2.new(0, 24, 0, 24)
+btnClose.Position = UDim2.new(1, -24, 0, 0)
+btnClose.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnClose.Font = Enum.Font.SourceSansBold
+btnClose.TextSize = 20
+btnClose.Parent = titleBar
+
+btnClose.MouseButton1Click:Connect(function()
+    if aimConnection then aimConnection:Disconnect() end
+    aimbotEnabled = false
+    predictEnabled = false
+    autoPredictEnabled = false
+    screenGui:Destroy()
+end)
+
+--------------------------------------------------------------------
+-- USERNAME TEXTBOX
+--------------------------------------------------------------------
+
+local txtUser = Instance.new("TextBox")
+txtUser.PlaceholderText = "Type usernames (comma separated)..."
+txtUser.Size = UDim2.new(1, -10, 0, 30)
+txtUser.Position = UDim2.new(0, 5, 0, 34)
+txtUser.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+txtUser.TextColor3 = Color3.fromRGB(255, 255, 255)
+txtUser.Font = Enum.Font.SourceSans
+txtUser.TextSize = 16
+txtUser.ClearTextOnFocus = false
+txtUser.Parent = mainFrame
+
+--------------------------------------------------------------------
+-- AIMBOT + PREDICT BUTTONS
+--------------------------------------------------------------------
+
+local btnAimbot = Instance.new("TextButton")
+btnAimbot.Text = "Aimbot: OFF"
+btnAimbot.Size = UDim2.new(0, 100, 0, 30)
+btnAimbot.Position = UDim2.new(1, -105, 0, 34)
+btnAimbot.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+btnAimbot.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnAimbot.Font = Enum.Font.SourceSansBold
+btnAimbot.TextSize = 16
+btnAimbot.Parent = mainFrame
+
+local btnPredict = Instance.new("TextButton")
+btnPredict.Text = "Predict: OFF"
+btnPredict.Size = UDim2.new(0, 100, 0, 30)
+btnPredict.Position = UDim2.new(0, 5, 0, 68)
+btnPredict.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+btnPredict.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnPredict.Font = Enum.Font.SourceSansBold
+btnPredict.TextSize = 16
+btnPredict.Parent = mainFrame
+
+--------------------------------------------------------------------
+-- SCROLLING FRAME FOR SLIDER + AUTO PREDICT BUTTON
+--------------------------------------------------------------------
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, -10, 0, 110)
+scrollFrame.Position = UDim2.new(0, 5, 0, 110)
+scrollFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+scrollFrame.BorderSizePixel = 0
+scrollFrame.ScrollBarThickness = 4
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 110)
+scrollFrame.Parent = mainFrame
+
+local sliderLabel = Instance.new("TextLabel")
+sliderLabel.Text = "Prediction Strength"
+sliderLabel.Size = UDim2.new(1, -10, 0, 20)
+sliderLabel.Position = UDim2.new(0, 5, 0, 5)
+sliderLabel.BackgroundTransparency = 1
+sliderLabel.Font = Enum.Font.SourceSansBold
+sliderLabel.TextSize = 16
+sliderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+sliderLabel.Parent = scrollFrame
+
+local sliderBar = Instance.new("Frame")
+sliderBar.Size = UDim2.new(1, -60, 0, 8)
+sliderBar.Position = UDim2.new(0, 5, 0, 35)
+sliderBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+sliderBar.BorderSizePixel = 0
+sliderBar.Parent = scrollFrame
+
+local sliderKnob = Instance.new("Frame")
+sliderKnob.Size = UDim2.new(0, 10, 0, 14)
+sliderKnob.Position = UDim2.new(0, 0, 0, 31)
+sliderKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+sliderKnob.BorderSizePixel = 0
+sliderKnob.Parent = scrollFrame
+
+local valueLabel = Instance.new("TextLabel")
+valueLabel.Text = string.format("%.2f", predictionStrength)
+valueLabel.Size = UDim2.new(0, 50, 0, 20)
+valueLabel.Position = UDim2.new(1, -55, 0, 28)
+valueLabel.BackgroundTransparency = 1
+valueLabel.Font = Enum.Font.SourceSansBold
+valueLabel.TextSize = 14
+valueLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+valueLabel.Parent = scrollFrame
+
+--------------------------------------------------------------------
+-- AUTO PREDICT BUTTON
+--------------------------------------------------------------------
+
+local btnAuto = Instance.new("TextButton")
+btnAuto.Text = "Auto Predict: OFF"
+btnAuto.Size = UDim2.new(1, -10, 0, 30)
+btnAuto.Position = UDim2.new(0, 5, 0, 65)
+btnAuto.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+btnAuto.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnAuto.Font = Enum.Font.SourceSansBold
+btnAuto.TextSize = 16
+btnAuto.Parent = scrollFrame
+
+--------------------------------------------------------------------
+-- SLIDER LOGIC
+--------------------------------------------------------------------
+
+local draggingSlider = false
+
+local function updateSliderVisual()
+    local barSize = sliderBar.AbsoluteSize.X
+    local t = math.clamp(predictionStrength, 0, 1)
+    local x = t * barSize
+    sliderKnob.Position = UDim2.new(0, sliderBar.Position.X.Offset + x - 5, 0, 31)
+    valueLabel.Text = string.format("%.2f", predictionStrength)
+end
+
+local function setStrengthFromX(x)
+    local barPos = sliderBar.AbsolutePosition.X
+    local barSize = sliderBar.AbsoluteSize.X
+    local rel = math.clamp(x - barPos, 0, barSize)
+    predictionStrength = round(rel / barSize, 2)
+    updateSliderVisual()
+end
+
+sliderBar.InputBegan:Connect(function(input)
+    if autoPredictEnabled then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+        setStrengthFromX(input.Position.X)
+    end
+end)
+
+sliderKnob.InputBegan:Connect(function(input)
+    if autoPredictEnabled then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+    end
+end)
+
+UserInput.InputChanged:Connect(function(input)
+    if draggingSlider and not autoPredictEnabled and input.UserInputType == Enum.UserInputType.MouseMovement then
+        setStrengthFromX(input.Position.X)
+    end
+end)
+
+UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingSlider = false end
+end)
+
+task.defer(updateSliderVisual)
+
+--------------------------------------------------------------------
+-- TARGETING SYSTEM
+--------------------------------------------------------------------
+
+local function getTargetPlayers(text)
+    local results = {}
+    for _, raw in ipairs(string.split(text, ",")) do
+        local partial = raw:lower():gsub("%s+", "")
+        if partial ~= "" then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer and plr.Name:lower():find(partial, 1, true) then
+                    table.insert(results, plr)
+                end
+            end
+        end
+    end
+    return results
+end
+
+txtUser.FocusLost:Connect(function()
+    local list = getTargetPlayers(txtUser.Text)
+    txtUser.BackgroundColor3 = (#list > 0) and Color3.fromRGB(25, 50, 25) or Color3.fromRGB(50, 25, 25)
+end)
+
+--------------------------------------------------------------------
+-- AIMBOT LOOP
+--------------------------------------------------------------------
+
+local function startAimbot()
+    if aimConnection then return end
+
+    aimConnection = RunService.RenderStepped:Connect(function()
+        if not (aimbotEnabled or predictEnabled) then return end
+
+        local candidates = getTargetPlayers(txtUser.Text)
+        if #candidates == 0 then return end
+
+        local myChar = localPlayer.Character
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return end
+
+        local closestHRP, closestDist = nil, math.huge
+
+        for _, plr in ipairs(candidates) do
+            local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (hrp.Position - myHRP.Position).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    closestHRP = hrp
+                end
+            end
+        end
+
+        if not closestHRP then return end
+
+        ------------------------------------------------------------
+        -- AUTO PREDICT MODE
+        ------------------------------------------------------------
+        if autoPredictEnabled then
+            local targetPos = closestHRP.Position
+            local targetVel = closestHRP.Velocity
+
+            local rel = targetPos - myHRP.Position
+            local dist = rel.Magnitude
+            local speed = targetVel.Magnitude
+
+            local raw = math.clamp((speed / 40 + dist / 80) / 2, 0, 1)
+            predictionStrength = round(raw, 2)
+
+            updateSliderVisual()
+
+            local predictionTime = predictionStrength
+            local predictedPos = targetPos + targetVel * predictionTime
+
+            camera.CFrame = CFrame.lookAt(camera.CFrame.Position, predictedPos)
+            return
+        end
+
+        ------------------------------------------------------------
+        -- MANUAL PREDICT MODE
+        ------------------------------------------------------------
+        if predictEnabled then
+            local targetPos = closestHRP.Position
+            local targetVel = closestHRP.Velocity
+
+            local rel = targetPos - myHRP.Position
+            local dist = rel.Magnitude
+            local speed = targetVel.Magnitude
+
+            local basePrediction = predictionStrength
+            local distanceFactor = math.clamp(dist / 60, 0, 2)
+            local velocityFactor = math.clamp(speed / 20, 0, 2)
+
+            local predictionTime = basePrediction * (0.5 + 0.5 * distanceFactor + 0.5 * velocityFactor)
+            local predictedPos = targetPos + targetVel * predictionTime
+
+            camera.CFrame = CFrame.lookAt(camera.CFrame.Position, predictedPos)
+            return
+        end
+
+        ------------------------------------------------------------
+        -- NORMAL AIMBOT MODE
+        ------------------------------------------------------------
+        if aimbotEnabled then
+            camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closestHRP.Position)
+        end
+    end)
+end
+
+--------------------------------------------------------------------
+-- BUTTON + KEYBIND LOGIC
+--------------------------------------------------------------------
+
+local function updateButtons()
+    btnAimbot.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
+    btnAimbot.BackgroundColor3 = aimbotEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+
+    btnPredict.Text = "Predict: " .. (predictEnabled and "ON" or "OFF")
+    btnPredict.BackgroundColor3 = predictEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+
+    btnAuto.Text = "Auto Predict: " .. (autoPredictEnabled and "ON" or "OFF")
+    btnAuto.BackgroundColor3 = autoPredictEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+
+    -- Grey out slider when auto predict is ON
+    local grey = autoPredictEnabled
+    sliderBar.BackgroundColor3 = grey and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(40, 40, 40)
+    sliderKnob.BackgroundColor3 = grey and Color3.fromRGB(120, 120, 120) or Color3.fromRGB(200, 200, 200)
+    valueLabel.TextColor3 = grey and Color3.fromRGB(150, 150, 150) or Color3.fromRGB(0, 255, 0)
+end
+
+local function stopConnectionIfNeeded()
+    if not aimbotEnabled and not predictEnabled and not autoPredictEnabled then
+        if aimConnection then aimConnection:Disconnect() end
+        aimConnection = nil
+    end
+end
+
+local function toggleAimbot()
+    aimbotEnabled = not aimbotEnabled
+    if aimbotEnabled then
+        predictEnabled = false
+        autoPredictEnabled = false
+        startAimbot()
+    end
+    updateButtons()
+    stopConnectionIfNeeded()
+end
+
+local function togglePredict()
+    predictEnabled = not predictEnabled
+    if predictEnabled then
+        aimbotEnabled = false
+        autoPredictEnabled = false
+        startAimbot()
+    end
+    updateButtons()
+    stopConnectionIfNeeded()
+end
+
+local function toggleAuto()
+    autoPredictEnabled = not autoPredictEnabled
+    if autoPredictEnabled then
+        aimbotEnabled = false
+        predictEnabled = false
+        startAimbot()
+    end
+    updateButtons()
+    stopConnectionIfNeeded()
+end
+
+btnAimbot.MouseButton1Click:Connect(toggleAimbot)
+btnPredict.MouseButton1Click:Connect(togglePredict)
+btnAuto.MouseButton1Click:Connect(toggleAuto)
+
+--------------------------------------------------------------------
+-- KEYBINDS
+--------------------------------------------------------------------
+
+UserInput.InputBegan:Connect(function(input, gp)
+    if gp then return end
+
+    if input.KeyCode == Enum.KeyCode.Q then txtUser:CaptureFocus() end
+
+    if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+        if txtUser:IsFocused() then txtUser:ReleaseFocus() end
+    end
+
+    if input
