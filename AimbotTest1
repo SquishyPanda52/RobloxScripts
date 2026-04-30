@@ -6,7 +6,8 @@ local UserInput      = game:GetService("UserInputService")
 --// Variables
 local localPlayer    = Players.LocalPlayer
 local camera         = workspace.CurrentCamera
-local aimbotEnabled  = false
+local aimbotEnabled  = false      -- normal snap aim
+local predictEnabled = false      -- advanced prediction aim
 local aimConnection  = nil
 
 --// Create ScreenGui
@@ -95,6 +96,8 @@ btnClose.Parent = titleBar
 
 btnClose.MouseButton1Click:Connect(function()
     if aimConnection then aimConnection:Disconnect() end
+    aimbotEnabled = false
+    predictEnabled = false
     screenGui:Destroy()
 end)
 
@@ -111,7 +114,7 @@ txtUser.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 txtUser.TextColor3 = Color3.fromRGB(255, 255, 255)
 txtUser.Parent = mainFrame
 
--- Aimbot Toggle Button
+-- Aimbot Toggle Button (normal snap)
 local btnToggle = Instance.new("TextButton")
 btnToggle.Name = "BtnToggle"
 btnToggle.Text = "Aimbot: OFF"
@@ -122,6 +125,18 @@ btnToggle.Position = UDim2.new(1, -105, 0, 34)
 btnToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
 btnToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 btnToggle.Parent = mainFrame
+
+-- Predict Toggle Button (advanced prediction)
+local btnPredict = Instance.new("TextButton")
+btnPredict.Name = "BtnPredict"
+btnPredict.Text = "Predict: OFF"
+btnPredict.Font = Enum.Font.SourceSansBold
+btnPredict.TextSize = 16
+btnPredict.Size = UDim2.new(0, 100, 0, 30)
+btnPredict.Position = UDim2.new(0, 5, 0, 68)
+btnPredict.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+btnPredict.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnPredict.Parent = mainFrame
 
 --------------------------------------------------------------------
 -- MULTI‑PLAYER TARGETING SYSTEM
@@ -162,7 +177,7 @@ local function startAimbot()
     if aimConnection then return end
 
     aimConnection = RunService.RenderStepped:Connect(function()
-        if not aimbotEnabled then return end
+        if not (aimbotEnabled or predictEnabled) then return end
 
         local candidates = getTargetPlayers(txtUser.Text)
         if #candidates == 0 then return end
@@ -188,24 +203,45 @@ local function startAimbot()
         end
 
         if closestHRP then
-            -- *** SNAPPY INSTANT AIM ***
-            camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closestHRP.Position)
+            if predictEnabled then
+                -- ADVANCED PREDICTION
+                local targetPos = closestHRP.Position
+                local targetVel = closestHRP.Velocity
+
+                local rel = targetPos - myHRP.Position
+                local dist = rel.Magnitude
+                local speed = targetVel.Magnitude
+
+                local basePrediction = 0.14
+                local distanceFactor = math.clamp(dist / 60, 0, 2)
+                local velocityFactor = math.clamp(speed / 20, 0, 2)
+
+                local predictionTime = basePrediction * (0.5 + 0.5 * distanceFactor + 0.5 * velocityFactor)
+                local predictedPos = targetPos + targetVel * predictionTime
+
+                camera.CFrame = CFrame.lookAt(camera.CFrame.Position, predictedPos)
+            else
+                -- NORMAL SNAPPY AIM
+                camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closestHRP.Position)
+            end
         end
     end)
 end
 
 --------------------------------------------------------------------
--- TOGGLE AIMBOT
+-- TOGGLES
 --------------------------------------------------------------------
 
-local function toggleAimbot()
-    aimbotEnabled = not aimbotEnabled
+local function updateButtons()
     btnToggle.Text = "Aimbot: " .. (aimbotEnabled and "ON" or "OFF")
     btnToggle.BackgroundColor3 = aimbotEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
 
-    if aimbotEnabled then
-        startAimbot()
-    else
+    btnPredict.Text = "Predict: " .. (predictEnabled and "ON" or "OFF")
+    btnPredict.BackgroundColor3 = predictEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
+end
+
+local function stopConnectionIfNeeded()
+    if not aimbotEnabled and not predictEnabled then
         if aimConnection then
             aimConnection:Disconnect()
             aimConnection = nil
@@ -213,7 +249,28 @@ local function toggleAimbot()
     end
 end
 
+local function toggleAimbot()
+    aimbotEnabled = not aimbotEnabled
+    if aimbotEnabled then
+        predictEnabled = false
+        startAimbot()
+    end
+    updateButtons()
+    stopConnectionIfNeeded()
+end
+
+local function togglePredict()
+    predictEnabled = not predictEnabled
+    if predictEnabled then
+        aimbotEnabled = false
+        startAimbot()
+    end
+    updateButtons()
+    stopConnectionIfNeeded()
+end
+
 btnToggle.MouseButton1Click:Connect(toggleAimbot)
+btnPredict.MouseButton1Click:Connect(togglePredict)
 
 --------------------------------------------------------------------
 -- KEYBINDS
