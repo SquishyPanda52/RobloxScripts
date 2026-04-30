@@ -404,7 +404,7 @@ UserInput.InputBegan:Connect(function(input, gp)
         toggleAimbot()
     end
 
-    if input.KeyCode == Enum.KeyCode.T then
+    if input.KeyCode == Enum.KeyCode.U then
         togglePredict()
     end
 end)
