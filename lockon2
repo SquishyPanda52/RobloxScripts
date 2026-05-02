@@ -10,9 +10,12 @@ local lockonEnabled  = false
 local lockonPredictEnabled = false      
 local lockonConnection  = nil
 
-local predictionStrength = 0.10
+local predictionStrength = 0.10   
+
+-- NEW
 local snapEnabled = false
-local smoothness = 0.15
+local smoothness = 0.12
+local lastTargetHRP = nil
 
 local function round(num, decimals)
     local mult = 10 ^ (decimals or 0)
@@ -44,24 +47,18 @@ titleBar.Parent = mainFrame
 -- Drag logic
 do
     local dragging, dragInput, dragStart, startPos
-
     local function update(input)
         local delta = input.Position - dragStart
-
         mainFrame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
         )
     end
-
     titleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             dragStart = input.Position
             startPos = mainFrame.Position
-
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
@@ -69,13 +66,11 @@ do
             end)
         end
     end)
-
     titleBar.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             dragInput = input
         end
     end)
-
     UserInput.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             update(input)
@@ -95,13 +90,9 @@ btnMinimize.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 btnMinimize.Parent = titleBar
 
 local minimized = false
-
 btnMinimize.MouseButton1Click:Connect(function()
     minimized = not minimized
-
-    mainFrame.Size =
-        minimized and UDim2.new(0, 300, 0, 24)
-        or UDim2.new(0, 300, 0, 220)
+    mainFrame.Size = minimized and UDim2.new(0, 300, 0, 24) or UDim2.new(0, 300, 0, 220)
 end)
 
 -- Close Button
@@ -116,13 +107,9 @@ btnClose.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 btnClose.Parent = titleBar
 
 btnClose.MouseButton1Click:Connect(function()
-    if lockonConnection then
-        lockonConnection:Disconnect()
-    end
-
+    if lockonConnection then lockonConnection:Disconnect() end
     lockonEnabled = false
     lockonPredictEnabled = false
-
     screenGui:Destroy()
 end)
 
@@ -139,7 +126,7 @@ txtUser.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 txtUser.TextColor3 = Color3.fromRGB(255, 255, 255)
 txtUser.Parent = mainFrame
 
--- Lockon Toggle Button
+-- Lockon Toggle Button (normal snap)
 local btnToggle = Instance.new("TextButton")
 btnToggle.Name = "BtnToggle"
 btnToggle.Text = "Lockon: OFF"
@@ -151,10 +138,10 @@ btnToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
 btnToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 btnToggle.Parent = mainFrame
 
--- Lockon Predict Toggle
+-- lockon predict toggle
 local btnLockonPredict = Instance.new("TextButton")
 btnLockonPredict.Name = "BtnLockonPredict"
-btnLockonPredict.Text = "Predict: OFF"
+btnLockonPredict.Text = "LockonPredict: OFF"
 btnLockonPredict.Font = Enum.Font.SourceSansBold
 btnLockonPredict.TextSize = 16
 btnLockonPredict.Size = UDim2.new(0, 100, 0, 30)
@@ -163,13 +150,13 @@ btnLockonPredict.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
 btnLockonPredict.TextColor3 = Color3.fromRGB(255, 255, 255)
 btnLockonPredict.Parent = mainFrame
 
--- Snap Toggle
+-- NEW SNAP TOGGLE BUTTON
 local btnSnap = Instance.new("TextButton")
 btnSnap.Name = "BtnSnap"
 btnSnap.Text = "Snap: OFF"
 btnSnap.Font = Enum.Font.SourceSansBold
 btnSnap.TextSize = 16
-btnSnap.Size = UDim2.new(0, 90, 0, 30)
+btnSnap.Size = UDim2.new(0, 100, 0, 30)
 btnSnap.Position = UDim2.new(0, 110, 0, 68)
 btnSnap.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
 btnSnap.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -233,41 +220,22 @@ local draggingSlider = false
 
 local function updateSliderFromStrength()
     if not sliderBar or not sliderKnob then return end
-
     local barAbsSize = sliderBar.AbsoluteSize.X
-
     if barAbsSize <= 0 then return end
-
     local t = math.clamp(predictionStrength, 0, 1)
     local x = t * barAbsSize
-
-    sliderKnob.Position = UDim2.new(
-        0,
-        sliderBar.Position.X.Offset + x - 5,
-        0,
-        sliderKnob.Position.Y.Offset
-    )
-
+    sliderKnob.Position = UDim2.new(0, sliderBar.Position.X.Offset + x - 5, 0, sliderKnob.Position.Y.Offset)
     valueLabel.Text = string.format("%.2f", predictionStrength)
 end
 
 local function setStrengthFromX(x)
     local barPos = sliderBar.AbsolutePosition.X
     local barSize = sliderBar.AbsoluteSize.X
-
     local rel = math.clamp(x - barPos, 0, barSize)
     local t = rel / barSize
-
     predictionStrength = round(t, 2)
-
     valueLabel.Text = string.format("%.2f", predictionStrength)
-
-    sliderKnob.Position = UDim2.new(
-        0,
-        sliderBar.Position.X.Offset + rel - 5,
-        0,
-        sliderKnob.Position.Y.Offset
-    )
+    sliderKnob.Position = UDim2.new(0, sliderBar.Position.X.Offset + rel - 5, 0, sliderKnob.Position.Y.Offset)
 end
 
 sliderBar.InputBegan:Connect(function(input)
@@ -295,6 +263,7 @@ UserInput.InputEnded:Connect(function(input)
     end
 end)
 
+-- initialize slider position
 task.defer(updateSliderFromStrength)
 
 --------------------------------------------------------------------
@@ -307,7 +276,6 @@ local function getTargetPlayers(text)
 
     for _, raw in ipairs(parts) do
         local partial = raw:lower():gsub("%s+", "")
-
         if partial ~= "" then
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr ~= localPlayer and plr.Name:lower():find(partial, 1, true) then
@@ -322,7 +290,6 @@ end
 
 txtUser.FocusLost:Connect(function()
     local list = getTargetPlayers(txtUser.Text)
-
     if #list > 0 then
         txtUser.BackgroundColor3 = Color3.fromRGB(25, 50, 25)
     else
@@ -331,29 +298,21 @@ txtUser.FocusLost:Connect(function()
 end)
 
 --------------------------------------------------------------------
--- LOCKON LOOP
+-- LOCKON LOOP (closest wins)
 --------------------------------------------------------------------
 
 local function startLockon()
     if lockonConnection then return end
 
     lockonConnection = RunService.RenderStepped:Connect(function()
-        if not (lockonEnabled or lockonPredictEnabled) then
-            return
-        end
+        if not (lockonEnabled or lockonPredictEnabled) then return end
 
         local candidates = getTargetPlayers(txtUser.Text)
-
-        if #candidates == 0 then
-            return
-        end
+        if #candidates == 0 then return end
 
         local myChar = localPlayer.Character
         local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-
-        if not myHRP then
-            return
-        end
+        if not myHRP then return end
 
         local closestHRP = nil
         local closestDist = math.huge
@@ -363,6 +322,7 @@ local function startLockon()
                 local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
                 local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
 
+                -- Skip dead targets until they respawn
                 if humanoid and humanoid.Health > 0 and hrp then
                     local dist = (hrp.Position - myHRP.Position).Magnitude
 
@@ -375,7 +335,10 @@ local function startLockon()
         end
 
         if closestHRP then
+            local targetPosition
+
             if lockonPredictEnabled then
+               
                 local targetPos = closestHRP.Position
                 local targetVel = closestHRP.Velocity
 
@@ -387,32 +350,23 @@ local function startLockon()
                 local distanceFactor = math.clamp(dist / 60, 0, 2)
                 local velocityFactor = math.clamp(speed / 20, 0, 2)
 
-                local predictionTime =
-                    basePrediction *
-                    (0.5 + 0.5 * distanceFactor + 0.5 * velocityFactor)
-
-                local predictedPos = targetPos + targetVel * predictionTime
-
-                local targetCFrame =
-                    CFrame.lookAt(camera.CFrame.Position, predictedPos)
-
-                if snapEnabled then
-                    camera.CFrame = targetCFrame
-                else
-                    camera.CFrame =
-                        camera.CFrame:Lerp(targetCFrame, smoothness)
-                end
+                local predictionTime = basePrediction * (0.5 + 0.5 * distanceFactor + 0.5 * velocityFactor)
+                targetPosition = targetPos + targetVel * predictionTime
             else
-                local targetCFrame =
-                    CFrame.lookAt(camera.CFrame.Position, closestHRP.Position)
-
-                if snapEnabled then
-                    camera.CFrame = targetCFrame
-                else
-                    camera.CFrame =
-                        camera.CFrame:Lerp(targetCFrame, smoothness)
-                end
+                targetPosition = closestHRP.Position
             end
+
+            local targetCFrame = CFrame.lookAt(camera.CFrame.Position, targetPosition)
+
+            if snapEnabled then
+                camera.CFrame = targetCFrame
+            else
+                camera.CFrame = camera.CFrame:Lerp(targetCFrame, smoothness)
+            end
+
+            lastTargetHRP = closestHRP
+        else
+            lastTargetHRP = nil
         end
     end)
 end
@@ -422,29 +376,15 @@ end
 --------------------------------------------------------------------
 
 local function updateButtons()
-    btnToggle.Text =
-        "Lockon: " .. (lockonEnabled and "ON" or "OFF")
+    btnToggle.Text = "Lockon: " .. (lockonEnabled and "ON" or "OFF")
+    btnToggle.BackgroundColor3 = lockonEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
 
-    btnToggle.BackgroundColor3 =
-        lockonEnabled
-        and Color3.fromRGB(0, 70, 0)
-        or Color3.fromRGB(70, 0, 0)
+    btnLockonPredict.Text = "Predict: " .. (lockonPredictEnabled and "ON" or "OFF")
+    btnLockonPredict.BackgroundColor3 = lockonPredictEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
 
-    btnLockonPredict.Text =
-        "Predict: " .. (lockonPredictEnabled and "ON" or "OFF")
-
-    btnLockonPredict.BackgroundColor3 =
-        lockonPredictEnabled
-        and Color3.fromRGB(0, 70, 0)
-        or Color3.fromRGB(70, 0, 0)
-
-    btnSnap.Text =
-        "Snap: " .. (snapEnabled and "ON" or "OFF")
-
-    btnSnap.BackgroundColor3 =
-        snapEnabled
-        and Color3.fromRGB(0, 70, 0)
-        or Color3.fromRGB(70, 0, 0)
+    -- NEW
+    btnSnap.Text = "Snap: " .. (snapEnabled and "ON" or "OFF")
+    btnSnap.BackgroundColor3 = snapEnabled and Color3.fromRGB(0, 70, 0) or Color3.fromRGB(70, 0, 0)
 end
 
 local function stopConnectionIfNeeded()
@@ -458,28 +398,25 @@ end
 
 local function toggleLockon()
     lockonEnabled = not lockonEnabled
-
     if lockonEnabled then
         lockonPredictEnabled = false
         startLockon()
     end
-
     updateButtons()
     stopConnectionIfNeeded()
 end
 
 local function toggleLockonPredict()
     lockonPredictEnabled = not lockonPredictEnabled
-
     if lockonPredictEnabled then
         lockonEnabled = false
         startLockon()
     end
-
     updateButtons()
     stopConnectionIfNeeded()
 end
 
+-- NEW
 local function toggleSnap()
     snapEnabled = not snapEnabled
     updateButtons()
@@ -500,9 +437,7 @@ UserInput.InputBegan:Connect(function(input, gp)
         txtUser:CaptureFocus()
     end
 
-    if input.KeyCode == Enum.KeyCode.Return
-        or input.KeyCode == Enum.KeyCode.KeypadEnter then
-
+    if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
         if txtUser:IsFocused() then
             txtUser:ReleaseFocus()
         end
@@ -515,8 +450,6 @@ UserInput.InputBegan:Connect(function(input, gp)
     if input.KeyCode == Enum.KeyCode.U then
         toggleLockonPredict()
     end
-
-    if input.KeyCode == Enum.KeyCode.P then
-        toggleSnap()
-    end
 end)
+
+updateButtons()
