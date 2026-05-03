@@ -24,7 +24,7 @@ local selectedTargetPlayer = nil
 local hoveredTargetPlayer = nil
 
 -- BIGGER HITBOX SETTINGS
-local targetRadius = 120 -- bigger = easier target selection
+local targetRadius = 120
 
 local function round(num, decimals)
     local mult = 10 ^ (decimals or 0)
@@ -205,7 +205,7 @@ btnAutoSelect.TextColor3 = Color3.fromRGB(255,255,255)
 btnAutoSelect.Parent = mainFrame
 
 local targetFoundLabel = Instance.new("TextLabel")
-targetFoundLabel.Size = UDim2.new(0,90,0,20)
+targetFoundLabel.Size = UDim2.new(0,140,0,20)
 targetFoundLabel.Position = UDim2.new(0,212,0,107)
 targetFoundLabel.BackgroundTransparency = 1
 targetFoundLabel.Font = Enum.Font.SourceSansBold
@@ -353,9 +353,6 @@ end
 
 --------------------------------------------------------------------
 -- AUTO SELECT DETECTION
--- NOW USES SCREEN DISTANCE INSTEAD OF RAYCAST
--- THIS ALLOWS TARGETING THROUGH WALLS
--- AND MAKES HITBOX BIGGER
 --------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
@@ -400,10 +397,16 @@ RunService.RenderStepped:Connect(function()
 
     if closestPlayer then
         hoveredTargetPlayer = closestPlayer
-        targetFoundLabel.Text = "Target Found"
+
+        if not selectedTargetPlayer then
+            targetFoundLabel.Text = "Target Found"
+        end
     else
         hoveredTargetPlayer = nil
-        targetFoundLabel.Text = ""
+
+        if not selectedTargetPlayer then
+            targetFoundLabel.Text = ""
+        end
     end
 end)
 
@@ -505,10 +508,6 @@ local function startLockon()
                     targetPosition
                 )
 
-            --------------------------------------------------------
-            -- SWITCH SMOOTHING
-            --------------------------------------------------------
-
             if lastTargetHRP ~= closestHRP then
 
                 if not snapEnabled then
@@ -546,10 +545,6 @@ local function startLockon()
 
                 lastTargetHRP = closestHRP
             end
-
-            --------------------------------------------------------
-            -- HARD LOCK
-            --------------------------------------------------------
 
             if not transitionActive then
                 camera.CFrame = targetCFrame
@@ -602,31 +597,6 @@ local function updateButtons()
         autoSelectEnabled
         and Color3.fromRGB(0,70,0)
         or Color3.fromRGB(70,0,0)
-
-    if autoSelectEnabled then
-        txtUser.BackgroundColor3 = Color3.fromRGB(70,70,70)
-        txtUser.TextEditable = false
-    else
-        txtUser.BackgroundColor3 = Color3.fromRGB(40,40,40)
-        txtUser.TextEditable = true
-    end
-end
-
---------------------------------------------------------------------
--- CLEANUP
---------------------------------------------------------------------
-
-local function stopConnectionIfNeeded()
-
-    if not lockonEnabled
-    and not lockonPredictEnabled
-    then
-
-        if lockonConnection then
-            lockonConnection:Disconnect()
-            lockonConnection = nil
-        end
-    end
 end
 
 --------------------------------------------------------------------
@@ -643,7 +613,6 @@ local function toggleLockon()
     end
 
     updateButtons()
-    stopConnectionIfNeeded()
 end
 
 local function togglePredict()
@@ -657,7 +626,6 @@ local function togglePredict()
     end
 
     updateButtons()
-    stopConnectionIfNeeded()
 end
 
 local function toggleSnap()
@@ -706,28 +674,35 @@ UserInput.InputBegan:Connect(function(input, gp)
     end
 
     ----------------------------------------------------------------
-    -- E = TOGGLE LOCK ON / LOCK OFF
+    -- E = TOGGLE LOCK / UNLOCK
     ----------------------------------------------------------------
 
     if input.KeyCode == Enum.KeyCode.E then
 
         if autoSelectEnabled then
 
-            -- LOCK OFF
+            -- UNLOCK
             if selectedTargetPlayer then
 
                 selectedTargetPlayer = nil
-                hoveredTargetPlayer = nil
                 lastTargetHRP = nil
-                targetFoundLabel.Text = ""
 
-            -- LOCK ON
+                targetFoundLabel.Text = "Unlocked"
+
+                task.delay(0.5, function()
+                    if targetFoundLabel and not selectedTargetPlayer then
+                        targetFoundLabel.Text = ""
+                    end
+                end)
+
+            -- LOCK
             elseif hoveredTargetPlayer then
 
-                selectedTargetPlayer =
-                    hoveredTargetPlayer
-
+                selectedTargetPlayer = hoveredTargetPlayer
                 lastTargetHRP = nil
+
+                targetFoundLabel.Text =
+                    "Locked: "..hoveredTargetPlayer.Name
             end
         end
     end
