@@ -23,6 +23,9 @@ local autoSelectEnabled = false
 local selectedTargetPlayer = nil
 local hoveredTargetPlayer = nil
 
+-- BIGGER HITBOX SETTINGS
+local targetRadius = 120 -- bigger = easier target selection
+
 local function round(num, decimals)
     local mult = 10 ^ (decimals or 0)
     return math.floor(num * mult + 0.5) / mult
@@ -350,6 +353,9 @@ end
 
 --------------------------------------------------------------------
 -- AUTO SELECT DETECTION
+-- NOW USES SCREEN DISTANCE INSTEAD OF RAYCAST
+-- THIS ALLOWS TARGETING THROUGH WALLS
+-- AND MAKES HITBOX BIGGER
 --------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
@@ -362,50 +368,43 @@ RunService.RenderStepped:Connect(function()
 
     local mousePos = UserInput:GetMouseLocation()
 
-    local ray =
-        camera:ViewportPointToRay(
-            mousePos.X,
-            mousePos.Y
-        )
+    local closestPlayer = nil
+    local closestDistance = targetRadius
 
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    for _, plr in ipairs(Players:GetPlayers()) do
 
-    if localPlayer.Character then
-        rayParams.FilterDescendantsInstances = {
-            localPlayer.Character
-        }
-    end
+        if plr ~= localPlayer and plr.Character then
 
-    local result =
-        workspace:Raycast(
-            ray.Origin,
-            ray.Direction * 1000,
-            rayParams
-        )
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
 
-    if result and result.Instance then
+            if hrp and humanoid and humanoid.Health > 0 then
 
-        local model =
-            result.Instance:FindFirstAncestorOfClass("Model")
+                local screenPos, onScreen =
+                    camera:WorldToViewportPoint(hrp.Position)
 
-        if model then
+                if onScreen then
 
-            local player =
-                Players:GetPlayerFromCharacter(model)
+                    local dist =
+                        (Vector2.new(screenPos.X, screenPos.Y)
+                        - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
 
-            if player and player ~= localPlayer then
-
-                hoveredTargetPlayer = player
-                targetFoundLabel.Text = "Target Found"
-
-                return
+                    if dist < closestDistance then
+                        closestDistance = dist
+                        closestPlayer = plr
+                    end
+                end
             end
         end
     end
 
-    hoveredTargetPlayer = nil
-    targetFoundLabel.Text = ""
+    if closestPlayer then
+        hoveredTargetPlayer = closestPlayer
+        targetFoundLabel.Text = "Target Found"
+    else
+        hoveredTargetPlayer = nil
+        targetFoundLabel.Text = ""
+    end
 end)
 
 --------------------------------------------------------------------
@@ -473,7 +472,7 @@ local function startLockon()
             if lockonPredictEnabled then
 
                 local targetPos = closestHRP.Position
-                local targetVel = closestHRP.Velocity
+                local targetVel = closestHRP.AssemblyLinearVelocity
 
                 local rel = targetPos - myHRP.Position
                 local dist = rel.Magnitude
@@ -706,16 +705,30 @@ UserInput.InputBegan:Connect(function(input, gp)
         end
     end
 
-    -- CONFIRM TARGET
+    ----------------------------------------------------------------
+    -- E = TOGGLE LOCK ON / LOCK OFF
+    ----------------------------------------------------------------
+
     if input.KeyCode == Enum.KeyCode.E then
 
-        if autoSelectEnabled
-        and hoveredTargetPlayer
-        then
-            selectedTargetPlayer =
-                hoveredTargetPlayer
+        if autoSelectEnabled then
 
-            lastTargetHRP = nil
+            -- LOCK OFF
+            if selectedTargetPlayer then
+
+                selectedTargetPlayer = nil
+                hoveredTargetPlayer = nil
+                lastTargetHRP = nil
+                targetFoundLabel.Text = ""
+
+            -- LOCK ON
+            elseif hoveredTargetPlayer then
+
+                selectedTargetPlayer =
+                    hoveredTargetPlayer
+
+                lastTargetHRP = nil
+            end
         end
     end
 
