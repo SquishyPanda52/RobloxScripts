@@ -349,7 +349,7 @@ local function getTargetPlayers(text)
 end
 
 --------------------------------------------------------------------
--- Auto Select
+-- AUTO SELECT DETECTION
 --------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
@@ -362,74 +362,50 @@ RunService.RenderStepped:Connect(function()
 
     local mousePos = UserInput:GetMouseLocation()
 
-    local bestPlayer = nil
-    local bestDistance = math.huge
+    local ray =
+        camera:ViewportPointToRay(
+            mousePos.X,
+            mousePos.Y
+        )
 
-    -- BIGGER LOCK HITBOX
-    local maxScreenDistance = 140
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
 
-    for _, plr in ipairs(Players:GetPlayers()) do
+    if localPlayer.Character then
+        rayParams.FilterDescendantsInstances = {
+            localPlayer.Character
+        }
+    end
 
-        if plr ~= localPlayer
-        and plr.Character
-        then
+    local result =
+        workspace:Raycast(
+            ray.Origin,
+            ray.Direction * 1000,
+            rayParams
+        )
 
-            local hrp =
-                plr.Character:FindFirstChild(
-                    "HumanoidRootPart"
-                )
+    if result and result.Instance then
 
-            local humanoid =
-                plr.Character:FindFirstChildOfClass(
-                    "Humanoid"
-                )
+        local model =
+            result.Instance:FindFirstAncestorOfClass("Model")
 
-            if hrp
-            and humanoid
-            and humanoid.Health > 0
-            then
+        if model then
 
-                local screenPos, onScreen =
-                    camera:WorldToViewportPoint(
-                        hrp.Position
-                    )
+            local player =
+                Players:GetPlayerFromCharacter(model)
 
-                if onScreen then
+            if player and player ~= localPlayer then
 
-                    local dist =
-                        (
-                            Vector2.new(
-                                screenPos.X,
-                                screenPos.Y
-                            )
-                            - Vector2.new(
-                                mousePos.X,
-                                mousePos.Y
-                            )
-                        ).Magnitude
+                hoveredTargetPlayer = player
+                targetFoundLabel.Text = "Target Found"
 
-                    if dist < maxScreenDistance
-                    and dist < bestDistance
-                    then
-                        bestDistance = dist
-                        bestPlayer = plr
-                    end
-                end
+                return
             end
         end
     end
 
-    if bestPlayer then
-
-        hoveredTargetPlayer = bestPlayer
-        targetFoundLabel.Text =
-            "Target Found"
-
-    else
-
-        hoveredTargetPlayer = nil
-        targetFoundLabel.Text = ""
-    end
+    hoveredTargetPlayer = nil
+    targetFoundLabel.Text = ""
 end)
 
 --------------------------------------------------------------------
