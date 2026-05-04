@@ -8,7 +8,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -27,6 +26,8 @@ end
 
 local enabled = false
 local clickingThread = nil
+local destroyed = false
+local connections = {}
 
 --////////////////////////////////////////////////////
 -- GUI
@@ -42,7 +43,7 @@ gui.Parent = playerGui
 ------------------------------------------------------
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 260, 0, 150)
+frame.Size = UDim2.new(0, 280, 0, 180)
 frame.Position = UDim2.new(0.02, 0, 0.3, 0)
 frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
 frame.BorderSizePixel = 0
@@ -53,86 +54,152 @@ corner.CornerRadius = UDim.new(0,10)
 corner.Parent = frame
 
 ------------------------------------------------------
--- TITLE
+-- TOP BAR
 ------------------------------------------------------
 
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1,0,0,30)
+topBar.BackgroundColor3 = Color3.fromRGB(35,35,35)
+topBar.BorderSizePixel = 0
+topBar.Parent = frame
+
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0,10)
+topCorner.Parent = topBar
+
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,0,0,30)
+title.Size = UDim2.new(1,-70,1,0)
+title.Position = UDim2.new(0,10,0,0)
 title.BackgroundTransparency = 1
-title.Text = "Auto Clicker (Y = Toggle)"
+title.Text = "Auto Clicker"
 title.TextColor3 = Color3.new(1,1,1)
 title.Font = Enum.Font.SourceSansBold
 title.TextSize = 20
-title.Parent = frame
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = topBar
+
+------------------------------------------------------
+-- MINIMIZE BUTTON
+------------------------------------------------------
+
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.new(0,30,0,30)
+minimizeBtn.Position = UDim2.new(1,-60,0,0)
+minimizeBtn.Text = "-"
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+minimizeBtn.TextColor3 = Color3.new(1,1,1)
+minimizeBtn.Font = Enum.Font.SourceSansBold
+minimizeBtn.TextSize = 22
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Parent = topBar
+
+------------------------------------------------------
+-- CLOSE BUTTON
+------------------------------------------------------
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0,30,0,30)
+closeBtn.Position = UDim2.new(1,-30,0,0)
+closeBtn.Text = "X"
+closeBtn.BackgroundColor3 = Color3.fromRGB(120,30,30)
+closeBtn.TextColor3 = Color3.new(1,1,1)
+closeBtn.Font = Enum.Font.SourceSansBold
+closeBtn.TextSize = 20
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = topBar
+
+------------------------------------------------------
+-- CONTENT FRAME
+------------------------------------------------------
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1,0,1,-30)
+content.Position = UDim2.new(0,0,0,30)
+content.BackgroundTransparency = 1
+content.Parent = frame
 
 ------------------------------------------------------
 -- CLICK SPEED
 ------------------------------------------------------
 
 local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(0,120,0,25)
-speedLabel.Position = UDim2.new(0,10,0,40)
+speedLabel.Size = UDim2.new(0,130,0,25)
+speedLabel.Position = UDim2.new(0,10,0,10)
 speedLabel.BackgroundTransparency = 1
 speedLabel.Text = "Clicks Per Sec:"
 speedLabel.TextColor3 = Color3.new(1,1,1)
 speedLabel.Font = Enum.Font.SourceSans
 speedLabel.TextSize = 18
 speedLabel.TextXAlignment = Enum.TextXAlignment.Left
-speedLabel.Parent = frame
+speedLabel.Parent = content
 
 local speedBox = Instance.new("TextBox")
 speedBox.Size = UDim2.new(0,100,0,25)
-speedBox.Position = UDim2.new(1,-110,0,40)
+speedBox.Position = UDim2.new(1,-110,0,10)
 speedBox.Text = "10"
 speedBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
 speedBox.TextColor3 = Color3.new(1,1,1)
 speedBox.Font = Enum.Font.SourceSans
 speedBox.TextSize = 18
 speedBox.ClearTextOnFocus = false
-speedBox.Parent = frame
+speedBox.Parent = content
 
 ------------------------------------------------------
 -- DURATION
 ------------------------------------------------------
 
 local durationLabel = Instance.new("TextLabel")
-durationLabel.Size = UDim2.new(0,120,0,25)
-durationLabel.Position = UDim2.new(0,10,0,75)
+durationLabel.Size = UDim2.new(0,130,0,25)
+durationLabel.Position = UDim2.new(0,10,0,45)
 durationLabel.BackgroundTransparency = 1
 durationLabel.Text = "Duration (sec):"
 durationLabel.TextColor3 = Color3.new(1,1,1)
 durationLabel.Font = Enum.Font.SourceSans
 durationLabel.TextSize = 18
 durationLabel.TextXAlignment = Enum.TextXAlignment.Left
-durationLabel.Parent = frame
+durationLabel.Parent = content
 
 local durationBox = Instance.new("TextBox")
 durationBox.Size = UDim2.new(0,100,0,25)
-durationBox.Position = UDim2.new(1,-110,0,75)
+durationBox.Position = UDim2.new(1,-110,0,45)
 durationBox.Text = "0"
 durationBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
 durationBox.TextColor3 = Color3.new(1,1,1)
 durationBox.Font = Enum.Font.SourceSans
 durationBox.TextSize = 18
 durationBox.ClearTextOnFocus = false
-durationBox.Parent = frame
+durationBox.Parent = content
 
 ------------------------------------------------------
 -- STATUS
 ------------------------------------------------------
 
 local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1,0,0,25)
-status.Position = UDim2.new(0,0,1,-30)
+status.Size = UDim2.new(1,0,0,30)
+status.Position = UDim2.new(0,0,0,90)
 status.BackgroundTransparency = 1
 status.Text = "OFF"
 status.TextColor3 = Color3.fromRGB(255,80,80)
 status.Font = Enum.Font.SourceSansBold
-status.TextSize = 22
-status.Parent = frame
+status.TextSize = 24
+status.Parent = content
 
 ------------------------------------------------------
--- DRAGGABLE RED CLICK POINT
+-- KEYBIND NOTE
+------------------------------------------------------
+
+local note = Instance.new("TextLabel")
+note.Size = UDim2.new(1,0,0,25)
+note.Position = UDim2.new(0,0,0,120)
+note.BackgroundTransparency = 1
+note.Text = "Toggle Keybind: Y"
+note.TextColor3 = Color3.fromRGB(180,180,180)
+note.Font = Enum.Font.SourceSansItalic
+note.TextSize = 18
+note.Parent = content
+
+------------------------------------------------------
+-- RED CLICK CIRCLE
 ------------------------------------------------------
 
 local clickPoint = Instance.new("Frame")
@@ -148,57 +215,83 @@ clickCorner.CornerRadius = UDim.new(1,0)
 clickCorner.Parent = clickPoint
 
 ------------------------------------------------------
--- DRAGGING
+-- CENTER DOT (EXACT CLICK POINT)
 ------------------------------------------------------
 
-local dragging = false
-local dragInput
-local dragStart
-local startPos
+local centerDot = Instance.new("Frame")
+centerDot.Size = UDim2.new(0,4,0,4)
+centerDot.Position = UDim2.new(0.5,-2,0.5,-2)
+centerDot.BackgroundColor3 = Color3.new(1,1,1)
+centerDot.BorderSizePixel = 0
+centerDot.Parent = clickPoint
 
-clickPoint.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = true
-		dragStart = input.Position
-		startPos = clickPoint.Position
+local dotCorner = Instance.new("UICorner")
+dotCorner.CornerRadius = UDim.new(1,0)
+dotCorner.Parent = centerDot
 
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
-	end
-end)
+--////////////////////////////////////////////////////
+-- DRAGGING FUNCTION
+--////////////////////////////////////////////////////
 
-clickPoint.InputChanged:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseMovement then
-		dragInput = input
-	end
-end)
+local function makeDraggable(dragObject, moveObject)
 
-UserInputService.InputChanged:Connect(function(input)
-	if input == dragInput and dragging then
-		local delta = input.Position - dragStart
+	local dragging = false
+	local dragInput
+	local dragStart
+	local startPos
 
-		clickPoint.Position = UDim2.new(
-			startPos.X.Scale,
-			startPos.X.Offset + delta.X,
-			startPos.Y.Scale,
-			startPos.Y.Offset + delta.Y
-		)
-	end
-end)
+	table.insert(connections, dragObject.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+
+			dragging = true
+			dragStart = input.Position
+			startPos = moveObject.Position
+
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end))
+
+	table.insert(connections, dragObject.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			dragInput = input
+		end
+	end))
+
+	table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+
+		if dragging and input == dragInput then
+
+			local delta = input.Position - dragStart
+
+			moveObject.Position = UDim2.new(
+				startPos.X.Scale,
+				startPos.X.Offset + delta.X,
+				startPos.Y.Scale,
+				startPos.Y.Offset + delta.Y
+			)
+		end
+	end))
+end
+
+makeDraggable(topBar, frame)
+makeDraggable(clickPoint, clickPoint)
 
 --////////////////////////////////////////////////////
 -- CLICK FUNCTION
 --////////////////////////////////////////////////////
 
 local function doClick()
-	local absPos = clickPoint.AbsolutePosition
-	local absSize = clickPoint.AbsoluteSize
 
-	local x = absPos.X + (absSize.X / 2)
-	local y = absPos.Y + (absSize.Y / 2)
+	-- EXACT CENTER OF RED CIRCLE
+	local pos = clickPoint.AbsolutePosition
+	local size = clickPoint.AbsoluteSize
+
+	local x = pos.X + (size.X / 2)
+	local y = pos.Y + (size.Y / 2)
 
 	VirtualInputManager:SendMouseButtonEvent(
 		x,
@@ -220,7 +313,7 @@ local function doClick()
 end
 
 --////////////////////////////////////////////////////
--- AUTO CLICKER LOOP
+-- AUTO CLICK LOOP
 --////////////////////////////////////////////////////
 
 local function startClicking()
@@ -237,15 +330,12 @@ local function startClicking()
 		end
 
 		local duration = tonumber(durationBox.Text) or 0
-
 		local delayTime = 1 / cps
 		local startTime = tick()
 
 		print("[AutoClicker] Started")
-		print("[AutoClicker] CPS:", cps)
-		print("[AutoClicker] Duration:", duration)
 
-		while enabled do
+		while enabled and not destroyed do
 
 			doClick()
 
@@ -271,10 +361,14 @@ local function startClicking()
 end
 
 --////////////////////////////////////////////////////
--- TOGGLE KEY
+-- TOGGLE
 --////////////////////////////////////////////////////
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+
+	if destroyed then
+		return
+	end
 
 	if gameProcessed then
 		return
@@ -285,17 +379,68 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		enabled = not enabled
 
 		if enabled then
+
 			status.Text = "ON"
 			status.TextColor3 = Color3.fromRGB(80,255,80)
 
 			startClicking()
+
 		else
+
 			status.Text = "OFF"
 			status.TextColor3 = Color3.fromRGB(255,80,80)
+
 		end
 
 		print("[AutoClicker] Toggle:", enabled)
 	end
+end))
+
+--////////////////////////////////////////////////////
+-- MINIMIZE
+--////////////////////////////////////////////////////
+
+local minimized = false
+
+minimizeBtn.MouseButton1Click:Connect(function()
+
+	minimized = not minimized
+
+	content.Visible = not minimized
+
+	if minimized then
+		frame.Size = UDim2.new(0,280,0,30)
+		minimizeBtn.Text = "+"
+	else
+		frame.Size = UDim2.new(0,280,0,180)
+		minimizeBtn.Text = "-"
+	end
+end)
+
+--////////////////////////////////////////////////////
+-- FULL CLEANUP
+--////////////////////////////////////////////////////
+
+local function destroyEverything()
+
+	destroyed = true
+	enabled = false
+
+	for _, conn in pairs(connections) do
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+
+	if gui then
+		gui:Destroy()
+	end
+
+	print("[AutoClicker] Fully Destroyed")
+end
+
+closeBtn.MouseButton1Click:Connect(function()
+	destroyEverything()
 end)
 
 print("[AutoClicker] Loaded Successfully")
