@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local VirtualUser = game:GetService("VirtualUser")
+local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -28,6 +29,7 @@ end
 local enabled = false
 local clickingThread = nil
 local destroyed = false
+local minimized = false
 local connections = {}
 
 --////////////////////////////////////////////////////
@@ -37,6 +39,7 @@ local connections = {}
 local gui = Instance.new("ScreenGui")
 gui.Name = "RuntimeAutoClicker"
 gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 ------------------------------------------------------
@@ -46,31 +49,31 @@ gui.Parent = playerGui
 local frame = Instance.new("Frame")
 frame.Size = UDim2.new(0, 280, 0, 180)
 frame.Position = UDim2.new(0.02, 0, 0.3, 0)
-frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 frame.BorderSizePixel = 0
 frame.Parent = gui
 
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0,10)
-corner.Parent = frame
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 10)
+frameCorner.Parent = frame
 
 ------------------------------------------------------
 -- TOP BAR
 ------------------------------------------------------
 
 local topBar = Instance.new("Frame")
-topBar.Size = UDim2.new(1,0,0,30)
-topBar.BackgroundColor3 = Color3.fromRGB(35,35,35)
+topBar.Size = UDim2.new(1, 0, 0, 30)
+topBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 topBar.BorderSizePixel = 0
 topBar.Parent = frame
 
 local topCorner = Instance.new("UICorner")
-topCorner.CornerRadius = UDim.new(0,10)
+topCorner.CornerRadius = UDim.new(0, 10)
 topCorner.Parent = topBar
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,-70,1,0)
-title.Position = UDim2.new(0,10,0,0)
+title.Size = UDim2.new(1, -70, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
 title.Text = "Auto Clicker"
 title.TextColor3 = Color3.new(1,1,1)
@@ -84,8 +87,8 @@ title.Parent = topBar
 ------------------------------------------------------
 
 local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0,30,0,30)
-minimizeBtn.Position = UDim2.new(1,-60,0,0)
+minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+minimizeBtn.Position = UDim2.new(1, -60, 0, 0)
 minimizeBtn.Text = "-"
 minimizeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
 minimizeBtn.TextColor3 = Color3.new(1,1,1)
@@ -99,8 +102,8 @@ minimizeBtn.Parent = topBar
 ------------------------------------------------------
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0,30,0,30)
-closeBtn.Position = UDim2.new(1,-30,0,0)
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -30, 0, 0)
 closeBtn.Text = "X"
 closeBtn.BackgroundColor3 = Color3.fromRGB(120,30,30)
 closeBtn.TextColor3 = Color3.new(1,1,1)
@@ -110,12 +113,12 @@ closeBtn.BorderSizePixel = 0
 closeBtn.Parent = topBar
 
 ------------------------------------------------------
--- CONTENT FRAME
+-- CONTENT
 ------------------------------------------------------
 
 local content = Instance.new("Frame")
-content.Size = UDim2.new(1,0,1,-30)
-content.Position = UDim2.new(0,0,0,30)
+content.Size = UDim2.new(1, 0, 1, -30)
+content.Position = UDim2.new(0, 0, 0, 30)
 content.BackgroundTransparency = 1
 content.Parent = frame
 
@@ -231,7 +234,7 @@ dotCorner.CornerRadius = UDim.new(1,0)
 dotCorner.Parent = centerDot
 
 --////////////////////////////////////////////////////
--- DRAGGING FUNCTION
+-- DRAGGING
 --////////////////////////////////////////////////////
 
 local function makeDraggable(dragObject, moveObject)
@@ -250,7 +253,6 @@ local function makeDraggable(dragObject, moveObject)
 			startPos = moveObject.Position
 
 			input.Changed:Connect(function()
-
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
 				end
@@ -259,7 +261,6 @@ local function makeDraggable(dragObject, moveObject)
 	end))
 
 	table.insert(connections, dragObject.InputChanged:Connect(function(input)
-
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			dragInput = input
 		end
@@ -291,21 +292,27 @@ makeDraggable(clickPoint, clickPoint)
 local function doClick()
 
 	-- EXACT CENTER OF RED CIRCLE
-	local pos = clickPoint.AbsolutePosition
-	local size = clickPoint.AbsoluteSize
+	local absPos = clickPoint.AbsolutePosition
+	local absSize = clickPoint.AbsoluteSize
 
-	local x = pos.X + (size.X / 2)
-	local y = pos.Y + (size.Y / 2)
+	local centerX = absPos.X + (absSize.X / 2)
+	local centerY = absPos.Y + (absSize.Y / 2)
 
-	-- FORCE CURSOR TO CENTER
-	VirtualUser:MoveMouse(Vector2.new(x, y))
+	-- FIX CURSOR OFFSET
+	local inset = GuiService:GetGuiInset()
+
+	local correctedX = centerX
+	local correctedY = centerY + inset.Y
+
+	-- FORCE CURSOR TO EXACT CENTER
+	VirtualUser:MoveMouse(Vector2.new(correctedX, correctedY))
 
 	task.wait()
 
-	-- CLICK
+	-- CLICK EXACT POSITION
 	VirtualInputManager:SendMouseButtonEvent(
-		x,
-		y,
+		correctedX,
+		correctedY,
 		0,
 		true,
 		game,
@@ -313,8 +320,8 @@ local function doClick()
 	)
 
 	VirtualInputManager:SendMouseButtonEvent(
-		x,
-		y,
+		correctedX,
+		correctedY,
 		0,
 		false,
 		game,
@@ -351,7 +358,6 @@ local function startClicking()
 			doClick()
 
 			if duration > 0 then
-
 				if tick() - startTime >= duration then
 					print("[AutoClicker] Duration ended")
 					enabled = false
@@ -412,8 +418,6 @@ end))
 -- MINIMIZE
 --////////////////////////////////////////////////////
 
-local minimized = false
-
 minimizeBtn.MouseButton1Click:Connect(function()
 
 	minimized = not minimized
@@ -430,7 +434,7 @@ minimizeBtn.MouseButton1Click:Connect(function()
 end)
 
 --////////////////////////////////////////////////////
--- FULL CLEANUP
+-- DESTROY EVERYTHING
 --////////////////////////////////////////////////////
 
 local function destroyEverything()
