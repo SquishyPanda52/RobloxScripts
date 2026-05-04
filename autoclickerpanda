@@ -1,0 +1,301 @@
+--// Runtime LocalScript
+--// Execute at runtime
+
+--////////////////////////////////////////////////////
+-- SERVICES
+--////////////////////////////////////////////////////
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+--////////////////////////////////////////////////////
+-- CLEAN OLD UI
+--////////////////////////////////////////////////////
+
+if playerGui:FindFirstChild("RuntimeAutoClicker") then
+	playerGui.RuntimeAutoClicker:Destroy()
+end
+
+--////////////////////////////////////////////////////
+-- VARIABLES
+--////////////////////////////////////////////////////
+
+local enabled = false
+local clickingThread = nil
+
+--////////////////////////////////////////////////////
+-- GUI
+--////////////////////////////////////////////////////
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "RuntimeAutoClicker"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+------------------------------------------------------
+-- MAIN FRAME
+------------------------------------------------------
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 260, 0, 150)
+frame.Position = UDim2.new(0.02, 0, 0.3, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0,10)
+corner.Parent = frame
+
+------------------------------------------------------
+-- TITLE
+------------------------------------------------------
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1,0,0,30)
+title.BackgroundTransparency = 1
+title.Text = "Auto Clicker (Y = Toggle)"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 20
+title.Parent = frame
+
+------------------------------------------------------
+-- CLICK SPEED
+------------------------------------------------------
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(0,120,0,25)
+speedLabel.Position = UDim2.new(0,10,0,40)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Clicks Per Sec:"
+speedLabel.TextColor3 = Color3.new(1,1,1)
+speedLabel.Font = Enum.Font.SourceSans
+speedLabel.TextSize = 18
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = frame
+
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.new(0,100,0,25)
+speedBox.Position = UDim2.new(1,-110,0,40)
+speedBox.Text = "10"
+speedBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+speedBox.TextColor3 = Color3.new(1,1,1)
+speedBox.Font = Enum.Font.SourceSans
+speedBox.TextSize = 18
+speedBox.ClearTextOnFocus = false
+speedBox.Parent = frame
+
+------------------------------------------------------
+-- DURATION
+------------------------------------------------------
+
+local durationLabel = Instance.new("TextLabel")
+durationLabel.Size = UDim2.new(0,120,0,25)
+durationLabel.Position = UDim2.new(0,10,0,75)
+durationLabel.BackgroundTransparency = 1
+durationLabel.Text = "Duration (sec):"
+durationLabel.TextColor3 = Color3.new(1,1,1)
+durationLabel.Font = Enum.Font.SourceSans
+durationLabel.TextSize = 18
+durationLabel.TextXAlignment = Enum.TextXAlignment.Left
+durationLabel.Parent = frame
+
+local durationBox = Instance.new("TextBox")
+durationBox.Size = UDim2.new(0,100,0,25)
+durationBox.Position = UDim2.new(1,-110,0,75)
+durationBox.Text = "0"
+durationBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+durationBox.TextColor3 = Color3.new(1,1,1)
+durationBox.Font = Enum.Font.SourceSans
+durationBox.TextSize = 18
+durationBox.ClearTextOnFocus = false
+durationBox.Parent = frame
+
+------------------------------------------------------
+-- STATUS
+------------------------------------------------------
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1,0,0,25)
+status.Position = UDim2.new(0,0,1,-30)
+status.BackgroundTransparency = 1
+status.Text = "OFF"
+status.TextColor3 = Color3.fromRGB(255,80,80)
+status.Font = Enum.Font.SourceSansBold
+status.TextSize = 22
+status.Parent = frame
+
+------------------------------------------------------
+-- DRAGGABLE RED CLICK POINT
+------------------------------------------------------
+
+local clickPoint = Instance.new("Frame")
+clickPoint.Size = UDim2.new(0,40,0,40)
+clickPoint.Position = UDim2.new(0.5,-20,0.5,-20)
+clickPoint.BackgroundColor3 = Color3.fromRGB(255,0,0)
+clickPoint.BackgroundTransparency = 0.35
+clickPoint.BorderSizePixel = 0
+clickPoint.Parent = gui
+
+local clickCorner = Instance.new("UICorner")
+clickCorner.CornerRadius = UDim.new(1,0)
+clickCorner.Parent = clickPoint
+
+------------------------------------------------------
+-- DRAGGING
+------------------------------------------------------
+
+local dragging = false
+local dragInput
+local dragStart
+local startPos
+
+clickPoint.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = clickPoint.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+clickPoint.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - dragStart
+
+		clickPoint.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+--////////////////////////////////////////////////////
+-- CLICK FUNCTION
+--////////////////////////////////////////////////////
+
+local function doClick()
+	local absPos = clickPoint.AbsolutePosition
+	local absSize = clickPoint.AbsoluteSize
+
+	local x = absPos.X + (absSize.X / 2)
+	local y = absPos.Y + (absSize.Y / 2)
+
+	VirtualInputManager:SendMouseButtonEvent(
+		x,
+		y,
+		0,
+		true,
+		game,
+		0
+	)
+
+	VirtualInputManager:SendMouseButtonEvent(
+		x,
+		y,
+		0,
+		false,
+		game,
+		0
+	)
+end
+
+--////////////////////////////////////////////////////
+-- AUTO CLICKER LOOP
+--////////////////////////////////////////////////////
+
+local function startClicking()
+
+	if clickingThread then
+		return
+	end
+
+	clickingThread = task.spawn(function()
+
+		local cps = tonumber(speedBox.Text) or 10
+		if cps <= 0 then
+			cps = 10
+		end
+
+		local duration = tonumber(durationBox.Text) or 0
+
+		local delayTime = 1 / cps
+		local startTime = tick()
+
+		print("[AutoClicker] Started")
+		print("[AutoClicker] CPS:", cps)
+		print("[AutoClicker] Duration:", duration)
+
+		while enabled do
+
+			doClick()
+
+			if duration > 0 then
+				if tick() - startTime >= duration then
+					print("[AutoClicker] Duration ended")
+					enabled = false
+					break
+				end
+			end
+
+			task.wait(delayTime)
+		end
+
+		status.Text = "OFF"
+		status.TextColor3 = Color3.fromRGB(255,80,80)
+
+		clickingThread = nil
+
+		print("[AutoClicker] Stopped")
+
+	end)
+end
+
+--////////////////////////////////////////////////////
+-- TOGGLE KEY
+--////////////////////////////////////////////////////
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+
+	if gameProcessed then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Y then
+
+		enabled = not enabled
+
+		if enabled then
+			status.Text = "ON"
+			status.TextColor3 = Color3.fromRGB(80,255,80)
+
+			startClicking()
+		else
+			status.Text = "OFF"
+			status.TextColor3 = Color3.fromRGB(255,80,80)
+		end
+
+		print("[AutoClicker] Toggle:", enabled)
+	end
+end)
+
+print("[AutoClicker] Loaded Successfully")
