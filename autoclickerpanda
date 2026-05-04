@@ -8,6 +8,7 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -215,7 +216,7 @@ clickCorner.CornerRadius = UDim.new(1,0)
 clickCorner.Parent = clickPoint
 
 ------------------------------------------------------
--- CENTER DOT (EXACT CLICK POINT)
+-- CENTER DOT
 ------------------------------------------------------
 
 local centerDot = Instance.new("Frame")
@@ -241,6 +242,7 @@ local function makeDraggable(dragObject, moveObject)
 	local startPos
 
 	table.insert(connections, dragObject.InputBegan:Connect(function(input)
+
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 
 			dragging = true
@@ -248,6 +250,7 @@ local function makeDraggable(dragObject, moveObject)
 			startPos = moveObject.Position
 
 			input.Changed:Connect(function()
+
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
 				end
@@ -256,6 +259,7 @@ local function makeDraggable(dragObject, moveObject)
 	end))
 
 	table.insert(connections, dragObject.InputChanged:Connect(function(input)
+
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			dragInput = input
 		end
@@ -293,6 +297,12 @@ local function doClick()
 	local x = pos.X + (size.X / 2)
 	local y = pos.Y + (size.Y / 2)
 
+	-- FORCE CURSOR TO CENTER
+	VirtualUser:MoveMouse(Vector2.new(x, y))
+
+	task.wait()
+
+	-- CLICK
 	VirtualInputManager:SendMouseButtonEvent(
 		x,
 		y,
@@ -325,6 +335,7 @@ local function startClicking()
 	clickingThread = task.spawn(function()
 
 		local cps = tonumber(speedBox.Text) or 10
+
 		if cps <= 0 then
 			cps = 10
 		end
@@ -340,6 +351,7 @@ local function startClicking()
 			doClick()
 
 			if duration > 0 then
+
 				if tick() - startTime >= duration then
 					print("[AutoClicker] Duration ended")
 					enabled = false
