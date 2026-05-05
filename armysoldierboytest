@@ -1,0 +1,370 @@
+--[[ 
+  Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
+  - Follow and Attack are mutually exclusive.
+  - Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
+  - New: Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
+  - Draggable, compact UI with minimize and hard close.
+  - Re-inject safe: re-running replaces previous instance cleanly.
+  - Added: Team Attack mode (separate attack mode that targets players by team name).
+  - Behavior: All attack modes (user-target and team-target) and follow are toggled off on death/respawn.
+]]
+
+-- Singleton cleanup (prevent duplicates)
+if _G.HiltonExec and _G.HiltonExec.Cleanup then
+    pcall(_G.HiltonExec.Cleanup)
+end
+_G.HiltonExec = {}
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+-- Locals
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- Config
+local FOLLOW_FAR = 8
+local FOLLOW_NEAR = 5
+local AUTOPRESS_HZ = 10
+local AUTOPRESS_MIN_HZ = 5
+local AUTOPRESS_MAX_HZ = 15
+local AUTOPRESS_START_DELAY = 0.35
+
+-- UI State
+local gui, mainFrame, titleBar, minBtn, closeBtn
+local content
+local followBtn, followBox
+local attackBtn, attackBox
+local teamAttackBtn, teamAttackBox
+local autoRow, autoLabel, autoBox
+local rateMinusBtn, rateLabel, ratePlusBtn
+
+-- Logic State
+local isMinimized = false
+local followEnabled = false
+local followTargetPlayer = nil
+
+local attackEnabled = false
+local attackNames = {}
+
+local teamAttackEnabled = false
+local teamAttackNames = {}
+
+-- Auto-press binding
+local binding = { kind = "mouse", button = 1 }
+
+-- Connections
+local followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn
+local connections = {}
+
+-- Humanoid/character death connection
+local localHumanoidDiedConn = nil
+local localCharacterRemovingConn = nil
+
+-- Utils
+local function trim(s)
+    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function setBtnState(btn, on, label)
+    btn.Text = label .. ": " .. (on and "On" or "Off")
+    btn.BackgroundColor3 = on and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(231, 76, 60)
+end
+
+local function findClosestPlayer(fragment)
+    fragment = trim(fragment or ""):lower()
+    if fragment == "" then return nil end
+    local best, bestScore
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= localPlayer then
+            local nm = pl.Name:lower()
+            if nm:find(fragment, 1, true) then
+                return pl
+            end
+            local score = math.abs(#nm - #fragment)
+            if not bestScore or score < bestScore then
+                bestScore, best = score, pl
+            end
+        end
+    end
+    return best
+end
+
+local function parseAttackNames(text)
+    attackNames = {}
+    for name in tostring(text or ""):gmatch("([^,]+)") do
+        name = trim(name)
+        if #name > 0 then
+            table.insert(attackNames, name)
+        end
+    end
+end
+
+local function parseTeamNames(text)
+    teamAttackNames = {}
+    for name in tostring(text or ""):gmatch("([^,]+)") do
+        name = trim(name)
+        if #name > 0 then
+            table.insert(teamAttackNames, name)
+        end
+    end
+end
+
+local function getHRP(p)
+    local char = p.Character
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHumanoid(p)
+    local char = p.Character
+    if not char then return nil end
+    return char:FindFirstChildOfClass("Humanoid")
+end
+
+-- Follow routine
+local function stopFollow()
+    followEnabled = false
+    followTargetPlayer = nil
+    if followConn then
+        followConn:Disconnect()
+        followConn = nil
+    end
+    setBtnState(followBtn, false, "Follow")
+end
+
+local function startFollow()
+    if followConn then
+        followConn:Disconnect()
+        followConn = nil
+    end
+    followConn = RunService.Heartbeat:Connect(function()
+        if not followEnabled or not followTargetPlayer then return end
+
+        local myHum = getHumanoid(localPlayer)
+        local myRoot = getHRP(localPlayer)
+        local thHum = getHumanoid(followTargetPlayer)
+        local thRoot = getHRP(followTargetPlayer)
+
+        if not (myHum and myRoot and thHum and thRoot) or myHum.Health <= 0 or thHum.Health <= 0 then
+            stopFollow()
+            return
+        end
+
+        local dist = (thRoot.Position - myRoot.Position).Magnitude
+        if dist > FOLLOW_FAR then
+            local dir = (thRoot.Position - myRoot.Position).Unit
+            myHum:MoveTo(thRoot.Position - dir * 2)
+        elseif dist < FOLLOW_NEAR then
+            myHum:Move(Vector3.new())
+        end
+    end)
+    table.insert(connections, followConn)
+end
+
+-- Attack routine
+local function stopAttack()
+    attackEnabled = false
+    if attackConn then
+        attackConn:Disconnect()
+        attackConn = nil
+    end
+    setBtnState(attackBtn, false, "Attack")
+    if autoPressConn and not (attackEnabled or teamAttackEnabled) then
+        autoPressConn:Disconnect()
+        autoPressConn = nil
+    end
+end
+
+local function doAutoPress()
+    if binding.kind == "mouse" then
+        local mousePos = UserInputService:GetMouseLocation()
+        local btnIndex = (binding.button == 2) and 1 or 0
+        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, true, game, 0)
+        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, false, game, 0)
+    elseif binding.kind == "key" and binding.keyCode then
+        VirtualInputManager:SendKeyEvent(true, binding.keyCode, false, game)
+        VirtualInputManager:SendKeyEvent(false, binding.keyCode, false, game)
+    end
+end
+
+local function startAutoPress()
+    if autoPressConn then
+        autoPressConn:Disconnect()
+        autoPressConn = nil
+    end
+    local last = 0
+    local blockUntil = time() + AUTOPRESS_START_DELAY
+    autoPressConn = RunService.RenderStepped:Connect(function()
+        if not (attackEnabled or teamAttackEnabled) then return end
+        local now = time()
+        if now < blockUntil then return end
+        local interval = 1 / AUTOPRESS_HZ
+        if now - last >= interval then
+            doAutoPress()
+            last = now
+        end
+    end)
+    table.insert(connections, autoPressConn)
+end
+    attackBox = Instance.new("TextBox")
+    attackBox.Size = UDim2.new(1, -126, 1, 0)
+    attackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    attackBox.PlaceholderText = "User1, User2 (partial ok)"
+    attackBox.Text = ""
+    attackBox.TextColor3 = Color3.new(1, 1, 1)
+    attackBox.Font = Enum.Font.Gotham
+    attackBox.TextSize = 14
+    attackBox.ClearTextOnFocus = false
+    attackBox.ZIndex = 999999
+    attackBox.Parent = attackRow
+    Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
+
+    -- Team Attack row
+    local teamAttackRow = Instance.new("Frame")
+    teamAttackRow.Size = UDim2.new(1, 0, 0, 30)
+    teamAttackRow.BackgroundTransparency = 1
+    teamAttackRow.ZIndex = 999999
+    teamAttackRow.Parent = content
+
+    local tah = Instance.new("UIListLayout", teamAttackRow)
+    tah.FillDirection = Enum.FillDirection.Horizontal
+    tah.Padding = UDim.new(0, 6)
+
+    teamAttackBtn = Instance.new("TextButton")
+    teamAttackBtn.Size = UDim2.new(0, 120, 1, 0)
+    teamAttackBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    teamAttackBtn.TextColor3 = Color3.new(1, 1, 1)
+    teamAttackBtn.Font = Enum.Font.GothamBold
+    teamAttackBtn.TextSize = 14
+    teamAttackBtn.Text = "TeamAttack: Off"
+    teamAttackBtn.ZIndex = 999999
+    teamAttackBtn.Parent = teamAttackRow
+    Instance.new("UICorner", teamAttackBtn).CornerRadius = UDim.new(0, 6)
+
+    teamAttackBox = Instance.new("TextBox")
+    teamAttackBox.Size = UDim2.new(1, -126, 1, 0)
+    teamAttackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    teamAttackBox.PlaceholderText = "TeamName1, TeamName2 (partial ok)"
+    teamAttackBox.Text = ""
+    teamAttackBox.TextColor3 = Color3.new(1, 1, 1)
+    teamAttackBox.Font = Enum.Font.Gotham
+    teamAttackBox.TextSize = 14
+    teamAttackBox.ClearTextOnFocus = false
+    teamAttackBox.ZIndex = 999999
+    teamAttackBox.Parent = teamAttackRow
+    Instance.new("UICorner", teamAttackBox).CornerRadius = UDim.new(0, 6)
+
+    -- Auto-press row
+    autoRow = Instance.new("Frame")
+    autoRow.Size = UDim2.new(1, 0, 0, 30)
+    autoRow.BackgroundTransparency = 1
+    autoRow.ZIndex = 999999
+    autoRow.Parent = content
+
+    local autol = Instance.new("UIListLayout", autoRow)
+    autol.FillDirection = Enum.FillDirection.Horizontal
+    autol.Padding = UDim.new(0, 6)
+
+    autoLabel = Instance.new("TextLabel")
+    autoLabel.Size = UDim2.new(0, 90, 1, 0)
+    autoLabel.BackgroundTransparency = 1
+    autoLabel.Font = Enum.Font.GothamBold
+    autoLabel.TextSize = 14
+    autoLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    autoLabel.TextXAlignment = Enum.TextXAlignment.Left
+    autoLabel.Text = "AutoPress:"
+    autoLabel.ZIndex = 999999
+    autoLabel.Parent = autoRow
+
+    autoBox = Instance.new("TextBox")
+    autoBox.Size = UDim2.new(0, 82, 1, 0)
+    autoBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    autoBox.PlaceholderText = "Click then press"
+    autoBox.Text = "Mouse1"
+    autoBox.TextColor3 = Color3.new(1, 1, 1)
+    autoBox.Font = Enum.Font.Gotham
+    autoBox.TextSize = 14
+    autoBox.ClearTextOnFocus = false
+    autoBox.ZIndex = 999999
+    autoBox.Parent = autoRow
+    Instance.new("UICorner", autoBox).CornerRadius = UDim.new(0, 6)
+
+    rateMinusBtn = Instance.new("TextButton")
+    rateMinusBtn.Size = UDim2.new(0, 22, 1, 0)
+    rateMinusBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+    rateMinusBtn.Text = "−"
+    rateMinusBtn.Font = Enum.Font.GothamBold
+    rateMinusBtn.TextSize = 14
+    rateMinusBtn.TextColor3 = Color3.new(1, 1, 1)
+    rateMinusBtn.ZIndex = 999999
+    rateMinusBtn.Parent = autoRow
+    Instance.new("UICorner", rateMinusBtn).CornerRadius = UDim.new(0, 6)
+
+    rateLabel = Instance.new("TextLabel")
+    rateLabel.Size = UDim2.new(0, 48, 1, 0)
+    rateLabel.BackgroundTransparency = 1
+    rateLabel.Font = Enum.Font.GothamBold
+    rateLabel.TextSize = 14
+    rateLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    rateLabel.TextXAlignment = Enum.TextXAlignment.Center
+    rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
+    rateLabel.ZIndex = 999999
+    rateLabel.Parent = autoRow
+
+    ratePlusBtn = Instance.new("TextButton")
+    ratePlusBtn.Size = UDim2.new(0, 22, 1, 0)
+    ratePlusBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+    ratePlusBtn.Text = "+"
+    ratePlusBtn.Font = Enum.Font.GothamBold
+    ratePlusBtn.TextSize = 14
+    ratePlusBtn.TextColor3 = Color3.new(1, 1, 1)
+    ratePlusBtn.ZIndex = 999999
+    ratePlusBtn.Parent = autoRow
+    Instance.new("UICorner", ratePlusBtn).CornerRadius = UDim.new(0, 6)
+
+    -- Dragging
+    local dragging, dragStart, startPos = false, nil, nil
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    -- Minimize
+    minBtn.MouseButton1Click:Connect(function()
+        isMinimized = not isMinimized
+        content.Visible = not isMinimized
+        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 260)
+        minBtn.Text = isMinimized and "+" or "—"
+    end)
+
+    -- Close
+    closeBtn.MouseButton1Click:Connect(function()
+        if _G.HiltonExec and _G.HiltonExec.Cleanup then
+            _G.HiltonExec.Cleanup()
+        end
+    end)
+end
