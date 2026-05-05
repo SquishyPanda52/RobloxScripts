@@ -823,6 +823,20 @@ table.insert(connections, Players.PlayerRemoving:Connect(function(pl)
     end
 end))
 
+-- Force max ZIndex on everything so it renders above all UI
+local function setMaxZIndex(obj)
+    if obj:IsA("GuiObject") then
+        obj.ZIndex = 999999
+    end
+    for _, child in ipairs(obj:GetDescendants()) do
+        if child:IsA("GuiObject") then
+            child.ZIndex = 999999
+        end
+    end
+end
+
+setMaxZIndex(gui)
+
 -- 🔥 KEYBINDS: E focuses attackBox, R toggles Attack ONLY if attackBox is NOT focused
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
