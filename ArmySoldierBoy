@@ -1,3 +1,4 @@
+
 --[[
   Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
   - Follow and Attack are mutually exclusive.
@@ -316,6 +317,8 @@ local function buildUI()
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    -- Ensure this ScreenGui renders above other UI by using a high DisplayOrder
+    gui.DisplayOrder = 9999
     gui.Parent = playerGui
 
     mainFrame = Instance.new("Frame")
@@ -579,6 +582,14 @@ local function buildUI()
             _G.HiltonExec.Cleanup()
         end
     end)
+
+    -- Ensure all GUI objects render above other UI by setting their ZIndex where applicable
+    -- Use a single pass to set ZIndex for all GuiObjects under this ScreenGui
+    for _, obj in ipairs(gui:GetDescendants()) do
+        if obj:IsA("GuiObject") then
+            pcall(function() obj.ZIndex = 9999 end)
+        end
+    end
 end
 
 -- Button logic
