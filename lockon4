@@ -38,6 +38,8 @@ end
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "JuggernautLockonGUI"
 screenGui.ResetOnSpawn = false
+-- Ensure this ScreenGui renders above other UI by using a high DisplayOrder
+screenGui.DisplayOrder = 9999
 screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 
 local mainFrame = Instance.new("Frame")
@@ -715,5 +717,13 @@ UserInput.InputBegan:Connect(function(input, gp)
         togglePredict()
     end
 end)
+
+-- Ensure all GUI objects render above other UI by setting their ZIndex where applicable
+-- Use a single pass to set ZIndex for all GuiObjects under this ScreenGui
+for _, obj in ipairs(screenGui:GetDescendants()) do
+    if obj:IsA("GuiObject") then
+        pcall(function() obj.ZIndex = 9999 end)
+    end
+end
 
 updateButtons()
