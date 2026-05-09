@@ -89,39 +89,35 @@ layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 layout.Parent = scrollingFrame
 
-local function createSectionLabel(text)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -10, 0, 20)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = scrollingFrame
-    return label
-end
-
 ---------------------------------------------------------------------
 -- STATE
 ---------------------------------------------------------------------
 local allHighlightEnabled = false
 local teamHighlightEnabled = false
-
 local highlights = {}
 
 ---------------------------------------------------------------------
--- TEXTLABEL STYLING (REQUESTED)
+-- ONLY NAME TAG STYLING (NO UI CHANGES)
 ---------------------------------------------------------------------
-local function styleTextLabel(label, teamColor)
+local function applyNameStroke(label, player)
+    local teamColor = player.Team and player.Team.TeamColor.Color or Color3.fromRGB(255,255,255)
+
     local stroke = Instance.new("UIStroke")
-    stroke.Thickness = 2.5
-    stroke.Color = teamColor or Color3.fromRGB(255,255,255)
+    stroke.Thickness = 3 -- thicker outline as requested
+    stroke.Color = teamColor
     stroke.Parent = label
+
+    -- update if team changes
+    player:GetPropertyChangedSignal("Team"):Connect(function()
+        if stroke then
+            local newColor = player.Team and player.Team.TeamColor.Color or Color3.fromRGB(255,255,255)
+            stroke.Color = newColor
+        end
+    end)
 end
 
 ---------------------------------------------------------------------
--- HIGHLIGHT SYSTEM
+-- CLEAR / CREATE HIGHLIGHTS
 ---------------------------------------------------------------------
 local function clearHighlights()
     for _,v in pairs(highlights) do
@@ -152,14 +148,13 @@ local function createHighlight(player)
     label.Text = player.Name
     label.Font = Enum.Font.GothamBold
     label.TextSize = 14
-    label.TextColor3 = player.TeamColor.Color
+    label.TextColor3 = player.Team and player.Team.TeamColor.Color or Color3.fromRGB(255,255,255)
     label.Parent = billboard
 
-    styleTextLabel(label, player.TeamColor.Color)
+    applyNameStroke(label, player)
 
     highlights[player] = billboard
 
-    -- visibility rule
     billboard.Enabled = (allHighlightEnabled or teamHighlightEnabled)
 end
 
@@ -178,7 +173,7 @@ local function refreshHighlights()
 end
 
 ---------------------------------------------------------------------
--- TOGGLES
+-- TOGGLE SYSTEM
 ---------------------------------------------------------------------
 local function createToggle(nameText, callback)
     local frame = Instance.new("Frame")
@@ -216,34 +211,28 @@ local function createToggle(nameText, callback)
 end
 
 ---------------------------------------------------------------------
--- TOGGLE LOGIC (REQUESTED MUTUAL EXCLUSIVITY)
+-- MUTUAL EXCLUSIVE LOGIC
 ---------------------------------------------------------------------
 createToggle("All Highlight", function(state)
     allHighlightEnabled = state
-
-    if state then
-        teamHighlightEnabled = false
-    end
-
+    if state then teamHighlightEnabled = false end
     refreshHighlights()
 end)
 
 createToggle("Team Highlight", function(state)
     teamHighlightEnabled = state
-
-    if state then
-        allHighlightEnabled = false
-    end
-
+    if state then allHighlightEnabled = false end
     refreshHighlights()
 end)
 
 ---------------------------------------------------------------------
--- PLAYER UPDATES
+-- PLAYER EVENTS
 ---------------------------------------------------------------------
-Players.PlayerAdded:Connect(function()
-    task.wait(1)
-    refreshHighlights()
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        refreshHighlights()
+    end)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -254,21 +243,11 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 ---------------------------------------------------------------------
--- CHARACTER UPDATES
----------------------------------------------------------------------
-Players.PlayerAdded:Connect(function(player)
-    player.CharacterAdded:Connect(function()
-        task.wait(0.5)
-        refreshHighlights()
-    end)
-end)
-
----------------------------------------------------------------------
--- INITIAL LOAD
+-- INIT
 ---------------------------------------------------------------------
 refreshHighlights()
 
 ---------------------------------------------------------------------
 -- END OF SCRIPT
 ---------------------------------------------------------------------
--- (END OF SCRIPT - DO NOT CUT)
+-- END OF SCRIPT (DO NOT CUT)
