@@ -1,639 +1,674 @@
-
---// Runtime Highlight / ESP UI Script
---// Execute in runtime or place in StarterPlayerScripts
+-- LocalScript (place in StarterPlayerScripts or run at runtime)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
-
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
 
---////////////////////////////////////////////////////////////
--- CLEAN OLD UI / CONNECTIONS
---////////////////////////////////////////////////////////////
+--////////////////////////////////////////////////
+-- STATE
+--////////////////////////////////////////////////
 
-pcall(function()
-    if getgenv().HighlightUIConnections then
-        for _,v in pairs(getgenv().HighlightUIConnections) do
-            pcall(function()
-                v:Disconnect()
-            end)
-        end
-    end
-end)
-
-pcall(function()
-    if CoreGui:FindFirstChild("RuntimeHighlightUI") then
-        CoreGui.RuntimeHighlightUI:Destroy()
-    end
-end)
-
-getgenv().HighlightUIConnections = {}
-
-local Connections = getgenv().HighlightUIConnections
-
-local function AddConnection(c)
-    table.insert(Connections, c)
-end
-
---////////////////////////////////////////////////////////////
--- SETTINGS
---////////////////////////////////////////////////////////////
-
-local Settings = {
-    TeamHighlight = false,
-    ShowOwnTeam = true,
-    AllHighlight = false,
-
-    TeamTransparency = 0.2,
-    AllTransparency = 0.2,
-    SpecificTransparency = 0,
-
-    SpecificPlayers = {}
-}
-
---////////////////////////////////////////////////////////////
--- GUI
---////////////////////////////////////////////////////////////
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "RuntimeHighlightUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = CoreGui
-
-local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 340, 0, 420)
-Main.Position = UDim2.new(0.05, 0, 0.2, 0)
-Main.BackgroundColor3 = Color3.fromRGB(24,24,24)
-Main.BorderSizePixel = 0
-Main.Active = true
-Main.Parent = ScreenGui
-
-local Corner = Instance.new("UICorner")
-Corner.CornerRadius = UDim.new(0,12)
-Corner.Parent = Main
-
-local Stroke = Instance.new("UIStroke")
-Stroke.Color = Color3.fromRGB(70,70,70)
-Stroke.Parent = Main
-
-local TopBar = Instance.new("Frame")
-TopBar.Size = UDim2.new(1,0,0,34)
-TopBar.BackgroundColor3 = Color3.fromRGB(35,35,35)
-TopBar.BorderSizePixel = 0
-TopBar.Parent = Main
-
-local TopCorner = Instance.new("UICorner")
-TopCorner.CornerRadius = UDim.new(0,12)
-TopCorner.Parent = TopBar
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -80, 1, 0)
-Title.Position = UDim2.new(0,10,0,0)
-Title.BackgroundTransparency = 1
-Title.Text = "Runtime Highlight UI"
-Title.Font = Enum.Font.GothamBold
-Title.TextColor3 = Color3.new(1,1,1)
-Title.TextSize = 16
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = TopBar
-
-local Minimize = Instance.new("TextButton")
-Minimize.Size = UDim2.new(0,30,0,24)
-Minimize.Position = UDim2.new(1,-70,0.5,-12)
-Minimize.Text = "-"
-Minimize.Font = Enum.Font.GothamBold
-Minimize.TextSize = 18
-Minimize.TextColor3 = Color3.new(1,1,1)
-Minimize.BackgroundColor3 = Color3.fromRGB(60,60,60)
-Minimize.BorderSizePixel = 0
-Minimize.Parent = TopBar
-
-local MinCorner = Instance.new("UICorner")
-MinCorner.CornerRadius = UDim.new(0,6)
-MinCorner.Parent = Minimize
-
-local Delete = Instance.new("TextButton")
-Delete.Size = UDim2.new(0,30,0,24)
-Delete.Position = UDim2.new(1,-35,0.5,-12)
-Delete.Text = "X"
-Delete.Font = Enum.Font.GothamBold
-Delete.TextSize = 16
-Delete.TextColor3 = Color3.new(1,1,1)
-Delete.BackgroundColor3 = Color3.fromRGB(170,40,40)
-Delete.BorderSizePixel = 0
-Delete.Parent = TopBar
-
-local DelCorner = Instance.new("UICorner")
-DelCorner.CornerRadius = UDim.new(0,6)
-DelCorner.Parent = Delete
-
-local Scroll = Instance.new("ScrollingFrame")
-Scroll.Size = UDim2.new(1,-10,1,-45)
-Scroll.Position = UDim2.new(0,5,0,40)
-Scroll.CanvasSize = UDim2.new(0,0,0,900)
-Scroll.ScrollBarThickness = 4
-Scroll.BackgroundTransparency = 1
-Scroll.BorderSizePixel = 0
-Scroll.Parent = Main
-
-local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0,10)
-Layout.Parent = Scroll
-
-local Padding = Instance.new("UIPadding")
-Padding.PaddingTop = UDim.new(0,5)
-Padding.PaddingLeft = UDim.new(0,5)
-Padding.Parent = Scroll
-
---////////////////////////////////////////////////////////////
--- DRAGGING
---////////////////////////////////////////////////////////////
-
+local uiScreenGui
+local mainFrame
+local minimized = false
 local dragging = false
-local dragInput
 local dragStart
 local startPos
 
-TopBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = Main.Position
+local teamHighlightEnabled = false
+local allHighlightEnabled = false
+local specificHighlightEnabled = false
+local showTeammates = true
 
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
+local teamTransparency = 0.3
+local allTransparency = 0.3
+local specificTransparency = 0.1
+
+local specificNamesRaw = ""
+local specificNameTokens = {}
+
+local connections = {}
+local playerData = {} -- [Player] = { highlight = Highlight, billboard = BillboardGui, charConn = RBXScriptConnection, healthConn = RBXScriptConnection }
+
+local destroyed = false
+
+--////////////////////////////////////////////////
+-- UTILS
+--////////////////////////////////////////////////
+
+local function disconnectAll()
+    for _, conn in ipairs(connections) do
+        if conn and conn.Disconnect then
+            conn:Disconnect()
+        end
+    end
+    table.clear(connections)
+end
+
+local function clearPlayerData()
+    for plr, data in pairs(playerData) do
+        if data.highlight then
+            data.highlight:Destroy()
+        end
+        if data.billboard then
+            data.billboard:Destroy()
+        end
+        if data.charConn then
+            data.charConn:Disconnect()
+        end
+        if data.healthConn then
+            data.healthConn:Disconnect()
+        end
+    end
+    table.clear(playerData)
+end
+
+local function isSpecificTarget(player)
+    if not specificHighlightEnabled or #specificNameTokens == 0 then
+        return false
+    end
+    local nameLower = string.lower(player.Name)
+    for _, token in ipairs(specificNameTokens) do
+        if token ~= "" and string.find(nameLower, token, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function getTeamColor(player)
+    if player.Team and player.Team.TeamColor then
+        return player.Team.TeamColor.Color
+    end
+    return Color3.fromRGB(255, 255, 255)
+end
+
+local function getHealthColor(humanoid)
+    if not humanoid then
+        return Color3.fromRGB(255, 255, 255)
+    end
+    local health = humanoid.Health
+    local maxHealth = humanoid.MaxHealth > 0 and humanoid.MaxHealth or 100
+    local ratio = health / maxHealth
+
+    if ratio >= 0.7 then
+        return Color3.fromRGB(0, 255, 0) -- green
+    elseif ratio >= 0.4 then
+        return Color3.fromRGB(255, 255, 0) -- yellow
+    elseif ratio > 0 then
+        return Color3.fromRGB(255, 128, 0) -- orange
+    else
+        return Color3.fromRGB(255, 0, 0) -- red
+    end
+end
+
+local function updateSpecificTokens()
+    specificNameTokens = {}
+    for token in string.gmatch(specificNamesRaw, "([^,]+)") do
+        local trimmed = string.lower(token:gsub("^%s+", ""):gsub("%s+$", ""))
+        if trimmed ~= "" then
+            table.insert(specificNameTokens, trimmed)
+        end
+    end
+end
+
+--////////////////////////////////////////////////
+-- HIGHLIGHT + NAME TAG CREATION
+--////////////////////////////////////////////////
+
+local function createHighlight(character)
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "RuntimeHighlight"
+    highlight.Adornee = character
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.Parent = character
+    return highlight
+end
+
+local function createBillboard(player, character)
+    local head = character:FindFirstChild("Head")
+    if not head then
+        return nil
+    end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "RuntimeNameTag"
+    billboard.Adornee = head
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.MaxDistance = 10000
+    billboard.Parent = character
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Name = "NameLabel"
+    textLabel.BackgroundTransparency = 1
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.Font = Enum.Font.SourceSansBold
+    textLabel.TextScaled = true
+    textLabel.Text = player.Name
+    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel.Parent = billboard
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 3
+    stroke.Color = getTeamColor(player)
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Outline
+    stroke.Parent = textLabel
+
+    return billboard
+end
+
+local function applyHighlightSettings(player, data)
+    local highlight = data.highlight
+    local billboard = data.billboard
+    if not highlight or not billboard then
+        return
+    end
+
+    local character = player.Character
+    if not character then
+        return
+    end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local healthColor = getHealthColor(humanoid)
+    local teamColor = getTeamColor(player)
+
+    -- Name label color based on health
+    local nameLabel = billboard:FindFirstChild("NameLabel")
+    if nameLabel then
+        nameLabel.TextColor3 = healthColor
+        local stroke = nameLabel:FindFirstChildOfClass("UIStroke")
+        if stroke then
+            stroke.Color = teamColor -- stroke color = team color
+        end
+    end
+
+    -- Determine highlight mode
+    local isLocal = (player == LocalPlayer)
+    local sameTeam = (LocalPlayer.Team ~= nil and player.Team == LocalPlayer.Team)
+
+    local useHighlight = false
+    local fillColor = Color3.fromRGB(255, 255, 255)
+    local outlineColor = Color3.fromRGB(0, 0, 0)
+    local transparency = 0.3
+
+    if specificHighlightEnabled and isSpecificTarget(player) then
+        useHighlight = true
+        fillColor = getTeamColor(player)
+        outlineColor = Color3.fromRGB(255, 215, 0) -- gold/yellow outline for specific
+        transparency = specificTransparency
+    elseif teamHighlightEnabled then
+        if sameTeam then
+            if showTeammates then
+                useHighlight = true
+                fillColor = getTeamColor(player)
+                outlineColor = getTeamColor(player)
+                transparency = teamTransparency
+            else
+                useHighlight = false
+            end
+        else
+            useHighlight = true
+            fillColor = getTeamColor(player)
+            outlineColor = getTeamColor(player)
+            transparency = teamTransparency
+        end
+    elseif allHighlightEnabled then
+        useHighlight = true
+        fillColor = getTeamColor(player)
+        outlineColor = getTeamColor(player)
+        transparency = allTransparency
+    end
+
+    if useHighlight then
+        highlight.Enabled = true
+        highlight.FillColor = fillColor
+        highlight.OutlineColor = outlineColor
+        highlight.FillTransparency = transparency
+        highlight.OutlineTransparency = transparency
+    else
+        highlight.Enabled = false
+    end
+end
+
+local function setupCharacter(player, character)
+    if destroyed then
+        return
+    end
+
+    -- Clean old
+    local old = playerData[player]
+    if old then
+        if old.highlight then old.highlight:Destroy() end
+        if old.billboard then old.billboard:Destroy() end
+        if old.healthConn then old.healthConn:Disconnect() end
+    end
+
+    local highlight = createHighlight(character)
+    local billboard = createBillboard(player, character)
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local healthConn
+    if humanoid then
+        healthConn = humanoid.HealthChanged:Connect(function()
+            if destroyed then return end
+            local data = playerData[player]
+            if data then
+                applyHighlightSettings(player, data)
             end
         end)
     end
-end)
 
-TopBar.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        dragInput = input
-    end
-end)
+    playerData[player] = {
+        highlight = highlight,
+        billboard = billboard,
+        charConn = nil,
+        healthConn = healthConn,
+    }
 
-AddConnection(UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-
-        Main.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-end))
-
---////////////////////////////////////////////////////////////
--- HELPERS
---////////////////////////////////////////////////////////////
-
-local function CreateSection(titleText)
-    local Holder = Instance.new("Frame")
-    Holder.Size = UDim2.new(1,-10,0,110)
-    Holder.BackgroundColor3 = Color3.fromRGB(32,32,32)
-    Holder.BorderSizePixel = 0
-    Holder.Parent = Scroll
-
-    local Corner = Instance.new("UICorner")
-    Corner.CornerRadius = UDim.new(0,10)
-    Corner.Parent = Holder
-
-    local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1,-10,0,24)
-    Title.Position = UDim2.new(0,10,0,4)
-    Title.BackgroundTransparency = 1
-    Title.Text = titleText
-    Title.Font = Enum.Font.GothamBold
-    Title.TextColor3 = Color3.new(1,1,1)
-    Title.TextSize = 14
-    Title.TextXAlignment = Enum.TextXAlignment.Left
-    Title.Parent = Holder
-
-    return Holder
+    applyHighlightSettings(player, playerData[player])
 end
 
-local function CreateToggle(parent, text, default, callback)
-    local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(1,-20,0,32)
-    Button.Position = UDim2.new(0,10,0,35)
-    Button.BackgroundColor3 = default and Color3.fromRGB(50,150,50) or Color3.fromRGB(70,70,70)
-    Button.Text = text .. ": " .. (default and "ON" or "OFF")
-    Button.TextColor3 = Color3.new(1,1,1)
-    Button.Font = Enum.Font.GothamBold
-    Button.TextSize = 13
-    Button.BorderSizePixel = 0
-    Button.Parent = parent
+local function onCharacterAdded(player, character)
+    setupCharacter(player, character)
+end
 
-    local Corner = Instance.new("UICorner")
-    Corner.CornerRadius = UDim.new(0,8)
-    Corner.Parent = Button
+local function onPlayerAdded(player)
+    local charConn = player.CharacterAdded:Connect(function(character)
+        onCharacterAdded(player, character)
+    end)
+    table.insert(connections, charConn)
 
-    local State = default
+    if player.Character then
+        onCharacterAdded(player, player.Character)
+    end
+end
 
-    Button.MouseButton1Click:Connect(function()
-        State = not State
+local function onPlayerRemoving(player)
+    local data = playerData[player]
+    if data then
+        if data.highlight then data.highlight:Destroy() end
+        if data.billboard then data.billboard:Destroy() end
+        if data.charConn then data.charConn:Disconnect() end
+        if data.healthConn then data.healthConn:Disconnect() end
+    end
+    playerData[player] = nil
+end
 
-        Button.Text = text .. ": " .. (State and "ON" or "OFF")
-        Button.BackgroundColor3 = State and Color3.fromRGB(50,150,50) or Color3.fromRGB(70,70,70)
+--////////////////////////////////////////////////
+-- UI HELPERS
+--////////////////////////////////////////////////
 
-        callback(State)
+local function makeToggle(parent, labelText, default, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -10, 0, 24)
+    frame.BackgroundTransparency = 1
+    frame.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.Font = Enum.Font.SourceSans
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Parent = frame
+
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0.3, 0, 1, 0)
+    button.Position = UDim2.new(0.7, 0, 0, 0)
+    button.BackgroundColor3 = default and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    button.Text = default and "ON" or "OFF"
+    button.TextScaled = true
+    button.Font = Enum.Font.SourceSansBold
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Parent = frame
+
+    local state = default
+
+    button.MouseButton1Click:Connect(function()
+        state = not state
+        button.BackgroundColor3 = state and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        button.Text = state and "ON" or "OFF"
+        callback(state)
     end)
 
-    return Button
+    return frame
 end
 
-local function CreateSlider(parent, title, defaultValue, yPos, callback)
-    local Label = Instance.new("TextLabel")
-    Label.Size = UDim2.new(1,-20,0,20)
-    Label.Position = UDim2.new(0,10,0,yPos)
-    Label.BackgroundTransparency = 1
-    Label.Text = title .. ": " .. tostring(defaultValue)
-    Label.Font = Enum.Font.Gotham
-    Label.TextColor3 = Color3.new(1,1,1)
-    Label.TextSize = 13
-    Label.TextXAlignment = Enum.TextXAlignment.Left
-    Label.Parent = parent
+local function makeSlider(parent, labelText, defaultValue, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -10, 0, 40)
+    frame.BackgroundTransparency = 1
+    frame.Parent = parent
 
-    local SliderBack = Instance.new("Frame")
-    SliderBack.Size = UDim2.new(1,-20,0,8)
-    SliderBack.Position = UDim2.new(0,10,0,yPos + 25)
-    SliderBack.BackgroundColor3 = Color3.fromRGB(60,60,60)
-    SliderBack.BorderSizePixel = 0
-    SliderBack.Parent = parent
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0.5, 0, 0.5, 0)
+    label.Font = Enum.Font.SourceSans
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText .. " (" .. tostring(defaultValue) .. ")"
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Parent = frame
 
-    local BackCorner = Instance.new("UICorner")
-    BackCorner.CornerRadius = UDim.new(1,0)
-    BackCorner.Parent = SliderBack
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Size = UDim2.new(0.9, 0, 0, 10)
+    sliderFrame.Position = UDim2.new(0.05, 0, 0.6, 0)
+    sliderFrame.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    sliderFrame.BorderSizePixel = 0
+    sliderFrame.Parent = frame
 
-    local Fill = Instance.new("Frame")
-    Fill.Size = UDim2.new(defaultValue,0,1,0)
-    Fill.BackgroundColor3 = Color3.fromRGB(255,170,0)
-    Fill.BorderSizePixel = 0
-    Fill.Parent = SliderBack
-
-    local FillCorner = Instance.new("UICorner")
-    FillCorner.CornerRadius = UDim.new(1,0)
-    FillCorner.Parent = Fill
-
-    local Knob = Instance.new("Frame")
-    Knob.Size = UDim2.new(0,16,0,16)
-    Knob.AnchorPoint = Vector2.new(0.5,0.5)
-    Knob.Position = UDim2.new(defaultValue,0,0.5,0)
-    Knob.BackgroundColor3 = Color3.new(1,1,1)
-    Knob.BorderSizePixel = 0
-    Knob.Parent = SliderBack
-
-    local KnobCorner = Instance.new("UICorner")
-    KnobCorner.CornerRadius = UDim.new(1,0)
-    KnobCorner.Parent = Knob
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 10, 0, 20)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = UDim2.new(defaultValue, 0, 0.5, 0)
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    knob.BorderSizePixel = 0
+    knob.Parent = sliderFrame
 
     local draggingSlider = false
 
-    Knob.InputBegan:Connect(function(input)
+    local function setValueFromX(x)
+        local absPos = sliderFrame.AbsolutePosition.X
+        local absSize = sliderFrame.AbsoluteSize.X
+        local alpha = math.clamp((x - absPos) / absSize, 0, 1)
+        -- step 0.1
+        alpha = math.floor(alpha * 10 + 0.5) / 10
+        knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+        label.Text = labelText .. " (" .. tostring(alpha) .. ")"
+        callback(alpha)
+    end
+
+    knob.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             draggingSlider = true
         end
     end)
 
-    UserInputService.InputEnded:Connect(function(input)
+    knob.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             draggingSlider = false
         end
     end)
 
-    AddConnection(UserInputService.InputChanged:Connect(function(input)
+    sliderFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingSlider = true
+            setValueFromX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
         if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local sizeX = SliderBack.AbsoluteSize.X
-            local posX = input.Position.X - SliderBack.AbsolutePosition.X
-
-            local percent = math.clamp(posX / sizeX, 0, 1)
-
-            percent = math.floor(percent * 10 + 0.5) / 10
-
-            Fill.Size = UDim2.new(percent,0,1,0)
-            Knob.Position = UDim2.new(percent,0,0.5,0)
-
-            Label.Text = title .. ": " .. tostring(percent)
-
-            callback(percent)
+            setValueFromX(input.Position.X)
         end
-    end))
+    end)
+
+    return frame
 end
 
---////////////////////////////////////////////////////////////
--- TEAM SECTION
---////////////////////////////////////////////////////////////
+local function makeTextBox(parent, labelText, defaultText, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -10, 0, 40)
+    frame.BackgroundTransparency = 1
+    frame.Parent = parent
 
-local TeamSection = CreateSection("Team Highlight")
-TeamSection.Size = UDim2.new(1,-10,0,170)
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0.4, 0, 1, 0)
+    label.Font = Enum.Font.SourceSans
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Parent = frame
 
-CreateToggle(TeamSection, "Team Highlight", false, function(state)
-    Settings.TeamHighlight = state
-end)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(0.6, 0, 1, 0)
+    box.Position = UDim2.new(0.4, 0, 0, 0)
+    box.Font = Enum.Font.SourceSans
+    box.TextScaled = true
+    box.Text = defaultText
+    box.ClearTextOnFocus = false
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    box.Parent = frame
 
-local OwnTeamToggle = CreateToggle(TeamSection, "Show Own Team", true, function(state)
-    Settings.ShowOwnTeam = state
-end)
-OwnTeamToggle.Position = UDim2.new(0,10,0,72)
+    box.FocusLost:Connect(function(enterPressed)
+        callback(box.Text)
+    end)
 
-CreateSlider(TeamSection, "Team Transparency", 0.2, 110, function(value)
-    Settings.TeamTransparency = value
-end)
+    return frame
+end
 
---////////////////////////////////////////////////////////////
--- ALL SECTION
---////////////////////////////////////////////////////////////
+--////////////////////////////////////////////////
+-- UI CREATION
+--////////////////////////////////////////////////
 
-local AllSection = CreateSection("All Player Highlight")
-AllSection.Size = UDim2.new(1,-10,0,120)
+local function makeDraggable(frame, dragHandle)
+    dragHandle = dragHandle or frame
 
-CreateToggle(AllSection, "All Highlight", false, function(state)
-    Settings.AllHighlight = state
-end)
-
-CreateSlider(AllSection, "All Transparency", 0.2, 72, function(value)
-    Settings.AllTransparency = value
-end)
-
---////////////////////////////////////////////////////////////
--- SPECIFIC SECTION
---////////////////////////////////////////////////////////////
-
-local SpecificSection = CreateSection("Specific Highlight")
-SpecificSection.Size = UDim2.new(1,-10,0,180)
-
-local Box = Instance.new("TextBox")
-Box.Size = UDim2.new(1,-20,0,36)
-Box.Position = UDim2.new(0,10,0,35)
-Box.PlaceholderText = "Player1, Player2"
-Box.Text = ""
-Box.TextColor3 = Color3.new(1,1,1)
-Box.BackgroundColor3 = Color3.fromRGB(50,50,50)
-Box.Font = Enum.Font.Gotham
-Box.TextSize = 13
-Box.ClearTextOnFocus = false
-Box.BorderSizePixel = 0
-Box.Parent = SpecificSection
-
-local BoxCorner = Instance.new("UICorner")
-BoxCorner.CornerRadius = UDim.new(0,8)
-BoxCorner.Parent = Box
-
-local Info = Instance.new("TextLabel")
-Info.Size = UDim2.new(1,-20,0,28)
-Info.Position = UDim2.new(0,10,0,78)
-Info.BackgroundTransparency = 1
-Info.Text = "Supports partial names and commas"
-Info.Font = Enum.Font.Gotham
-Info.TextColor3 = Color3.fromRGB(200,200,200)
-Info.TextSize = 12
-Info.TextWrapped = true
-Info.Parent = SpecificSection
-
-CreateSlider(SpecificSection, "Specific Outline", 0, 118, function(value)
-    Settings.SpecificTransparency = value
-end)
-
-Box.FocusLost:Connect(function()
-    Settings.SpecificPlayers = {}
-
-    for str in string.gmatch(Box.Text, "[^,]+") do
-        table.insert(Settings.SpecificPlayers, string.lower(str:gsub("^%s+", ""):gsub("%s+$", "")))
-    end
-end)
-
---////////////////////////////////////////////////////////////
--- HIGHLIGHT SYSTEM
---////////////////////////////////////////////////////////////
-
-local HighlightFolder = Instance.new("Folder")
-HighlightFolder.Name = "RuntimeHighlights"
-HighlightFolder.Parent = ScreenGui
-
-local function IsSpecific(player)
-    for _,name in pairs(Settings.SpecificPlayers) do
-        if string.find(string.lower(player.Name), name, 1, true) then
-            return true
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
         end
-    end
+    end)
 
-    return false
-end
-
-local function GetHealthColor(humanoid)
-    local hp = humanoid.Health / humanoid.MaxHealth
-
-    if hp > 0.7 then
-        return Color3.fromRGB(0,255,0)
-    elseif hp > 0.4 then
-        return Color3.fromRGB(255,255,0)
-    else
-        return Color3.fromRGB(255,0,0)
-    end
-end
-
-local function RemoveESP(player)
-    if HighlightFolder:FindFirstChild(player.Name .. "_ESP") then
-        HighlightFolder[player.Name .. "_ESP"]:Destroy()
-    end
-end
-
-local function CreateESP(player)
-    if player == LocalPlayer and not Settings.ShowOwnTeam then
-        RemoveESP(player)
-        return
-    end
-
-    local Character = player.Character
-    if not Character then return end
-
-    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    local Head = Character:FindFirstChild("Head")
-
-    if not Humanoid or not Head then return end
-
-    local Existing = HighlightFolder:FindFirstChild(player.Name .. "_ESP")
-
-    if Existing then
-        Existing:Destroy()
-    end
-
-    local Holder = Instance.new("Folder")
-    Holder.Name = player.Name .. "_ESP"
-    Holder.Parent = HighlightFolder
-
-    local ShouldHighlight = false
-
-    local FillColor = Color3.new(1,1,1)
-    local OutlineColor = Color3.new(1,1,1)
-    local FillTransparency = 0.2
-
-    if Settings.AllHighlight then
-        ShouldHighlight = true
-        FillColor = Color3.fromRGB(255,255,255)
-        OutlineColor = Color3.fromRGB(180,180,180)
-        FillTransparency = Settings.AllTransparency
-    end
-
-    if Settings.TeamHighlight then
-        ShouldHighlight = true
-
-        if player.Team then
-            FillColor = player.Team.TeamColor.Color
-            OutlineColor = player.Team.TeamColor.Color
+    dragHandle.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
         end
+    end)
 
-        FillTransparency = Settings.TeamTransparency
-
-        if player.Team == LocalPlayer.Team and not Settings.ShowOwnTeam then
-            ShouldHighlight = false
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
         end
-    end
+    end)
+end
 
-    if IsSpecific(player) then
-        ShouldHighlight = true
-        OutlineColor = Color3.fromRGB(255,215,0)
-        FillTransparency = Settings.SpecificTransparency
-    end
+local function buildUI()
+    uiScreenGui = Instance.new("ScreenGui")
+    uiScreenGui.Name = "RuntimeHighlightUI"
+    uiScreenGui.ResetOnSpawn = false
+    uiScreenGui.IgnoreGuiInset = true
+    uiScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-    if ShouldHighlight then
-        local Highlight = Instance.new("Highlight")
-        Highlight.Name = "Highlight"
-        Highlight.Adornee = Character
-        Highlight.FillColor = FillColor
-        Highlight.OutlineColor = OutlineColor
-        Highlight.FillTransparency = FillTransparency
-        Highlight.OutlineTransparency = 0
-        Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        Highlight.Parent = Holder
-    end
+    mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 320, 0, 260)
+    mainFrame.Position = UDim2.new(0, 50, 0, 50)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Active = true
+    mainFrame.Parent = uiScreenGui
 
-    local Billboard = Instance.new("BillboardGui")
-    Billboard.Name = "NameTag"
-    Billboard.Adornee = Head
-    Billboard.AlwaysOnTop = true
-    Billboard.Size = UDim2.new(0,200,0,40)
-    Billboard.StudsOffset = Vector3.new(0,3,0)
-    Billboard.Parent = Holder
+    local topBar = Instance.new("Frame")
+    topBar.Name = "TopBar"
+    topBar.Size = UDim2.new(1, 0, 0, 24)
+    topBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    topBar.BorderSizePixel = 0
+    topBar.Parent = mainFrame
 
-    local Name = Instance.new("TextLabel")
-    Name.BackgroundTransparency = 1
-    Name.Size = UDim2.new(1,0,1,0)
-    Name.Font = Enum.Font.GothamBold
-    Name.Text = player.Name
-    Name.TextScaled = true
-    Name.TextStrokeTransparency = 0
-    Name.Parent = Billboard
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Size = UDim2.new(1, -60, 1, 0)
+    title.Position = UDim2.new(0, 5, 0, 0)
+    title.Font = Enum.Font.SourceSansBold
+    title.TextScaled = true
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Text = "Highlight Manager"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Parent = topBar
 
-    local function UpdateHealthColor()
-        if Humanoid and Humanoid.Parent then
-            Name.TextColor3 = GetHealthColor(Humanoid)
+    local minimizeButton = Instance.new("TextButton")
+    minimizeButton.Size = UDim2.new(0, 24, 0, 24)
+    minimizeButton.Position = UDim2.new(1, -48, 0, 0)
+    minimizeButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    minimizeButton.Text = "-"
+    minimizeButton.TextScaled = true
+    minimizeButton.Font = Enum.Font.SourceSansBold
+    minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    minimizeButton.Parent = topBar
+
+    local closeButton = Instance.new("TextButton")
+    closeButton.Size = UDim2.new(0, 24, 0, 24)
+    closeButton.Position = UDim2.new(1, -24, 0, 0)
+    closeButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+    closeButton.Text = "X"
+    closeButton.TextScaled = true
+    closeButton.Font = Enum.Font.SourceSansBold
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.Parent = topBar
+
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Name = "Content"
+    contentFrame.Size = UDim2.new(1, 0, 1, -24)
+    contentFrame.Position = UDim2.new(0, 0, 0, 24)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = mainFrame
+
+    local scrolling = Instance.new("ScrollingFrame")
+    scrolling.Name = "SettingsScroll"
+    scrolling.Size = UDim2.new(1, -10, 1, -10)
+    scrolling.Position = UDim2.new(0, 5, 0, 5)
+    scrolling.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scrolling.ScrollBarThickness = 6
+    scrolling.BackgroundTransparency = 1
+    scrolling.Parent = contentFrame
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.FillDirection = Enum.FillDirection.Vertical
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = scrolling
+
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scrolling.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+    end)
+
+    -- Toggles
+    makeToggle(scrolling, "Team Highlight", teamHighlightEnabled, function(state)
+        teamHighlightEnabled = state
+        if state then
+            allHighlightEnabled = false
         end
-    end
-
-    UpdateHealthColor()
-
-    AddConnection(Humanoid.HealthChanged:Connect(UpdateHealthColor))
-end
-
-local function RefreshESP()
-    for _,player in pairs(Players:GetPlayers()) do
-        if player.Character then
-            CreateESP(player)
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
         end
-    end
+    end)
+
+    makeToggle(scrolling, "All Highlight", allHighlightEnabled, function(state)
+        allHighlightEnabled = state
+        if state then
+            teamHighlightEnabled = false
+        end
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
+        end
+    end)
+
+    makeToggle(scrolling, "Show Teammates (Team Mode)", showTeammates, function(state)
+        showTeammates = state
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
+        end
+    end)
+
+    makeToggle(scrolling, "Specific Highlight", specificHighlightEnabled, function(state)
+        specificHighlightEnabled = state
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
+        end
+    end)
+
+    makeTextBox(scrolling, "Specific Names", specificNamesRaw, function(text)
+        specificNamesRaw = text
+        updateSpecificTokens()
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
+        end
+    end)
+
+    -- Sliders
+    makeSlider(scrolling, "Team Highlight Transparency", teamTransparency, function(value)
+        teamTransparency = value
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
+        end
+    end)
+
+    makeSlider(scrolling, "All Highlight Transparency", allTransparency, function(value)
+        allTransparency = value
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
+        end
+    end)
+
+    makeSlider(scrolling, "Specific Outline Transparency", specificTransparency, function(value)
+        specificTransparency = value
+        for plr, data in pairs(playerData) do
+            applyHighlightSettings(plr, data)
+        end
+    end)
+
+    -- Dragging
+    makeDraggable(mainFrame, topBar)
+
+    -- Minimize
+    minimizeButton.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        contentFrame.Visible = not minimized
+    end)
+
+    -- Close (delete everything)
+    closeButton.MouseButton1Click:Connect(function()
+        destroyed = true
+        disconnectAll()
+        clearPlayerData()
+        if uiScreenGui then
+            uiScreenGui:Destroy()
+        end
+    end)
 end
 
---////////////////////////////////////////////////////////////
--- PLAYER EVENTS
---////////////////////////////////////////////////////////////
+--////////////////////////////////////////////////
+-- MAIN
+--////////////////////////////////////////////////
 
-local function SetupPlayer(player)
-    AddConnection(player.CharacterAdded:Connect(function()
-        task.wait(1)
-        CreateESP(player)
-    end))
+buildUI()
 
-    if player.Character then
-        CreateESP(player)
-    end
+-- Hook players
+for _, plr in ipairs(Players:GetPlayers()) do
+    onPlayerAdded(plr)
 end
 
-for _,player in pairs(Players:GetPlayers()) do
-    SetupPlayer(player)
-end
+table.insert(connections, Players.PlayerAdded:Connect(onPlayerAdded))
+table.insert(connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 
-AddConnection(Players.PlayerAdded:Connect(SetupPlayer))
-
-AddConnection(Players.PlayerRemoving:Connect(function(player)
-    RemoveESP(player)
-end))
-
---////////////////////////////////////////////////////////////
--- AUTO UPDATE LOOP
---////////////////////////////////////////////////////////////
-
-AddConnection(RunService.RenderStepped:Connect(function()
-    for _,player in pairs(Players:GetPlayers()) do
-        if player.Character then
-            CreateESP(player)
+-- Continuous update (safety net for health/team changes)
+table.insert(connections, RunService.Heartbeat:Connect(function()
+    if destroyed then return end
+    for plr, data in pairs(playerData) do
+        if plr.Character and data.highlight and data.billboard then
+            applyHighlightSettings(plr, data)
         end
     end
 end))
 
---////////////////////////////////////////////////////////////
--- MINIMIZE
---////////////////////////////////////////////////////////////
-
-local Minimized = false
-
-Minimize.MouseButton1Click:Connect(function()
-    Minimized = not Minimized
-
-    if Minimized then
-        TweenService:Create(Main, TweenInfo.new(0.2), {
-            Size = UDim2.new(0,340,0,34)
-        }):Play()
-
-        Scroll.Visible = false
-    else
-        TweenService:Create(Main, TweenInfo.new(0.2), {
-            Size = UDim2.new(0,340,0,420)
-        }):Play()
-
-        Scroll.Visible = true
-    end
-end)
-
---////////////////////////////////////////////////////////////
--- DELETE / FULL CLEANUP
---////////////////////////////////////////////////////////////
-
-Delete.MouseButton1Click:Connect(function()
-
-    for _,player in pairs(Players:GetPlayers()) do
-        RemoveESP(player)
-    end
-
-    for _,connection in pairs(Connections) do
-        pcall(function()
-            connection:Disconnect()
-        end)
-    end
-
-    getgenv().HighlightUIConnections = nil
-
-    ScreenGui:Destroy()
-end)
-
-print("[Runtime Highlight UI] Loaded Successfully")
-
+-- END OF SCRIPT
