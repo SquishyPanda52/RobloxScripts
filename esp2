@@ -376,10 +376,11 @@ local function createNameTag(character, plr)
 
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "NameTag"
-    billboard.Size = UDim2.new(0, 120, 0, 24)
-    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+    billboard.Size = UDim2.new(0, 220, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3.5, 0)
     billboard.AlwaysOnTop = true
-    billboard.MaxDistance = 200
+    billboard.MaxDistance = math.huge
+    billboard.LightInfluence = 0
     billboard.Adornee = head
     billboard.Parent = character
 
@@ -388,7 +389,9 @@ local function createNameTag(character, plr)
     label.BackgroundTransparency = 1
     label.Text = plr.Name
     label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
+    label.TextScaled = true
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.new(0, 0, 0)
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
     label.Parent = billboard
 
@@ -407,7 +410,7 @@ local function createHighlight(character)
     local highlight = Instance.new("Highlight")
     highlight.Name = "PlayerHighlight"
     highlight.FillTransparency = 0.2
-    highlight.OutlineTransparency = 0
+    highlight.OutlineTransparency = 0.2
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee = character
     highlight.Parent = character
@@ -506,7 +509,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
                 fillColor = ALL_FILL_COLOR
                 fillTrans = allTrans
                 outlineColor = Color3.new(0, 0, 0)
-                outlineTrans = 0
+                outlineTrans = allTrans
             end
 
             if teamEnabled then
@@ -516,14 +519,14 @@ trackConnection(RunService.RenderStepped:Connect(function()
                         fillColor = getTeamColor(plr)
                         fillTrans = teamTrans
                         outlineColor = fillColor
-                        outlineTrans = 0
+                        outlineTrans = teamTrans
                     end
                 else
                     visible = true
                     fillColor = getTeamColor(plr)
                     fillTrans = teamTrans
                     outlineColor = fillColor
-                    outlineTrans = 0
+                    outlineTrans = teamTrans
                 end
             end
 
