@@ -471,14 +471,23 @@ local function createHighlightForCharacter(player, character)
     nameLabel.Font = Enum.Font.GothamBold
     nameLabel.TextSize = 18
     nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    nameLabel.TextStrokeTransparency = 0
+    -- hide built-in text stroke so we can use UIStroke for a thin black outline
+    nameLabel.TextStrokeTransparency = 1
     nameLabel.TextStrokeColor3 = Color3.fromRGB(255, 255, 255)
     nameLabel.Parent = billboard
+
+    -- Add a thin black UIStroke for better readability
+    local uiStroke = Instance.new("UIStroke")
+    uiStroke.Color = Color3.fromRGB(0, 0, 0)
+    uiStroke.Thickness = 1
+    uiStroke.Transparency = 0
+    uiStroke.Parent = nameLabel
 
     characterData[player] = {
         Highlight = highlight,
         Billboard = billboard,
         NameLabel = nameLabel,
+        UIStroke = uiStroke,
     }
 
     return highlight, billboard, nameLabel
@@ -518,6 +527,7 @@ local function updateHighlightForPlayer(player)
     local highlight = data.Highlight
     local billboard = data.Billboard
     local nameLabel = data.NameLabel
+    local uiStroke = data.UIStroke
 
     if not highlight or not highlight.Parent then
         return
@@ -581,10 +591,18 @@ local function updateHighlightForPlayer(player)
     if nameLabel then
         local teamColor = getTeamColor(player)
 
-        -- Use team color for the name label instead of health-based color
+        -- Use team color for the name label text
         nameLabel.TextColor3 = teamColor
-        nameLabel.TextStrokeTransparency = 0
+
+        -- Hide built-in TextStroke and rely on UIStroke for a thin black outline
+        nameLabel.TextStrokeTransparency = 1
         nameLabel.TextStrokeColor3 = teamColor
+
+        if uiStroke then
+            uiStroke.Color = Color3.fromRGB(0, 0, 0)
+            uiStroke.Thickness = 1
+            uiStroke.Transparency = 0
+        end
 
         -- Apply size from the new slider
         if nameLabelSizeSlider and nameLabelSizeSlider.GetValue then
