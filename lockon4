@@ -679,7 +679,7 @@ UserInput.InputBegan:Connect(function(input, gp)
     -- E = TOGGLE LOCK / UNLOCK
     ----------------------------------------------------------------
 
-    if input.KeyCode == Enum.KeyCode.E then
+    if input.KeyCode == Enum.KeyCode.T then
 
         if autoSelectEnabled then
 
