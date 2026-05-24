@@ -834,7 +834,7 @@ table.insert(connections, Players.PlayerRemoving:Connect(function(pl)
     end
 end))
 
--- 🔥 KEYBINDS: E focuses attackBox, R toggles Attack ONLY if attackBox is NOT focused
+-- 🔥 KEYBINDS: T focuses attackBox, R toggles Attack, Y toggles Follow
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
 
@@ -849,6 +849,13 @@ table.insert(connections, UserInputService.InputBegan:Connect(function(input, gp
     if input.KeyCode == Enum.KeyCode.R then
         if attackBox and not attackBox:IsFocused() then
             onAttackToggle()
+        end
+    end
+
+    -- Y = toggle Follow ONLY if followBox is not focused
+    if input.KeyCode == Enum.KeyCode.Y then
+        if followBox and not followBox:IsFocused() then
+            onFollowToggle()
         end
     end
 end))
