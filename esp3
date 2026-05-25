@@ -551,8 +551,8 @@ local function updateHighlightForPlayer(player)
 
     if allHighlightEnabled then
         visible = true
-        fillColor = Color3.fromRGB(255, 255, 255)
-        outlineColor = Color3.fromRGB(255, 255, 255)
+        fillColor = Color3.fromRGB(0, 255, 0)
+        outlineColor = Color3.fromRGB(0, 255, 0)
         fillTransparency = allTransparencySlider.GetValue()
         outlineTransparency = allTransparencySlider.GetValue()
     end
