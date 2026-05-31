@@ -6,52 +6,125 @@ gui.Name = "MasterHub"
 gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
---// MAIN FRAME (Holds everything)
+--// MAIN FRAME (Compact)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 650, 0, 450)
-mainFrame.Position = UDim2.new(0.5, -325, 0.5, -225)
+mainFrame.Size = UDim2.new(0, 520, 0, 380) -- Smaller & compact
+mainFrame.Position = UDim2.new(0.5, -260, 0.5, -190)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 mainFrame.BorderSizePixel = 0
+mainFrame.Visible = true
 mainFrame.Parent = gui
 
---// UI CORNER
 local mainCorner = Instance.new("UICorner")
 mainCorner.CornerRadius = UDim.new(0, 10)
 mainCorner.Parent = mainFrame
 
---// SCROLLING FRAME (Main Menu Content)
+--// TOP BAR (Title + Buttons)
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Size = UDim2.new(1, 0, 0, 32)
+topBar.Position = UDim2.new(0, 0, 0, 0)
+topBar.BackgroundColor3 = Color3.fromRGB(35, 120, 35)
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
+
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, 10)
+topCorner.Parent = topBar
+
+--// TITLE TEXT
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, -80, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Title"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = topBar
+
+--// CLOSE BUTTON (X)
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.new(0, 30, 0, 22)
+closeBtn.Position = UDim2.new(1, -35, 0.5, -11)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.Parent = topBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 6)
+closeCorner.Parent = closeBtn
+
+--// MINIMIZE BUTTON (-)
+local miniBtn = Instance.new("TextButton")
+miniBtn.Name = "MinimizeButton"
+miniBtn.Size = UDim2.new(0, 30, 0, 22)
+miniBtn.Position = UDim2.new(1, -70, 0.5, -11)
+miniBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
+miniBtn.Text = "-"
+miniBtn.TextColor3 = Color3.new(1, 1, 1)
+miniBtn.Font = Enum.Font.GothamBold
+miniBtn.TextSize = 20
+miniBtn.Parent = topBar
+
+local miniCorner = Instance.new("UICorner")
+miniCorner.CornerRadius = UDim.new(0, 6)
+miniCorner.Parent = miniBtn
+
+--// MINIMIZE / CLOSE LOGIC
+local minimized = false
+
+miniBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    for _, child in ipairs(mainFrame:GetChildren()) do
+        if child ~= topBar then
+            child.Visible = not minimized
+        end
+    end
+    mainFrame.Size = minimized and UDim2.new(0, 520, 0, 32) or UDim2.new(0, 520, 0, 380)
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+end)
+
+--// SCROLLING FRAME (Slimmer width)
 local scroll = Instance.new("ScrollingFrame")
 scroll.Name = "MenuScroll"
-scroll.Size = UDim2.new(1, -120, 1, -20) -- Leaves space for side tab
-scroll.Position = UDim2.new(0, 10, 0, 10)
-scroll.CanvasSize = UDim2.new(0, 0, 3, 0) -- Large vertical space for future scripts
-scroll.ScrollBarThickness = 8
+scroll.Size = UDim2.new(1, -140, 1, -50)
+scroll.Position = UDim2.new(0, 10, 0, 40)
+scroll.CanvasSize = UDim2.new(0, 0, 3, 0)
+scroll.ScrollBarThickness = 6
 scroll.ScrollBarImageColor3 = Color3.fromRGB(140, 255, 120)
 scroll.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 scroll.BorderSizePixel = 0
 scroll.Parent = mainFrame
 
---// GRADIENT FOR SCROLLING FRAME
 local grad = Instance.new("UIGradient")
 grad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 255, 60)),   -- Green
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 255, 80))   -- Yellow-green
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 255, 60)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 255, 80))
 })
 grad.Rotation = 90
 grad.Parent = scroll
 
---// UI PADDING
 local pad = Instance.new("UIPadding")
 pad.PaddingLeft = UDim.new(0, 10)
 pad.PaddingTop = UDim.new(0, 10)
 pad.Parent = scroll
 
---// SIDE TAB (Static, does NOT scroll)
+--// SIDE TAB (Fixed)
 local sideTab = Instance.new("Frame")
 sideTab.Name = "SideTab"
-sideTab.Size = UDim2.new(0, 100, 1, -20)
-sideTab.Position = UDim2.new(1, -110, 0, 10)
+sideTab.Size = UDim2.new(0, 110, 1, -50)
+sideTab.Position = UDim2.new(1, -120, 0, 40)
 sideTab.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
 sideTab.BorderSizePixel = 0
 sideTab.Parent = mainFrame
@@ -60,7 +133,6 @@ local sideCorner = Instance.new("UICorner")
 sideCorner.CornerRadius = UDim.new(0, 8)
 sideCorner.Parent = sideTab
 
---// SIDE TAB GRADIENT
 local tabGrad = Instance.new("UIGradient")
 tabGrad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 255, 60)),
@@ -69,7 +141,6 @@ tabGrad.Color = ColorSequence.new({
 tabGrad.Rotation = 90
 tabGrad.Parent = sideTab
 
---// LAYOUT FOR FUTURE TAB BUTTONS
 local tabLayout = Instance.new("UIListLayout")
 tabLayout.Padding = UDim.new(0, 6)
 tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -97,5 +168,5 @@ function AddSectionButton(sectionName, scrollTargetY)
     end)
 end
 
---// Example placeholder (remove later)
+-- Example placeholder
 AddSectionButton("Example", 0)
