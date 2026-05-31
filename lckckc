@@ -305,7 +305,7 @@ commanderToggle.TextColor3 = Color3.fromRGB(255,255,255)
 commanderToggle.Parent = scrollFrame
 
 --------------------------------------------------------------------
--- SLIDER (continued)
+-- SLIDER
 --------------------------------------------------------------------
 
 local draggingSlider = false
@@ -834,28 +834,69 @@ if TextChatService then
         if not isCommander(plr.Name) then return end
 
         local text = tostring(msg.Text or "")
-
-        -- Check for .atk command (case-insensitive)
         local lower = text:lower()
+
+        -- .atk command
         if lower:sub(1,4) == ".atk" then
-            -- Extract everything after ".atk" and optional space
             local after = text:match("^%.atk%s*(.+)$")
             if after then
-                -- Paste into the main txtUser box
                 txtUser.Text = after
 
-                -- Ensure AutoSelect is off when commander triggers
                 if autoSelectEnabled then
                     autoSelectEnabled = false
                 end
 
-                -- Ensure lockon toggles on
                 if not lockonEnabled then
                     toggleLockon()
                 end
 
                 updateButtons()
             end
+            return
+        end
+
+        -- .stop command (clear the lockon textbox)
+        if lower:match("^%.stop%s*$") or lower:match("^%.stop%s+") then
+            txtUser.Text = ""
+            updateButtons()
+            return
+        end
+
+        -- .follow me command (paste commander into lockon textbox)
+        if lower:match("^%.follow%s+me") or lower:match("^%.followme") then
+            -- Use the player's exact Name for the textbox
+            txtUser.Text = plr.Name
+
+            if autoSelectEnabled then
+                autoSelectEnabled = false
+            end
+
+            if not lockonEnabled then
+                toggleLockon()
+            end
+
+            updateButtons()
+            return
+        end
+
+        -- Additional: support ".follow PlayerName" to follow another player explicitly
+        if lower:sub(1,7) == ".follow" then
+            local after = text:match("^%.follow%s*(.+)$")
+            if after then
+                -- paste whatever follows into txtUser (could be a name or comma list)
+                txtUser.Text = after
+
+                if autoSelectEnabled then
+                    autoSelectEnabled = false
+                end
+
+                if not lockonEnabled then
+                    toggleLockon()
+                end
+
+                updateButtons()
+            end
+            return
         end
     end)
 end
