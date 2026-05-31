@@ -8,7 +8,7 @@
   - Added: Team Attack mode (separate attack mode that targets players by team name).
   - Behavior: All attack modes (user-target and team-target) and follow are toggled off on death/respawn.
   - Added: Commander command listener (TextChatService) with UI textbox and toggle.
-  - Added: Walk Fix toggle (auto-press W pattern) controllable via UI and commander commands.
+  - Added: Walk Fix toggle (auto-press pattern) and Locked toggle to control auto-sync behavior.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -46,6 +46,7 @@ local teamAttackBtn, teamAttackBox
 local autoRow, autoLabel, autoBox
 local rateMinusBtn, rateLabel, ratePlusBtn
 local walkFixBtn, walkPatternBox
+local lockedBtn
 
 -- Logic State
 local isMinimized = false
@@ -63,8 +64,11 @@ local commanderMode = false
 
 -- Walk Fix
 local walkFixEnabled = false
-local walkPatternText = "W 1 10" -- default pattern: Key cooldown hold (hold interpreted as centiseconds -> /100)
+local walkPatternText = "W 10" -- default pattern: Key holdSeconds
 local walkFixConn = nil
+
+-- Locked behavior
+local lockedEnabled = false -- default off
 
 -- Auto-press binding
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
@@ -149,6 +153,12 @@ local function stopFollow()
         followConn = nil
     end
     setBtnState(followBtn, false, "Follow")
+    -- If locked is on, walkFix should reflect follow/attack state
+    if lockedEnabled then
+        if not (followEnabled or attackEnabled) then
+            stopWalkFix()
+        end
+    end
 end
 
 local function startFollow()
@@ -178,6 +188,12 @@ local function startFollow()
         end
     end)
     table.insert(connections, followConn)
+    -- If locked is enabled, ensure walkFix follows
+    if lockedEnabled then
+        if followEnabled or attackEnabled then
+            startWalkFix()
+        end
+    end
 end
 
 -- Attack routine
@@ -191,6 +207,12 @@ local function stopAttack()
     if autoPressConn and not (attackEnabled or teamAttackEnabled) then
         autoPressConn:Disconnect()
         autoPressConn = nil
+    end
+    -- If locked is enabled, ensure walkFix follows
+    if lockedEnabled then
+        if not (followEnabled or attackEnabled) then
+            stopWalkFix()
+        end
     end
 end
 
@@ -242,6 +264,11 @@ local function stopTeamAttack()
         autoPressConn:Disconnect()
         autoPressConn = nil
     end
+    if lockedEnabled then
+        if not (followEnabled or attackEnabled) then
+            stopWalkFix()
+        end
+    end
 end
 
 local function startTeamAttack()
@@ -288,6 +315,11 @@ local function startTeamAttack()
     if not autoPressConn then
         startAutoPress()
     end
+    if lockedEnabled then
+        if followEnabled or attackEnabled then
+            startWalkFix()
+        end
+    end
 end
 
 local function startAttack()
@@ -325,24 +357,38 @@ local function startAttack()
     if not autoPressConn then
         startAutoPress()
     end
+    if lockedEnabled then
+        if followEnabled or attackEnabled then
+            startWalkFix()
+        end
+    end
 end
 
--- Walk Fix helpers
+-- Walk Fix helpers (two-interval model: key + hold duration; repeats immediately)
 local function parseWalkPattern(text)
     text = tostring(text or ""):gsub("%s+", " ")
     local parts = {}
     for p in text:gmatch("%S+") do
         table.insert(parts, p)
     end
-    if #parts < 3 then
+    -- Accept "W 10" or "W,10"
+    if #parts < 2 then
+        -- try comma split
+        local commaParts = {}
+        for p in tostring(text or ""):gmatch("([^,]+)") do
+            table.insert(commaParts, trim(p))
+        end
+        if #commaParts >= 2 then
+            parts = commaParts
+        end
+    end
+    if #parts < 2 then
         return nil
     end
     local keyStr = tostring(parts[1] or "W")
-    local cooldown = tonumber(parts[2]) or 1
-    local holdRaw = tonumber(parts[3]) or 10
-    -- interpret third number as centiseconds -> convert to seconds
-    local hold = math.max(0.01, holdRaw / 100)
-    return { key = keyStr, cooldown = math.max(0.01, cooldown), hold = hold }
+    local holdRaw = tonumber(parts[2]) or 10
+    local hold = math.max(0.01, holdRaw) -- hold in seconds
+    return { key = keyStr, hold = hold }
 end
 
 local function keyStringToEnum(keyStr)
@@ -352,7 +398,7 @@ local function keyStringToEnum(keyStr)
     if Enum.KeyCode[k] then
         return Enum.KeyCode[k]
     end
-    -- handle common names like "ONE" or "1"
+    -- handle numeric keys "1".."0"
     if #k == 1 and k:match("%d") then
         local map = {
             ["1"] = "One", ["2"] = "Two", ["3"] = "Three", ["4"] = "Four",
@@ -375,31 +421,28 @@ local function startWalkFix()
         walkFixConn:Disconnect()
         walkFixConn = nil
     end
-    local pattern = parseWalkPattern(walkPatternText) or parseWalkPattern("W 1 10")
+    local pattern = parseWalkPattern(walkPatternText) or parseWalkPattern("W 10")
     local keyEnum = keyStringToEnum(pattern.key)
     if not keyEnum then
-        -- cannot map key, do nothing
         return
     end
     walkFixEnabled = true
     setBtnState(walkFixBtn, true, "WalkFix")
-    local last = 0
-    walkFixConn = RunService.Heartbeat:Connect(function(dt)
-        if not walkFixEnabled then return end
-        local now = time()
-        if now - last >= pattern.cooldown then
-            last = now
-            -- press key down
+    local running = true
+    walkFixConn = RunService.Heartbeat:Connect(function()
+        if not walkFixEnabled or not running then return end
+        running = false
+        -- press down
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, keyEnum, false, game)
+        end)
+        -- hold for pattern.hold seconds, then release and immediately start again
+        task.delay(pattern.hold, function()
             pcall(function()
-                VirtualInputManager:SendKeyEvent(true, keyEnum, false, game)
+                VirtualInputManager:SendKeyEvent(false, keyEnum, false, game)
             end)
-            -- hold for pattern.hold seconds, then release
-            task.delay(pattern.hold, function()
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(false, keyEnum, false, game)
-                end)
-            end)
-        end
+            running = true
+        end)
     end)
     table.insert(connections, walkFixConn)
 end
@@ -425,7 +468,7 @@ local function buildUI()
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "Main"
-    mainFrame.Size = UDim2.new(0, 300, 0, 320)
+    mainFrame.Size = UDim2.new(0, 300, 0, 360)
     mainFrame.Position = UDim2.new(0, 40, 0, 120)
     mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
     mainFrame.BorderSizePixel = 0
@@ -485,7 +528,7 @@ local function buildUI()
     vlist.SortOrder = Enum.SortOrder.LayoutOrder
     vlist.Padding = UDim.new(0, 8)
 
-    -- Commander row (new)
+    -- Commander row
     local commanderRow = Instance.new("Frame")
     commanderRow.Size = UDim2.new(1, 0, 0, 30)
     commanderRow.BackgroundTransparency = 1
@@ -698,7 +741,7 @@ local function buildUI()
     walkPatternBox = Instance.new("TextBox")
     walkPatternBox.Size = UDim2.new(1, -126, 1, 0)
     walkPatternBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    walkPatternBox.PlaceholderText = "Pattern e.g. W 1 10 (key cooldown holdCentisec)"
+    walkPatternBox.PlaceholderText = "Pattern e.g. W 10 (key holdSeconds)"
     walkPatternBox.Text = walkPatternText
     walkPatternBox.TextColor3 = Color3.new(1, 1, 1)
     walkPatternBox.Font = Enum.Font.Gotham
@@ -706,6 +749,26 @@ local function buildUI()
     walkPatternBox.ClearTextOnFocus = false
     walkPatternBox.Parent = walkRow
     Instance.new("UICorner", walkPatternBox).CornerRadius = UDim.new(0, 6)
+
+    -- Locked row (below WalkFix)
+    local lockedRow = Instance.new("Frame")
+    lockedRow.Size = UDim2.new(1, 0, 0, 30)
+    lockedRow.BackgroundTransparency = 1
+    lockedRow.Parent = content
+
+    local lh = Instance.new("UIListLayout", lockedRow)
+    lh.FillDirection = Enum.FillDirection.Horizontal
+    lh.Padding = UDim.new(0, 6)
+
+    lockedBtn = Instance.new("TextButton")
+    lockedBtn.Size = UDim2.new(0, 120, 1, 0)
+    lockedBtn.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+    lockedBtn.TextColor3 = Color3.new(1, 1, 1)
+    lockedBtn.Font = Enum.Font.GothamBold
+    lockedBtn.TextSize = 14
+    lockedBtn.Text = "Locked: Off"
+    lockedBtn.Parent = lockedRow
+    Instance.new("UICorner", lockedBtn).CornerRadius = UDim.new(0, 6)
 
     -- Dragging
     local dragging, dragStart, startPos = false, nil, nil
@@ -738,7 +801,7 @@ local function buildUI()
     minBtn.MouseButton1Click:Connect(function()
         isMinimized = not isMinimized
         content.Visible = not isMinimized
-        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 320)
+        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 360)
         minBtn.Text = isMinimized and "+" or "—"
     end)
 
@@ -783,6 +846,14 @@ local function onFollowToggle()
     else
         stopFollow()
     end
+    -- If locked is enabled, walkFix mirrors follow/attack state
+    if lockedEnabled then
+        if followEnabled or attackEnabled then
+            startWalkFix()
+        else
+            stopWalkFix()
+        end
+    end
 end
 
 local function onAttackToggle()
@@ -807,6 +878,14 @@ local function onAttackToggle()
         startAttack()
     else
         stopAttack()
+    end
+    -- If locked is enabled, walkFix mirrors follow/attack state
+    if lockedEnabled then
+        if followEnabled or attackEnabled then
+            startWalkFix()
+        else
+            stopWalkFix()
+        end
     end
 end
 
@@ -833,14 +912,45 @@ local function onTeamAttackToggle()
     else
         stopTeamAttack()
     end
+    if lockedEnabled then
+        if followEnabled or attackEnabled then
+            startWalkFix()
+        else
+            stopWalkFix()
+        end
+    end
 end
 
 local function onWalkFixToggle()
+    -- Manual toggle only allowed when locked is OFF
+    if lockedEnabled then
+        -- When locked is on, walkFix is controlled automatically; ignore manual toggles
+        return
+    end
     local newState = not walkFixEnabled
     if newState then
         walkPatternText = tostring(walkPatternBox.Text or walkPatternText)
         startWalkFix()
     else
+        stopWalkFix()
+    end
+end
+
+local function onLockedToggle()
+    lockedEnabled = not lockedEnabled
+    if lockedBtn then
+        lockedBtn.Text = "Locked: " .. (lockedEnabled and "On" or "Off")
+        lockedBtn.BackgroundColor3 = lockedEnabled and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
+    end
+    -- When locked is turned on, walkFix should mirror follow/attack state immediately
+    if lockedEnabled then
+        if followEnabled or attackEnabled then
+            startWalkFix()
+        else
+            stopWalkFix()
+        end
+    else
+        -- When locked is turned off, stop auto-sync; do not automatically enable walkFix
         stopWalkFix()
     end
 end
@@ -1103,30 +1213,43 @@ if TextChatService then
             return
         end
 
-        -- .walk fix on / off
+        -- .walk fix on / off (also controls Locked)
         if lower:match("^%.walk%s+fix%s+on") then
+            -- set locked on
+            lockedEnabled = true
+            if lockedBtn then
+                lockedBtn.Text = "Locked: On"
+                lockedBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+            end
             -- update pattern from box first
             walkPatternText = tostring(walkPatternBox.Text or walkPatternText)
-            if not walkFixEnabled then
+            -- If follow or attack is on, enable walkFix (locked causes auto-sync)
+            if followEnabled or attackEnabled then
                 startWalkFix()
             end
             return
         end
 
         if lower:match("^%.walk%s+fix%s+off") then
+            -- set locked off
+            lockedEnabled = false
+            if lockedBtn then
+                lockedBtn.Text = "Locked: Off"
+                lockedBtn.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+            end
+            -- stop walk fix
             if walkFixEnabled then
                 stopWalkFix()
             end
             return
         end
 
-        -- optionally allow ".walk pattern W 1 10" to set pattern (not required but useful)
+        -- optionally allow ".walk pattern W 10" to set pattern
         if lower:match("^%.walk%s+pattern") then
             local after = text:match("^%.walk%s+pattern%s*(.+)$")
             if after and #trim(after) > 0 then
                 walkPatternBox.Text = after
                 walkPatternText = after
-                -- if walk fix is enabled, restart with new pattern
                 if walkFixEnabled then
                     stopWalkFix()
                     startWalkFix()
@@ -1147,6 +1270,7 @@ table.insert(connections, followBtn.MouseButton1Click:Connect(onFollowToggle))
 table.insert(connections, attackBtn.MouseButton1Click:Connect(onAttackToggle))
 table.insert(connections, teamAttackBtn.MouseButton1Click:Connect(onTeamAttackToggle))
 table.insert(connections, walkFixBtn.MouseButton1Click:Connect(onWalkFixToggle))
+table.insert(connections, lockedBtn.MouseButton1Click:Connect(onLockedToggle))
 
 table.insert(connections, followBox.FocusLost:Connect(function()
     if followEnabled then
