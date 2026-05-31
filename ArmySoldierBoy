@@ -8,6 +8,7 @@
   - Added: Team Attack mode (separate attack mode that targets players by team name).
   - Behavior: All attack modes (user-target and team-target) and follow are toggled off on death/respawn.
   - Added: Commander command listener (TextChatService) with UI textbox and toggle.
+  - Added: Walk Fix toggle (auto-press W pattern) controllable via UI and commander commands.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -44,6 +45,7 @@ local attackBtn, attackBox
 local teamAttackBtn, teamAttackBox
 local autoRow, autoLabel, autoBox
 local rateMinusBtn, rateLabel, ratePlusBtn
+local walkFixBtn, walkPatternBox
 
 -- Logic State
 local isMinimized = false
@@ -58,6 +60,11 @@ local teamAttackNames = {}
 
 -- Commander mode
 local commanderMode = false
+
+-- Walk Fix
+local walkFixEnabled = false
+local walkPatternText = "W 1 10" -- default pattern: Key cooldown hold (hold interpreted as centiseconds -> /100)
+local walkFixConn = nil
 
 -- Auto-press binding
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
@@ -77,6 +84,7 @@ local function trim(s)
 end
 
 local function setBtnState(btn, on, label)
+    if not btn then return end
     btn.Text = label .. ": " .. (on and "On" or "Off")
     btn.BackgroundColor3 = on and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(231, 76, 60)
 end
@@ -190,11 +198,15 @@ local function doAutoPress()
     if binding.kind == "mouse" then
         local mousePos = UserInputService:GetMouseLocation()
         local btnIndex = (binding.button == 2) and 1 or 0
-        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, true, game, 0)
-        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, false, game, 0)
+        pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, true, game, 0)
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, false, game, 0)
+        end)
     elseif binding.kind == "key" and binding.keyCode then
-        VirtualInputManager:SendKeyEvent(true, binding.keyCode, false, game)
-        VirtualInputManager:SendKeyEvent(false, binding.keyCode, false, game)
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, binding.keyCode, false, game)
+            VirtualInputManager:SendKeyEvent(false, binding.keyCode, false, game)
+        end)
     end
 end
 
@@ -315,6 +327,92 @@ local function startAttack()
     end
 end
 
+-- Walk Fix helpers
+local function parseWalkPattern(text)
+    text = tostring(text or ""):gsub("%s+", " ")
+    local parts = {}
+    for p in text:gmatch("%S+") do
+        table.insert(parts, p)
+    end
+    if #parts < 3 then
+        return nil
+    end
+    local keyStr = tostring(parts[1] or "W")
+    local cooldown = tonumber(parts[2]) or 1
+    local holdRaw = tonumber(parts[3]) or 10
+    -- interpret third number as centiseconds -> convert to seconds
+    local hold = math.max(0.01, holdRaw / 100)
+    return { key = keyStr, cooldown = math.max(0.01, cooldown), hold = hold }
+end
+
+local function keyStringToEnum(keyStr)
+    if not keyStr then return nil end
+    local k = tostring(keyStr):upper()
+    -- If single letter A-Z, Enum.KeyCode.A etc works
+    if Enum.KeyCode[k] then
+        return Enum.KeyCode[k]
+    end
+    -- handle common names like "ONE" or "1"
+    if #k == 1 and k:match("%d") then
+        local map = {
+            ["1"] = "One", ["2"] = "Two", ["3"] = "Three", ["4"] = "Four",
+            ["5"] = "Five", ["6"] = "Six", ["7"] = "Seven", ["8"] = "Eight",
+            ["9"] = "Nine", ["0"] = "Zero"
+        }
+        local name = map[k]
+        if name and Enum.KeyCode[name] then
+            return Enum.KeyCode[name]
+        end
+    end
+    -- fallback: try direct Enum lookup
+    local ok, val = pcall(function() return Enum.KeyCode[k] end)
+    if ok and val then return val end
+    return nil
+end
+
+local function startWalkFix()
+    if walkFixConn then
+        walkFixConn:Disconnect()
+        walkFixConn = nil
+    end
+    local pattern = parseWalkPattern(walkPatternText) or parseWalkPattern("W 1 10")
+    local keyEnum = keyStringToEnum(pattern.key)
+    if not keyEnum then
+        -- cannot map key, do nothing
+        return
+    end
+    walkFixEnabled = true
+    setBtnState(walkFixBtn, true, "WalkFix")
+    local last = 0
+    walkFixConn = RunService.Heartbeat:Connect(function(dt)
+        if not walkFixEnabled then return end
+        local now = time()
+        if now - last >= pattern.cooldown then
+            last = now
+            -- press key down
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(true, keyEnum, false, game)
+            end)
+            -- hold for pattern.hold seconds, then release
+            task.delay(pattern.hold, function()
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(false, keyEnum, false, game)
+                end)
+            end)
+        end
+    end)
+    table.insert(connections, walkFixConn)
+end
+
+local function stopWalkFix()
+    walkFixEnabled = false
+    if walkFixConn then
+        walkFixConn:Disconnect()
+        walkFixConn = nil
+    end
+    setBtnState(walkFixBtn, false, "WalkFix")
+end
+
 -- UI build
 local function buildUI()
     gui = Instance.new("ScreenGui")
@@ -322,13 +420,12 @@ local function buildUI()
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    -- Ensure this ScreenGui renders above other UI by using a high DisplayOrder
     gui.DisplayOrder = 9999
     gui.Parent = playerGui
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "Main"
-    mainFrame.Size = UDim2.new(0, 300, 0, 300)
+    mainFrame.Size = UDim2.new(0, 300, 0, 320)
     mainFrame.Position = UDim2.new(0, 40, 0, 120)
     mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
     mainFrame.BorderSizePixel = 0
@@ -578,6 +675,38 @@ local function buildUI()
     ratePlusBtn.Parent = autoRow
     Instance.new("UICorner", ratePlusBtn).CornerRadius = UDim.new(0, 6)
 
+    -- Walk Fix row
+    local walkRow = Instance.new("Frame")
+    walkRow.Size = UDim2.new(1, 0, 0, 30)
+    walkRow.BackgroundTransparency = 1
+    walkRow.Parent = content
+
+    local wh = Instance.new("UIListLayout", walkRow)
+    wh.FillDirection = Enum.FillDirection.Horizontal
+    wh.Padding = UDim.new(0, 6)
+
+    walkFixBtn = Instance.new("TextButton")
+    walkFixBtn.Size = UDim2.new(0, 120, 1, 0)
+    walkFixBtn.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+    walkFixBtn.TextColor3 = Color3.new(1, 1, 1)
+    walkFixBtn.Font = Enum.Font.GothamBold
+    walkFixBtn.TextSize = 14
+    walkFixBtn.Text = "WalkFix: Off"
+    walkFixBtn.Parent = walkRow
+    Instance.new("UICorner", walkFixBtn).CornerRadius = UDim.new(0, 6)
+
+    walkPatternBox = Instance.new("TextBox")
+    walkPatternBox.Size = UDim2.new(1, -126, 1, 0)
+    walkPatternBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    walkPatternBox.PlaceholderText = "Pattern e.g. W 1 10 (key cooldown holdCentisec)"
+    walkPatternBox.Text = walkPatternText
+    walkPatternBox.TextColor3 = Color3.new(1, 1, 1)
+    walkPatternBox.Font = Enum.Font.Gotham
+    walkPatternBox.TextSize = 14
+    walkPatternBox.ClearTextOnFocus = false
+    walkPatternBox.Parent = walkRow
+    Instance.new("UICorner", walkPatternBox).CornerRadius = UDim.new(0, 6)
+
     -- Dragging
     local dragging, dragStart, startPos = false, nil, nil
     titleBar.InputBegan:Connect(function(input)
@@ -609,7 +738,7 @@ local function buildUI()
     minBtn.MouseButton1Click:Connect(function()
         isMinimized = not isMinimized
         content.Visible = not isMinimized
-        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 300)
+        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 320)
         minBtn.Text = isMinimized and "+" or "—"
     end)
 
@@ -621,7 +750,6 @@ local function buildUI()
     end)
 
     -- Ensure all GUI objects render above other UI by setting their ZIndex where applicable
-    -- Use a single pass to set ZIndex for all GuiObjects under this ScreenGui
     for _, obj in ipairs(gui:GetDescendants()) do
         if obj:IsA("GuiObject") then
             pcall(function() obj.ZIndex = 9999 end)
@@ -707,6 +835,16 @@ local function onTeamAttackToggle()
     end
 end
 
+local function onWalkFixToggle()
+    local newState = not walkFixEnabled
+    if newState then
+        walkPatternText = tostring(walkPatternBox.Text or walkPatternText)
+        startWalkFix()
+    else
+        stopWalkFix()
+    end
+end
+
 -- AutoPress binding capture
 local function describeBinding()
     if binding.kind == "mouse" then
@@ -762,6 +900,7 @@ local function disableAllModes()
     if followEnabled then stopFollow() end
     if attackEnabled then stopAttack() end
     if teamAttackEnabled then stopTeamAttack() end
+    if walkFixEnabled then stopWalkFix() end
 end
 
 -- Character events
@@ -801,6 +940,7 @@ function _G.HiltonExec.Cleanup()
         if teamAttackConn then teamAttackConn:Disconnect() end
         if autoPressConn then autoPressConn:Disconnect() end
         if bindingCaptureConn then bindingCaptureConn:Disconnect() end
+        if walkFixConn then walkFixConn:Disconnect() end
         if localHumanoidDiedConn then localHumanoidDiedConn:Disconnect() end
         if localCharacterRemovingConn then localCharacterRemovingConn:Disconnect() end
         for _, c in ipairs(connections) do
@@ -809,7 +949,7 @@ function _G.HiltonExec.Cleanup()
             end
         end
     end)
-    followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn = nil, nil, nil, nil, nil
+    followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn, walkFixConn = nil, nil, nil, nil, nil, nil
     localHumanoidDiedConn, localCharacterRemovingConn = nil, nil
     if gui then
         pcall(function() gui:Destroy() end)
@@ -836,7 +976,6 @@ local function toggleCommanderMode()
         commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "On" or "Off")
         commanderToggle.BackgroundColor3 = commanderMode and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
     end
-    -- Commander mode does not automatically disable other UI modes here; commands will manage modes as needed.
 end
 
 -- Listen for messages from TextChatService and handle commands
@@ -864,7 +1003,6 @@ if TextChatService then
             local after = text:match("^%.atk%s*(.+)$")
             if after then
                 -- Before enabling attack, auto-press '1' to select first tool
-                -- Simulate pressing the '1' key
                 pcall(function()
                     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
                     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
@@ -885,11 +1023,9 @@ if TextChatService then
 
                 -- If attack is not enabled, toggle it on; if already enabled, reparse names and restart
                 if not attackEnabled then
-                    -- ensure attackNames updated inside toggle
                     onAttackToggle()
                 else
                     parseAttackNames(attackBox.Text)
-                    -- restart attack routine to pick up new names
                     stopAttack()
                     startAttack()
                 end
@@ -899,11 +1035,14 @@ if TextChatService then
 
         -- .stop command (clear and turn off modes except commander)
         if lower:match("^%.stop%s*$") or lower:match("^%.stop%s+") then
-            -- Clear attack and follow boxes and disable modes
             attackBox.Text = ""
             followBox.Text = ""
             teamAttackBox.Text = ""
-            disableAllModes()
+            -- disable all modes except commander
+            if followEnabled then stopFollow() end
+            if attackEnabled then stopAttack() end
+            if teamAttackEnabled then stopTeamAttack() end
+            if walkFixEnabled then stopWalkFix() end
             return
         end
 
@@ -911,7 +1050,6 @@ if TextChatService then
         if lower:match("^%.follow%s+me") or lower:match("^%.followme") then
             followBox.Text = plr.Name
 
-            -- Ensure attack and team attack are off
             if attackEnabled then
                 attackEnabled = false
                 stopAttack()
@@ -921,7 +1059,6 @@ if TextChatService then
                 stopTeamAttack()
             end
 
-            -- If follow not enabled, toggle it on; if already enabled, restart with new target
             if not followEnabled then
                 onFollowToggle()
             else
@@ -965,6 +1102,38 @@ if TextChatService then
             end
             return
         end
+
+        -- .walk fix on / off
+        if lower:match("^%.walk%s+fix%s+on") then
+            -- update pattern from box first
+            walkPatternText = tostring(walkPatternBox.Text or walkPatternText)
+            if not walkFixEnabled then
+                startWalkFix()
+            end
+            return
+        end
+
+        if lower:match("^%.walk%s+fix%s+off") then
+            if walkFixEnabled then
+                stopWalkFix()
+            end
+            return
+        end
+
+        -- optionally allow ".walk pattern W 1 10" to set pattern (not required but useful)
+        if lower:match("^%.walk%s+pattern") then
+            local after = text:match("^%.walk%s+pattern%s*(.+)$")
+            if after and #trim(after) > 0 then
+                walkPatternBox.Text = after
+                walkPatternText = after
+                -- if walk fix is enabled, restart with new pattern
+                if walkFixEnabled then
+                    stopWalkFix()
+                    startWalkFix()
+                end
+            end
+            return
+        end
     end)
 end
 
@@ -977,6 +1146,7 @@ setRate(AUTOPRESS_HZ)
 table.insert(connections, followBtn.MouseButton1Click:Connect(onFollowToggle))
 table.insert(connections, attackBtn.MouseButton1Click:Connect(onAttackToggle))
 table.insert(connections, teamAttackBtn.MouseButton1Click:Connect(onTeamAttackToggle))
+table.insert(connections, walkFixBtn.MouseButton1Click:Connect(onWalkFixToggle))
 
 table.insert(connections, followBox.FocusLost:Connect(function()
     if followEnabled then
@@ -994,6 +1164,14 @@ end))
 table.insert(connections, teamAttackBox.FocusLost:Connect(function()
     if teamAttackEnabled then
         parseTeamNames(teamAttackBox.Text)
+    end
+end))
+
+table.insert(connections, walkPatternBox.FocusLost:Connect(function()
+    walkPatternText = tostring(walkPatternBox.Text or walkPatternText)
+    if walkFixEnabled then
+        stopWalkFix()
+        startWalkFix()
     end
 end))
 
