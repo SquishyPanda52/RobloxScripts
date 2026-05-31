@@ -1,0 +1,125 @@
+--// SERVICES
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+--// UI CREATION
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 260, 0, 120)
+Frame.Position = UDim2.new(0.5, -130, 0.3, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Frame.Active = true
+Frame.Draggable = true
+Frame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -60, 0, 25)
+Title.Position = UDim2.new(0, 5, 0, 5)
+Title.BackgroundTransparency = 1
+Title.Text = "Chat Command Listener"
+Title.TextColor3 = Color3.fromRGB(255,255,255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Frame
+
+local Minimize = Instance.new("TextButton")
+Minimize.Size = UDim2.new(0, 25, 0, 25)
+Minimize.Position = UDim2.new(1, -55, 0, 5)
+Minimize.Text = "-"
+Minimize.BackgroundColor3 = Color3.fromRGB(60,60,60)
+Minimize.TextColor3 = Color3.fromRGB(255,255,255)
+Minimize.Parent = Frame
+
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.new(0, 25, 0, 25)
+Close.Position = UDim2.new(1, -30, 0, 5)
+Close.Text = "X"
+Close.BackgroundColor3 = Color3.fromRGB(120,40,40)
+Close.TextColor3 = Color3.fromRGB(255,255,255)
+Close.Parent = Frame
+
+local TextBox = Instance.new("TextBox")
+TextBox.Size = UDim2.new(1, -20, 0, 30)
+TextBox.Position = UDim2.new(0, 10, 0, 45)
+TextBox.PlaceholderText = "Enter usernames (Player1, Player2)"
+TextBox.Text = ""
+TextBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+TextBox.TextColor3 = Color3.fromRGB(255,255,255)
+TextBox.Parent = Frame
+
+--// MINIMIZE LOGIC
+local minimized = false
+Minimize.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        Frame.Size = UDim2.new(0, 260, 0, 35)
+    else
+        Frame.Size = UDim2.new(0, 260, 0, 120)
+    end
+end)
+
+--// CLOSE + DELETE EVERYTHING
+Close.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+    script:Destroy()
+end)
+
+--// PARSE USER INPUT
+local function getTargetPlayers()
+    local raw = TextBox.Text
+    local names = {}
+
+    for part in string.gmatch(raw, "([^,]+)") do
+        table.insert(names, string.lower(part:gsub("%s+", "")))
+    end
+
+    local matched = {}
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local lowerName = string.lower(plr.Name)
+        for _, partial in ipairs(names) do
+            if partial ~= "" and string.find(lowerName, partial, 1, true) then
+                table.insert(matched, plr)
+            end
+        end
+    end
+
+    return matched
+end
+
+--// CHAT LISTENER
+TextChatService.MessageReceived:Connect(function(message)
+    local sender = message.TextSource
+    if not sender then return end
+
+    local senderPlayer = Players:GetPlayerByUserId(sender.UserId)
+    if not senderPlayer then return end
+
+    -- Check if sender matches textbox list
+    local targets = getTargetPlayers()
+    local isTarget = false
+
+    for _, plr in ipairs(targets) do
+        if plr == senderPlayer then
+            isTarget = true
+            break
+        end
+    end
+
+    if not isTarget then return end
+
+    -- COMMANDS
+    local msg = string.lower(message.Text)
+
+    if msg == ".jump" then
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChildOfClass("Humanoid") then
+            char:FindFirstChildOfClass("Humanoid").Jump = true
+        end
+    end
+end)
