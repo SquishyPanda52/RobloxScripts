@@ -1,0 +1,101 @@
+--// MAIN MENU HUB FOUNDATION //--
+
+local player = game.Players.LocalPlayer
+local gui = Instance.new("ScreenGui")
+gui.Name = "MasterHub"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+--// MAIN FRAME (Holds everything)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 650, 0, 450)
+mainFrame.Position = UDim2.new(0.5, -325, 0.5, -225)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = gui
+
+--// UI CORNER
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 10)
+mainCorner.Parent = mainFrame
+
+--// SCROLLING FRAME (Main Menu Content)
+local scroll = Instance.new("ScrollingFrame")
+scroll.Name = "MenuScroll"
+scroll.Size = UDim2.new(1, -120, 1, -20) -- Leaves space for side tab
+scroll.Position = UDim2.new(0, 10, 0, 10)
+scroll.CanvasSize = UDim2.new(0, 0, 3, 0) -- Large vertical space for future scripts
+scroll.ScrollBarThickness = 8
+scroll.ScrollBarImageColor3 = Color3.fromRGB(140, 255, 120)
+scroll.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+scroll.BorderSizePixel = 0
+scroll.Parent = mainFrame
+
+--// GRADIENT FOR SCROLLING FRAME
+local grad = Instance.new("UIGradient")
+grad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 255, 60)),   -- Green
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 255, 80))   -- Yellow-green
+})
+grad.Rotation = 90
+grad.Parent = scroll
+
+--// UI PADDING
+local pad = Instance.new("UIPadding")
+pad.PaddingLeft = UDim.new(0, 10)
+pad.PaddingTop = UDim.new(0, 10)
+pad.Parent = scroll
+
+--// SIDE TAB (Static, does NOT scroll)
+local sideTab = Instance.new("Frame")
+sideTab.Name = "SideTab"
+sideTab.Size = UDim2.new(0, 100, 1, -20)
+sideTab.Position = UDim2.new(1, -110, 0, 10)
+sideTab.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+sideTab.BorderSizePixel = 0
+sideTab.Parent = mainFrame
+
+local sideCorner = Instance.new("UICorner")
+sideCorner.CornerRadius = UDim.new(0, 8)
+sideCorner.Parent = sideTab
+
+--// SIDE TAB GRADIENT
+local tabGrad = Instance.new("UIGradient")
+tabGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 255, 60)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 255, 80))
+})
+tabGrad.Rotation = 90
+tabGrad.Parent = sideTab
+
+--// LAYOUT FOR FUTURE TAB BUTTONS
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.Padding = UDim.new(0, 6)
+tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabLayout.Parent = sideTab
+
+--// FUNCTION FOR FUTURE SECTION BUTTONS
+function AddSectionButton(sectionName, scrollTargetY)
+    local btn = Instance.new("TextButton")
+    btn.Name = sectionName
+    btn.Size = UDim2.new(0, 90, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    btn.Text = sectionName
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 14
+    btn.Parent = sideTab
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        scroll.CanvasPosition = Vector2.new(0, scrollTargetY)
+    end)
+end
+
+--// Example placeholder (remove later)
+AddSectionButton("Example", 0)
