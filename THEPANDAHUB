@@ -4,6 +4,7 @@ local player = game.Players.LocalPlayer
 local gui = Instance.new("ScreenGui")
 gui.Name = "MasterHub"
 gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
 gui.Parent = player:WaitForChild("PlayerGui")
 
 --// MAIN FRAME (Compact)
@@ -52,6 +53,7 @@ closeBtn.Text = "X"
 closeBtn.TextColor3 = Color3.new(1, 1, 1)
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 16
+closeBtn.AutoButtonColor = true
 closeBtn.Parent = topBar
 
 local closeCorner = Instance.new("UICorner")
@@ -68,32 +70,12 @@ miniBtn.Text = "-"
 miniBtn.TextColor3 = Color3.new(1, 1, 1)
 miniBtn.Font = Enum.Font.GothamBold
 miniBtn.TextSize = 20
+miniBtn.AutoButtonColor = true
 miniBtn.Parent = topBar
 
 local miniCorner = Instance.new("UICorner")
 miniCorner.CornerRadius = UDim.new(0, 6)
 miniCorner.Parent = miniBtn
-
---// MINIMIZE / CLOSE LOGIC
-local minimized = false
-local fullSize = UDim2.new(0, 520, 0, 380)
-local miniSize = UDim2.new(0, 520, 0, 32)
-
-miniBtn.MouseButton1Click:Connect(function()
-    minimized = not minimized
-
-    for _, child in ipairs(mainFrame:GetChildren()) do
-        if child ~= topBar then
-            child.Visible = not minimized
-        end
-    end
-
-    mainFrame.Size = minimized and miniSize or fullSize
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-    mainFrame.Visible = false
-end)
 
 --// SCROLLING FRAME (Slimmer width)
 local scroll = Instance.new("ScrollingFrame")
@@ -157,6 +139,7 @@ function AddSectionButton(sectionName, scrollTargetY)
     btn.TextColor3 = Color3.new(1, 1, 1)
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 14
+    btn.AutoButtonColor = true
     btn.Parent = sideTab
 
     local corner = Instance.new("UICorner")
@@ -170,3 +153,24 @@ end
 
 -- Example placeholder
 AddSectionButton("Example", 0)
+
+--// MINIMIZE / CLOSE LOGIC (simple & reliable)
+local minimized = false
+local fullSize = UDim2.new(0, 520, 0, 380)
+local miniSize = UDim2.new(0, 520, 0, 32)
+
+miniBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+
+    -- Visual feedback so you KNOW it's firing
+    miniBtn.BackgroundColor3 = minimized and Color3.fromRGB(40, 120, 40) or Color3.fromRGB(60, 160, 60)
+
+    scroll.Visible = not minimized
+    sideTab.Visible = not minimized
+
+    mainFrame.Size = minimized and miniSize or fullSize
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+end)
