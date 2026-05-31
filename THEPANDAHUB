@@ -9,7 +9,7 @@ gui.Parent = player:WaitForChild("PlayerGui")
 --// MAIN FRAME (Compact)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 520, 0, 380) -- Smaller & compact
+mainFrame.Size = UDim2.new(0, 520, 0, 380)
 mainFrame.Position = UDim2.new(0.5, -260, 0.5, -190)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 mainFrame.BorderSizePixel = 0
@@ -28,10 +28,6 @@ topBar.Position = UDim2.new(0, 0, 0, 0)
 topBar.BackgroundColor3 = Color3.fromRGB(35, 120, 35)
 topBar.BorderSizePixel = 0
 topBar.Parent = mainFrame
-
-local topCorner = Instance.new("UICorner")
-topCorner.CornerRadius = UDim.new(0, 10)
-topCorner.Parent = topBar
 
 --// TITLE TEXT
 local title = Instance.new("TextLabel")
@@ -80,15 +76,19 @@ miniCorner.Parent = miniBtn
 
 --// MINIMIZE / CLOSE LOGIC
 local minimized = false
+local fullSize = UDim2.new(0, 520, 0, 380)
+local miniSize = UDim2.new(0, 520, 0, 32)
 
 miniBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
+
     for _, child in ipairs(mainFrame:GetChildren()) do
         if child ~= topBar then
             child.Visible = not minimized
         end
     end
-    mainFrame.Size = minimized and UDim2.new(0, 520, 0, 32) or UDim2.new(0, 520, 0, 380)
+
+    mainFrame.Size = minimized and miniSize or fullSize
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
