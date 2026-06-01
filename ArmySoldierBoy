@@ -8,7 +8,6 @@
   - Team Attack mode (targets players by team name).
   - Behavior: All attack modes and follow are toggled off on death/respawn.
   - Commander command listener (TextChatService) with UI textbox and toggle.
-  - Auto Jump (auto-unstuck) toggle that persists across respawns.
   - Fixes: commander .follow/.atk now update targets without turning the mode off;
            .stop immediately halts movement and disables modes.
 ]]
@@ -47,7 +46,6 @@ local attackBtn, attackBox
 local teamAttackBtn, teamAttackBox
 local autoRow, autoLabel, autoBox
 local rateMinusBtn, rateLabel, ratePlusBtn
-local autoJumpBtn
 
 -- Logic State
 local isMinimized = false
@@ -66,14 +64,6 @@ local commanderMode = false
 -- Auto-press binding
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
 local binding = { kind = "mouse", button = 1 }
-
--- Auto Jump (auto-unstuck)
-local autoJumpEnabled = false
-local autoJumpConn = nil
-local AUTOJUMP_COOLDOWN = 0.6 -- seconds between automatic jumps
-local autoJumpLast = 0
-local AUTOJUMP_MIN_MOVE_DIR = 0.1 -- require player to be trying to move
-local AUTOJUMP_VEL_THRESHOLD = 2 -- horizontal velocity threshold to consider stuck
 
 -- Connections
 local followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn
@@ -151,61 +141,11 @@ local function stopMovementImmediate()
     if not char then return end
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if humanoid then
-        -- Stop any MoveTo by issuing a zero move
         pcall(function() humanoid:Move(Vector3.new()) end)
-        -- Also set MoveTo target to current position to cancel pending MoveTo
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if hrp then
             pcall(function() humanoid:MoveTo(hrp.Position) end)
         end
-    end
-end
-
--- Auto Jump helpers
-local function startAutoJump()
-    if autoJumpConn then
-        autoJumpConn:Disconnect()
-        autoJumpConn = nil
-    end
-    autoJumpEnabled = true
-    autoJumpLast = 0
-    autoJumpConn = RunService.Heartbeat:Connect(function()
-        if not autoJumpEnabled then return end
-        -- Only attempt when follow or attack is active
-        if not (followEnabled or attackEnabled or teamAttackEnabled) then
-            return
-        end
-
-        local char = localPlayer.Character
-        if not char then return end
-        local humanoid = char:FindFirstChildOfClass("Humanoid")
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not humanoid or not hrp then return end
-
-        -- Player must be trying to move
-        local moveDir = humanoid.MoveDirection
-        if not moveDir or moveDir.Magnitude < AUTOJUMP_MIN_MOVE_DIR then
-            return
-        end
-
-        -- Horizontal speed
-        local horizontalVel = Vector3.new(hrp.Velocity.X, 0, hrp.Velocity.Z).Magnitude
-        local now = time()
-        if horizontalVel < AUTOJUMP_VEL_THRESHOLD and now - autoJumpLast >= AUTOJUMP_COOLDOWN then
-            autoJumpLast = now
-            pcall(function()
-                humanoid.Jump = true
-            end)
-        end
-    end)
-    table.insert(connections, autoJumpConn)
-end
-
-local function stopAutoJump()
-    autoJumpEnabled = false
-    if autoJumpConn then
-        autoJumpConn:Disconnect()
-        autoJumpConn = nil
     end
 end
 
@@ -664,36 +604,6 @@ local function buildUI()
     commanderBox.Parent = commanderRow
     Instance.new("UICorner", commanderBox).CornerRadius = UDim.new(0, 6)
 
-    -- Auto Jump row
-    local autoJumpRow = Instance.new("Frame")
-    autoJumpRow.Size = UDim2.new(1, 0, 0, 30)
-    autoJumpRow.BackgroundTransparency = 1
-    autoJumpRow.Parent = content
-
-    local ajl = Instance.new("UIListLayout", autoJumpRow)
-    ajl.FillDirection = Enum.FillDirection.Horizontal
-    ajl.Padding = UDim.new(0, 6)
-
-    local autoJumpLabel = Instance.new("TextLabel")
-    autoJumpLabel.Size = UDim2.new(0, 90, 1, 0)
-    autoJumpLabel.BackgroundTransparency = 1
-    autoJumpLabel.Font = Enum.Font.GothamBold
-    autoJumpLabel.TextSize = 14
-    autoJumpLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-    autoJumpLabel.TextXAlignment = Enum.TextXAlignment.Left
-    autoJumpLabel.Text = "Auto Jump"
-    autoJumpLabel.Parent = autoJumpRow
-
-    autoJumpBtn = Instance.new("TextButton")
-    autoJumpBtn.Size = UDim2.new(0, 120, 1, 0)
-    autoJumpBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
-    autoJumpBtn.TextColor3 = Color3.new(1, 1, 1)
-    autoJumpBtn.Font = Enum.Font.GothamBold
-    autoJumpBtn.TextSize = 14
-    autoJumpBtn.Text = "AutoJump: Off"
-    autoJumpBtn.Parent = autoJumpRow
-    Instance.new("UICorner", autoJumpBtn).CornerRadius = UDim.new(0, 6)
-
     -- Dragging
     local dragging, dragStart, startPos = false, nil, nil
     titleBar.InputBegan:Connect(function(input)
@@ -769,10 +679,6 @@ local function onFollowToggle()
     else
         stopFollow()
     end
-    -- AutoJump persistence: ensure auto-jump connection exists if enabled
-    if autoJumpEnabled and not autoJumpConn then
-        startAutoJump()
-    end
 end
 
 local function onAttackToggle()
@@ -797,9 +703,6 @@ local function onAttackToggle()
     else
         stopAttack()
     end
-    if autoJumpEnabled and not autoJumpConn then
-        startAutoJump()
-    end
 end
 
 local function onTeamAttackToggle()
@@ -823,9 +726,6 @@ local function onTeamAttackToggle()
         startTeamAttack()
     else
         stopTeamAttack()
-    end
-    if autoJumpEnabled and not autoJumpConn then
-        startAutoJump()
     end
 end
 
@@ -913,11 +813,6 @@ local function connectLocalCharacterEvents(character)
         end
     end)
     table.insert(connections, localCharacterRemovingConn)
-
-    -- If autoJumpEnabled, ensure the autoJump connection is active after respawn
-    if autoJumpEnabled and not autoJumpConn then
-        startAutoJump()
-    end
 end
 
 -- Cleanup routine
@@ -928,7 +823,6 @@ function _G.HiltonExec.Cleanup()
         if teamAttackConn then teamAttackConn:Disconnect() end
         if autoPressConn then autoPressConn:Disconnect() end
         if bindingCaptureConn then bindingCaptureConn:Disconnect() end
-        if autoJumpConn then autoJumpConn:Disconnect() end
         if localHumanoidDiedConn then localHumanoidDiedConn:Disconnect() end
         if localCharacterRemovingConn then localCharacterRemovingConn:Disconnect() end
         for _, c in ipairs(connections) do
@@ -937,7 +831,7 @@ function _G.HiltonExec.Cleanup()
             end
         end
     end)
-    followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn, autoJumpConn = nil, nil, nil, nil, nil, nil
+    followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn = nil, nil, nil, nil, nil
     localHumanoidDiedConn, localCharacterRemovingConn = nil, nil
     if gui then
         pcall(function() gui:Destroy() end)
@@ -1007,13 +901,12 @@ if TextChatService then
                     stopTeamAttack()
                 end
 
-                -- If attack already enabled, update targets and restart attack without toggling off
+                -- Update targets and start attack (do not toggle off if already on)
                 parseAttackNames(attackBox.Text)
                 if not attackEnabled then
                     attackEnabled = true
                     startAttack()
                 else
-                    -- restart attack loop to pick up new names
                     if attackConn then
                         attackConn:Disconnect()
                         attackConn = nil
@@ -1048,7 +941,7 @@ if TextChatService then
                 stopTeamAttack()
             end
 
-            -- If follow already enabled, update target without turning off
+            -- Update target and start follow without toggling off
             local target = findClosestPlayer(followBox.Text)
             if target then
                 followTargetPlayer = target
@@ -1056,7 +949,6 @@ if TextChatService then
                     followEnabled = true
                     startFollow()
                 else
-                    -- restart follow loop to ensure new target is used
                     if followConn then
                         followConn:Disconnect()
                         followConn = nil
@@ -1095,18 +987,6 @@ if TextChatService then
                     end
                 end
             end
-            return
-        end
-
-        -- Optionally allow ".autojump on/off" to control auto-jump via commander
-        if lower:match("^%.autojump%s+on") then
-            autoJumpEnabled = true
-            if not autoJumpConn then startAutoJump() end
-            return
-        end
-        if lower:match("^%.autojump%s+off") then
-            autoJumpEnabled = false
-            stopAutoJump()
             return
         end
     end)
@@ -1189,19 +1069,6 @@ if commanderToggle then
     table.insert(connections, commanderToggle.MouseButton1Click:Connect(toggleCommanderMode))
 end
 
--- AutoJump button wiring
-if autoJumpBtn then
-    table.insert(connections, autoJumpBtn.MouseButton1Click:Connect(function()
-        autoJumpEnabled = not autoJumpEnabled
-        if autoJumpEnabled then
-            if not autoJumpConn then startAutoJump() end
-        else
-            stopAutoJump()
-        end
-        setBtnState(autoJumpBtn, autoJumpEnabled, "AutoJump")
-    end))
-end
-
 -- 🔥 KEYBINDS: T focuses attackBox, R toggles Attack, Y toggles Follow
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
@@ -1235,12 +1102,4 @@ setBtnState(teamAttackBtn, teamAttackEnabled, "TeamAttack")
 if commanderToggle then
     commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "On" or "Off")
     commanderToggle.BackgroundColor3 = commanderMode and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
-end
-if autoJumpBtn then
-    setBtnState(autoJumpBtn, autoJumpEnabled, "AutoJump")
-end
-
--- Ensure auto-jump persists if enabled
-if autoJumpEnabled and not autoJumpConn then
-    startAutoJump()
 end
