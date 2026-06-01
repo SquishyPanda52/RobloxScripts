@@ -1,462 +1,1003 @@
---// Runtime LocalScript
---// Execute at runtime
+--// Services
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UserInput      = game:GetService("UserInputService")
+local TextChatService = game:GetService("TextChatService")
 
---////////////////////////////////////////////////////
--- SERVICES
---////////////////////////////////////////////////////
+--// Variables
+local localPlayer    = Players.LocalPlayer
+local camera         = workspace.CurrentCamera
 
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local VirtualUser = game:GetService("VirtualUser")
-local GuiService = game:GetService("GuiService")
+local lockonEnabled = false
+local lockonPredictEnabled = false
+local lockonConnection = nil
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local predictionStrength = 0.10
 
---////////////////////////////////////////////////////
--- CLEAN OLD UI
---////////////////////////////////////////////////////
+-- SNAP SYSTEM
+local snapEnabled = false
+local lastTargetHRP = nil
+local transitionActive = false
 
-if playerGui:FindFirstChild("RuntimeAutoClicker") then
-	playerGui.RuntimeAutoClicker:Destroy()
+-- AUTO SELECT
+local autoSelectEnabled = false
+local selectedTargetPlayer = nil
+local hoveredTargetPlayer = nil
+
+-- COMMANDER MODE
+local commanderMode = false
+local lastCommanderUserId = nil -- track most recent commander who issued a command
+
+-- BIGGER HITBOX SETTINGS
+local targetRadius = 120
+
+local function round(num, decimals)
+    local mult = 10 ^ (decimals or 0)
+    return math.floor(num * mult + 0.5) / mult
 end
 
---////////////////////////////////////////////////////
--- VARIABLES
---////////////////////////////////////////////////////
-
-local enabled = false
-local clickingThread = nil
-local destroyed = false
-local minimized = false
-local connections = {}
-
---////////////////////////////////////////////////////
+--------------------------------------------------------------------
 -- GUI
---////////////////////////////////////////////////////
+--------------------------------------------------------------------
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "RuntimeAutoClicker"
-gui.ResetOnSpawn = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.Parent = playerGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JuggernautLockonGUI"
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 9999
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 
-------------------------------------------------------
--- MAIN FRAME
-------------------------------------------------------
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 260)
+mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 280, 0, 180)
-frame.Position = UDim2.new(0.02, 0, 0.3, 0)
-frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-frame.BorderSizePixel = 0
-frame.Parent = gui
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 24)
+titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleBar.Parent = mainFrame
 
-local frameCorner = Instance.new("UICorner")
-frameCorner.CornerRadius = UDim.new(0, 10)
-frameCorner.Parent = frame
-
-------------------------------------------------------
--- TOP BAR
-------------------------------------------------------
-
-local topBar = Instance.new("Frame")
-topBar.Size = UDim2.new(1, 0, 0, 30)
-topBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-topBar.BorderSizePixel = 0
-topBar.Parent = frame
-
-local topCorner = Instance.new("UICorner")
-topCorner.CornerRadius = UDim.new(0, 10)
-topCorner.Parent = topBar
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -70, 1, 0)
-title.Position = UDim2.new(0, 10, 0, 0)
-title.BackgroundTransparency = 1
-title.Text = "Auto Clicker"
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.SourceSansBold
-title.TextSize = 20
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = topBar
-
-------------------------------------------------------
--- MINIMIZE BUTTON
-------------------------------------------------------
-
-local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
-minimizeBtn.Position = UDim2.new(1, -60, 0, 0)
-minimizeBtn.Text = "-"
-minimizeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
-minimizeBtn.TextColor3 = Color3.new(1,1,1)
-minimizeBtn.Font = Enum.Font.SourceSansBold
-minimizeBtn.TextSize = 22
-minimizeBtn.BorderSizePixel = 0
-minimizeBtn.Parent = topBar
-
-------------------------------------------------------
--- CLOSE BUTTON
-------------------------------------------------------
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 30, 0, 30)
-closeBtn.Position = UDim2.new(1, -30, 0, 0)
-closeBtn.Text = "X"
-closeBtn.BackgroundColor3 = Color3.fromRGB(120,30,30)
-closeBtn.TextColor3 = Color3.new(1,1,1)
-closeBtn.Font = Enum.Font.SourceSansBold
-closeBtn.TextSize = 20
-closeBtn.BorderSizePixel = 0
-closeBtn.Parent = topBar
-
-------------------------------------------------------
--- CONTENT
-------------------------------------------------------
-
-local content = Instance.new("Frame")
-content.Size = UDim2.new(1, 0, 1, -30)
-content.Position = UDim2.new(0, 0, 0, 30)
-content.BackgroundTransparency = 1
-content.Parent = frame
-
-------------------------------------------------------
--- CLICK SPEED
-------------------------------------------------------
-
-local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(0,130,0,25)
-speedLabel.Position = UDim2.new(0,10,0,10)
-speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "Clicks Per Sec:"
-speedLabel.TextColor3 = Color3.new(1,1,1)
-speedLabel.Font = Enum.Font.SourceSans
-speedLabel.TextSize = 18
-speedLabel.TextXAlignment = Enum.TextXAlignment.Left
-speedLabel.Parent = content
-
-local speedBox = Instance.new("TextBox")
-speedBox.Size = UDim2.new(0,100,0,25)
-speedBox.Position = UDim2.new(1,-110,0,10)
-speedBox.Text = "10"
-speedBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
-speedBox.TextColor3 = Color3.new(1,1,1)
-speedBox.Font = Enum.Font.SourceSans
-speedBox.TextSize = 18
-speedBox.ClearTextOnFocus = false
-speedBox.Parent = content
-
-------------------------------------------------------
--- DURATION
-------------------------------------------------------
-
-local durationLabel = Instance.new("TextLabel")
-durationLabel.Size = UDim2.new(0,130,0,25)
-durationLabel.Position = UDim2.new(0,10,0,45)
-durationLabel.BackgroundTransparency = 1
-durationLabel.Text = "Duration (sec):"
-durationLabel.TextColor3 = Color3.new(1,1,1)
-durationLabel.Font = Enum.Font.SourceSans
-durationLabel.TextSize = 18
-durationLabel.TextXAlignment = Enum.TextXAlignment.Left
-durationLabel.Parent = content
-
-local durationBox = Instance.new("TextBox")
-durationBox.Size = UDim2.new(0,100,0,25)
-durationBox.Position = UDim2.new(1,-110,0,45)
-durationBox.Text = "0"
-durationBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
-durationBox.TextColor3 = Color3.new(1,1,1)
-durationBox.Font = Enum.Font.SourceSans
-durationBox.TextSize = 18
-durationBox.ClearTextOnFocus = false
-durationBox.Parent = content
-
-------------------------------------------------------
--- STATUS
-------------------------------------------------------
-
-local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1,0,0,30)
-status.Position = UDim2.new(0,0,0,90)
-status.BackgroundTransparency = 1
-status.Text = "OFF"
-status.TextColor3 = Color3.fromRGB(255,80,80)
-status.Font = Enum.Font.SourceSansBold
-status.TextSize = 24
-status.Parent = content
-
-------------------------------------------------------
--- KEYBIND NOTE
-------------------------------------------------------
-
-local note = Instance.new("TextLabel")
-note.Size = UDim2.new(1,0,0,25)
-note.Position = UDim2.new(0,0,0,120)
-note.BackgroundTransparency = 1
-note.Text = "Toggle Keybind: Y"
-note.TextColor3 = Color3.fromRGB(180,180,180)
-note.Font = Enum.Font.SourceSansItalic
-note.TextSize = 18
-note.Parent = content
-
-------------------------------------------------------
--- RED CLICK CIRCLE
-------------------------------------------------------
-
-local clickPoint = Instance.new("Frame")
-clickPoint.Size = UDim2.new(0,40,0,40)
-clickPoint.Position = UDim2.new(0.5,-20,0.5,-20)
-clickPoint.BackgroundColor3 = Color3.fromRGB(255,0,0)
-clickPoint.BackgroundTransparency = 0.35
-clickPoint.BorderSizePixel = 0
-clickPoint.Parent = gui
-
-local clickCorner = Instance.new("UICorner")
-clickCorner.CornerRadius = UDim.new(1,0)
-clickCorner.Parent = clickPoint
-
-------------------------------------------------------
--- CENTER DOT
-------------------------------------------------------
-
-local centerDot = Instance.new("Frame")
-centerDot.Size = UDim2.new(0,4,0,4)
-centerDot.Position = UDim2.new(0.5,-2,0.5,-2)
-centerDot.BackgroundColor3 = Color3.new(1,1,1)
-centerDot.BorderSizePixel = 0
-centerDot.Parent = clickPoint
-
-local dotCorner = Instance.new("UICorner")
-dotCorner.CornerRadius = UDim.new(1,0)
-dotCorner.Parent = centerDot
-
---////////////////////////////////////////////////////
+--------------------------------------------------------------------
 -- DRAGGING
---////////////////////////////////////////////////////
+--------------------------------------------------------------------
 
-local function makeDraggable(dragObject, moveObject)
+do
+    local dragging, dragInput, dragStart, startPos
 
-	local dragging = false
-	local dragInput
-	local dragStart
-	local startPos
+    local function update(input)
+        local delta = input.Position - dragStart
 
-	table.insert(connections, dragObject.InputBegan:Connect(function(input)
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
 
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
 
-			dragging = true
-			dragStart = input.Position
-			startPos = moveObject.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
 
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
-			end)
-		end
-	end))
+    titleBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
 
-	table.insert(connections, dragObject.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			dragInput = input
-		end
-	end))
-
-	table.insert(connections, UserInputService.InputChanged:Connect(function(input)
-
-		if dragging and input == dragInput then
-
-			local delta = input.Position - dragStart
-
-			moveObject.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
-			)
-		end
-	end))
+    UserInput.InputChanged:Connect(function(input)
+        if dragging and input == dragInput then
+            update(input)
+        end
+    end)
 end
 
-makeDraggable(topBar, frame)
-makeDraggable(clickPoint, clickPoint)
-
---////////////////////////////////////////////////////
--- CLICK FUNCTION
---////////////////////////////////////////////////////
-
-local function doClick()
-
-	-- EXACT CENTER OF RED CIRCLE
-	local absPos = clickPoint.AbsolutePosition
-	local absSize = clickPoint.AbsoluteSize
-
-	local centerX = absPos.X + (absSize.X / 2)
-	local centerY = absPos.Y + (absSize.Y / 2)
-
-	-- FIX CURSOR OFFSET
-	local inset = GuiService:GetGuiInset()
-
-	local correctedX = centerX
-	local correctedY = centerY + inset.Y
-
-	-- FORCE CURSOR TO EXACT CENTER
-	VirtualUser:MoveMouse(Vector2.new(correctedX, correctedY))
-
-	task.wait()
-
-	-- CLICK EXACT POSITION
-	VirtualInputManager:SendMouseButtonEvent(
-		correctedX,
-		correctedY,
-		0,
-		true,
-		game,
-		0
-	)
-
-	VirtualInputManager:SendMouseButtonEvent(
-		correctedX,
-		correctedY,
-		0,
-		false,
-		game,
-		0
-	)
-end
-
---////////////////////////////////////////////////////
--- AUTO CLICK LOOP
---////////////////////////////////////////////////////
-
-local function startClicking()
-
-	if clickingThread then
-		return
-	end
-
-	clickingThread = task.spawn(function()
-
-		local cps = tonumber(speedBox.Text) or 10
-
-		if cps <= 0 then
-			cps = 10
-		end
-
-		local duration = tonumber(durationBox.Text) or 0
-		local delayTime = 1 / cps
-		local startTime = tick()
-
-		print("[AutoClicker] Started")
-
-		while enabled and not destroyed do
-
-			doClick()
-
-			if duration > 0 then
-				if tick() - startTime >= duration then
-					print("[AutoClicker] Duration ended")
-					enabled = false
-					break
-				end
-			end
-
-			task.wait(delayTime)
-		end
-
-		status.Text = "OFF"
-		status.TextColor3 = Color3.fromRGB(255,80,80)
-
-		clickingThread = nil
-
-		print("[AutoClicker] Stopped")
-
-	end)
-end
-
---////////////////////////////////////////////////////
--- TOGGLE
---////////////////////////////////////////////////////
-
-table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
-
-	if destroyed then
-		return
-	end
-
-	if gameProcessed then
-		return
-	end
-
-	if input.KeyCode == Enum.KeyCode.Y then
-
-		enabled = not enabled
-
-		if enabled then
-
-			status.Text = "ON"
-			status.TextColor3 = Color3.fromRGB(80,255,80)
-
-			startClicking()
-
-		else
-
-			status.Text = "OFF"
-			status.TextColor3 = Color3.fromRGB(255,80,80)
-
-		end
-
-		print("[AutoClicker] Toggle:", enabled)
-	end
-end))
-
---////////////////////////////////////////////////////
+--------------------------------------------------------------------
 -- MINIMIZE
---////////////////////////////////////////////////////
+--------------------------------------------------------------------
 
-minimizeBtn.MouseButton1Click:Connect(function()
+local btnMinimize = Instance.new("TextButton")
+btnMinimize.Text = "-"
+btnMinimize.Font = Enum.Font.SourceSansBold
+btnMinimize.TextSize = 20
+btnMinimize.Size = UDim2.new(0, 24, 0, 24)
+btnMinimize.Position = UDim2.new(1, -48, 0, 0)
+btnMinimize.BackgroundColor3 = Color3.fromRGB(50,50,50)
+btnMinimize.Parent = titleBar
 
-	minimized = not minimized
+local minimized = false
 
-	content.Visible = not minimized
+btnMinimize.MouseButton1Click:Connect(function()
+    minimized = not minimized
 
-	if minimized then
-		frame.Size = UDim2.new(0,280,0,30)
-		minimizeBtn.Text = "+"
-	else
-		frame.Size = UDim2.new(0,280,0,180)
-		minimizeBtn.Text = "-"
-	end
+    mainFrame.Size =
+        minimized
+        and UDim2.new(0,300,0,24)
+        or UDim2.new(0,300,0,260)
 end)
 
---////////////////////////////////////////////////////
--- DESTROY EVERYTHING
---////////////////////////////////////////////////////
+--------------------------------------------------------------------
+-- CLOSE
+--------------------------------------------------------------------
 
-local function destroyEverything()
+local btnClose = Instance.new("TextButton")
+btnClose.Text = "X"
+btnClose.Font = Enum.Font.SourceSansBold
+btnClose.TextSize = 20
+btnClose.Size = UDim2.new(0,24,0,24)
+btnClose.Position = UDim2.new(1,-24,0,0)
+btnClose.BackgroundColor3 = Color3.fromRGB(50,50,50)
+btnClose.Parent = titleBar
 
-	destroyed = true
-	enabled = false
+btnClose.MouseButton1Click:Connect(function()
 
-	for _, conn in pairs(connections) do
-		pcall(function()
-			conn:Disconnect()
-		end)
-	end
+    if lockonConnection then
+        lockonConnection:Disconnect()
+    end
 
-	if gui then
-		gui:Destroy()
-	end
+    screenGui:Destroy()
+end)
 
-	print("[AutoClicker] Fully Destroyed")
+--------------------------------------------------------------------
+-- USER BOX
+--------------------------------------------------------------------
+
+local txtUser = Instance.new("TextBox")
+txtUser.PlaceholderText = "Type usernames (comma separated)..."
+txtUser.Font = Enum.Font.SourceSans
+txtUser.TextSize = 16
+txtUser.ClearTextOnFocus = false
+txtUser.Size = UDim2.new(1, -10, 0, 30)
+txtUser.Position = UDim2.new(0,5,0,34)
+txtUser.BackgroundColor3 = Color3.fromRGB(40,40,40)
+txtUser.TextColor3 = Color3.fromRGB(255,255,255)
+txtUser.Parent = mainFrame
+
+--------------------------------------------------------------------
+-- BUTTONS
+--------------------------------------------------------------------
+
+local btnToggle = Instance.new("TextButton")
+btnToggle.Text = "Lockon: OFF"
+btnToggle.Font = Enum.Font.SourceSansBold
+btnToggle.TextSize = 16
+btnToggle.Size = UDim2.new(0,100,0,30)
+btnToggle.Position = UDim2.new(1,-105,0,34)
+btnToggle.BackgroundColor3 = Color3.fromRGB(70,0,0)
+btnToggle.TextColor3 = Color3.fromRGB(255,255,255)
+btnToggle.Parent = mainFrame
+
+local btnPredict = Instance.new("TextButton")
+btnPredict.Text = "Predict: OFF"
+btnPredict.Font = Enum.Font.SourceSansBold
+btnPredict.TextSize = 16
+btnPredict.Size = UDim2.new(0,100,0,30)
+btnPredict.Position = UDim2.new(0,5,0,68)
+btnPredict.BackgroundColor3 = Color3.fromRGB(70,0,0)
+btnPredict.TextColor3 = Color3.fromRGB(255,255,255)
+btnPredict.Parent = mainFrame
+
+local btnSnap = Instance.new("TextButton")
+btnSnap.Text = "Snap: OFF"
+btnSnap.Font = Enum.Font.SourceSansBold
+btnSnap.TextSize = 16
+btnSnap.Size = UDim2.new(0,100,0,30)
+btnSnap.Position = UDim2.new(0,110,0,68)
+btnSnap.BackgroundColor3 = Color3.fromRGB(70,0,0)
+btnSnap.TextColor3 = Color3.fromRGB(255,255,255)
+btnSnap.Parent = mainFrame
+
+local btnAutoSelect = Instance.new("TextButton")
+btnAutoSelect.Text = "Auto Select: OFF"
+btnAutoSelect.Font = Enum.Font.SourceSansBold
+btnAutoSelect.TextSize = 16
+btnAutoSelect.Size = UDim2.new(0,205,0,30)
+btnAutoSelect.Position = UDim2.new(0,5,0,102)
+btnAutoSelect.BackgroundColor3 = Color3.fromRGB(70,0,0)
+btnAutoSelect.TextColor3 = Color3.fromRGB(255,255,255)
+btnAutoSelect.Parent = mainFrame
+
+local targetFoundLabel = Instance.new("TextLabel")
+targetFoundLabel.Size = UDim2.new(0,140,0,20)
+targetFoundLabel.Position = UDim2.new(0,212,0,107)
+targetFoundLabel.BackgroundTransparency = 1
+targetFoundLabel.Font = Enum.Font.SourceSansBold
+targetFoundLabel.TextSize = 16
+targetFoundLabel.TextColor3 = Color3.fromRGB(0,255,0)
+targetFoundLabel.Text = ""
+targetFoundLabel.Parent = mainFrame
+
+--------------------------------------------------------------------
+-- SETTINGS
+--------------------------------------------------------------------
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1,-10,0,100)
+scrollFrame.Position = UDim2.new(0,5,0,145)
+scrollFrame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+scrollFrame.BorderSizePixel = 0
+scrollFrame.ScrollBarThickness = 4
+scrollFrame.CanvasSize = UDim2.new(0,0,0,160)
+scrollFrame.Parent = mainFrame
+
+local sliderLabel = Instance.new("TextLabel")
+sliderLabel.Size = UDim2.new(1,-10,0,20)
+sliderLabel.Position = UDim2.new(0,5,0,5)
+sliderLabel.BackgroundTransparency = 1
+sliderLabel.Font = Enum.Font.SourceSansBold
+sliderLabel.TextSize = 16
+sliderLabel.TextColor3 = Color3.fromRGB(200,200,200)
+sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+sliderLabel.Text = "Prediction Strength"
+sliderLabel.Parent = scrollFrame
+
+local sliderBar = Instance.new("Frame")
+sliderBar.Size = UDim2.new(1,-60,0,8)
+sliderBar.Position = UDim2.new(0,5,0,35)
+sliderBar.BackgroundColor3 = Color3.fromRGB(40,40,40)
+sliderBar.BorderSizePixel = 0
+sliderBar.Parent = scrollFrame
+
+local sliderKnob = Instance.new("Frame")
+sliderKnob.Size = UDim2.new(0,10,0,14)
+sliderKnob.Position = UDim2.new(0,0,0,31)
+sliderKnob.BackgroundColor3 = Color3.fromRGB(200,200,200)
+sliderKnob.BorderSizePixel = 0
+sliderKnob.Parent = scrollFrame
+
+local valueLabel = Instance.new("TextLabel")
+valueLabel.Size = UDim2.new(0,50,0,20)
+valueLabel.Position = UDim2.new(1,-55,0,28)
+valueLabel.BackgroundTransparency = 1
+valueLabel.Font = Enum.Font.SourceSansBold
+valueLabel.TextSize = 14
+valueLabel.TextColor3 = Color3.fromRGB(0,255,0)
+valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+valueLabel.Text = string.format("%.2f", predictionStrength)
+valueLabel.Parent = scrollFrame
+
+--------------------------------------------------------------------
+-- COMMANDER UI (Below slider)
+--------------------------------------------------------------------
+
+local commanderLabel = Instance.new("TextLabel")
+commanderLabel.Size = UDim2.new(1,-10,0,20)
+commanderLabel.Position = UDim2.new(0,5,0,60)
+commanderLabel.BackgroundTransparency = 1
+commanderLabel.Font = Enum.Font.SourceSansBold
+commanderLabel.TextSize = 16
+commanderLabel.TextColor3 = Color3.fromRGB(200,200,200)
+commanderLabel.TextXAlignment = Enum.TextXAlignment.Left
+commanderLabel.Text = "Commander Users"
+commanderLabel.Parent = scrollFrame
+
+local commanderBox = Instance.new("TextBox")
+commanderBox.PlaceholderText = "Commander1, Commander2..."
+commanderBox.Font = Enum.Font.SourceSans
+commanderBox.TextSize = 16
+commanderBox.ClearTextOnFocus = false
+commanderBox.Size = UDim2.new(1,-10,0,28)
+commanderBox.Position = UDim2.new(0,5,0,85)
+commanderBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+commanderBox.TextColor3 = Color3.fromRGB(255,255,255)
+commanderBox.Parent = scrollFrame
+
+local commanderToggle = Instance.new("TextButton")
+commanderToggle.Text = "Cmd Mode: OFF"
+commanderToggle.Font = Enum.Font.SourceSansBold
+commanderToggle.TextSize = 16
+commanderToggle.Size = UDim2.new(1,-10,0,28)
+commanderToggle.Position = UDim2.new(0,5,0,120)
+commanderToggle.BackgroundColor3 = Color3.fromRGB(70,0,0)
+commanderToggle.TextColor3 = Color3.fromRGB(255,255,255)
+commanderToggle.Parent = scrollFrame
+
+--------------------------------------------------------------------
+-- SLIDER
+--------------------------------------------------------------------
+
+local draggingSlider = false
+
+local function setStrengthFromX(x)
+
+    local barPos = sliderBar.AbsolutePosition.X
+    local barSize = sliderBar.AbsoluteSize.X
+
+    local rel = math.clamp(x - barPos, 0, barSize)
+    local t = rel / barSize
+
+    predictionStrength = round(t, 2)
+
+    valueLabel.Text = string.format("%.2f", predictionStrength)
+
+    sliderKnob.Position = UDim2.new(
+        0,
+        sliderBar.Position.X.Offset + rel - 5,
+        0,
+        sliderKnob.Position.Y.Offset
+    )
 end
 
-closeBtn.MouseButton1Click:Connect(function()
-	destroyEverything()
+sliderBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+        setStrengthFromX(input.Position.X)
+    end
 end)
 
-print("[AutoClicker] Loaded Successfully")
+sliderKnob.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = true
+    end
+end)
+
+UserInput.InputChanged:Connect(function(input)
+    if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
+        setStrengthFromX(input.Position.X)
+    end
+end)
+
+UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSlider = false
+    end
+end)
+
+--------------------------------------------------------------------
+-- TARGETS
+--------------------------------------------------------------------
+
+local function getTargetPlayers(text)
+
+    if autoSelectEnabled then
+        if selectedTargetPlayer then
+            return {selectedTargetPlayer}
+        end
+
+        return {}
+    end
+
+    local results = {}
+    local parts = string.split(text, ",")
+
+    for _, raw in ipairs(parts) do
+
+        local partial = raw:lower():gsub("%s+", "")
+
+        if partial ~= "" then
+
+            for _, plr in ipairs(Players:GetPlayers()) do
+
+                if plr ~= localPlayer
+                and plr.Name:lower():find(partial, 1, true)
+                then
+                    table.insert(results, plr)
+                end
+            end
+        end
+    end
+
+    return results
+end
+
+--------------------------------------------------------------------
+-- AUTO SELECT DETECTION
+--------------------------------------------------------------------
+
+RunService.RenderStepped:Connect(function()
+
+    if not autoSelectEnabled then
+        hoveredTargetPlayer = nil
+        targetFoundLabel.Text = ""
+        return
+    end
+
+    local mousePos = UserInput:GetMouseLocation()
+
+    local closestPlayer = nil
+    local closestDistance = targetRadius
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+
+        if plr ~= localPlayer and plr.Character then
+
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
+
+            if hrp and humanoid and humanoid.Health > 0 then
+
+                local screenPos, onScreen =
+                    camera:WorldToViewportPoint(hrp.Position)
+
+                if onScreen then
+
+                    local dist =
+                        (Vector2.new(screenPos.X, screenPos.Y)
+                        - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
+
+                    if dist < closestDistance then
+                        closestDistance = dist
+                        closestPlayer = plr
+                    end
+                end
+            end
+        end
+    end
+
+    if closestPlayer then
+        hoveredTargetPlayer = closestPlayer
+
+        if not selectedTargetPlayer then
+            targetFoundLabel.Text = "Target Found"
+        end
+    else
+        hoveredTargetPlayer = nil
+
+        if not selectedTargetPlayer then
+            targetFoundLabel.Text = ""
+        end
+    end
+end)
+
+--------------------------------------------------------------------
+-- LOCKON
+--------------------------------------------------------------------
+
+local function startLockon()
+
+    if lockonConnection then
+        return
+    end
+
+    lockonConnection = RunService.RenderStepped:Connect(function()
+
+        if not (lockonEnabled or lockonPredictEnabled) then
+            return
+        end
+
+        local candidates = getTargetPlayers(txtUser.Text)
+
+        if #candidates == 0 then
+            return
+        end
+
+        local myChar = localPlayer.Character
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+        if not myHRP then
+            return
+        end
+
+        local closestHRP = nil
+        local closestDist = math.huge
+
+        for _, plr in ipairs(candidates) do
+
+            if plr.Character then
+
+                local humanoid =
+                    plr.Character:FindFirstChildOfClass("Humanoid")
+
+                local hrp =
+                    plr.Character:FindFirstChild("HumanoidRootPart")
+
+                if humanoid
+                and humanoid.Health > 0
+                and hrp
+                then
+
+                    local dist =
+                        (hrp.Position - myHRP.Position).Magnitude
+
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestHRP = hrp
+                    end
+                end
+            end
+        end
+
+        if closestHRP then
+
+            local targetPosition
+
+            if lockonPredictEnabled then
+
+                local targetPos = closestHRP.Position
+                local targetVel = closestHRP.AssemblyLinearVelocity
+
+                local rel = targetPos - myHRP.Position
+                local dist = rel.Magnitude
+                local speed = targetVel.Magnitude
+
+                local distanceFactor =
+                    math.clamp(dist / 60, 0, 2)
+
+                local velocityFactor =
+                    math.clamp(speed / 20, 0, 2)
+
+                local predictionTime =
+                    predictionStrength *
+                    (
+                        0.5
+                        + 0.5 * distanceFactor
+                        + 0.5 * velocityFactor
+                    )
+
+                targetPosition =
+                    targetPos + targetVel * predictionTime
+
+            else
+                targetPosition = closestHRP.Position
+            end
+
+            local targetCFrame =
+                CFrame.lookAt(
+                    camera.CFrame.Position,
+                    targetPosition
+                )
+
+            if lastTargetHRP ~= closestHRP then
+
+                if not snapEnabled then
+
+                    transitionActive = true
+
+                    local startCFrame = camera.CFrame
+                    local transitionTime = 0.12
+                    local startTime = tick()
+
+                    repeat
+
+                        local alpha = math.clamp(
+                            (tick() - startTime)
+                            / transitionTime,
+                            0,
+                            1
+                        )
+
+                        camera.CFrame =
+                            startCFrame:Lerp(
+                                targetCFrame,
+                                alpha
+                            )
+
+                        RunService.RenderSteipped and RunService.RenderStepped:Wait() or RunService.Heartbeat:Wait()
+
+                    until alpha >= 1
+
+                    transitionActive = false
+
+                else
+                    camera.CFrame = targetCFrame
+                end
+
+                lastTargetHRP = closestHRP
+            end
+
+            if not transitionActive then
+                camera.CFrame = targetCFrame
+            end
+
+        else
+            lastTargetHRP = nil
+        end
+    end)
+end
+
+--------------------------------------------------------------------
+-- BUTTONS
+--------------------------------------------------------------------
+
+local function updateButtons()
+
+    btnToggle.Text =
+        "Lockon: "
+        .. (lockonEnabled and "ON" or "OFF")
+
+    btnToggle.BackgroundColor3 =
+        lockonEnabled
+        and Color3.fromRGB(0,70,0)
+        or Color3.fromRGB(70,0,0)
+
+    btnPredict.Text =
+        "Predict: "
+        .. (lockonPredictEnabled and "ON" or "OFF")
+
+    btnPredict.BackgroundColor3 =
+        lockonPredictEnabled
+        and Color3.fromRGB(0,70,0)
+        or Color3.fromRGB(70,0,0)
+
+    btnSnap.Text =
+        "Snap: "
+        .. (snapEnabled and "ON" or "OFF")
+
+    btnSnap.BackgroundColor3 =
+        snapEnabled
+        and Color3.fromRGB(0,70,0)
+        or Color3.fromRGB(70,0,0)
+
+    btnAutoSelect.Text =
+        "Auto Select: "
+        .. (autoSelectEnabled and "ON" or "OFF")
+
+    btnAutoSelect.BackgroundColor3 =
+        autoSelectEnabled
+        and Color3.fromRGB(0,70,0)
+        or Color3.fromRGB(70,0,0)
+
+    -- Commander toggle visual update
+    if commanderToggle then
+        commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "ON" or "OFF")
+        commanderToggle.BackgroundColor3 =
+            commanderMode and Color3.fromRGB(0,70,0) or Color3.fromRGB(70,0,0)
+    end
+end
+
+--------------------------------------------------------------------
+-- TOGGLES
+--------------------------------------------------------------------
+
+local function toggleLockon()
+
+    lockonEnabled = not lockonEnabled
+
+    if lockonEnabled then
+        lockonPredictEnabled = false
+        startLockon()
+    end
+
+    updateButtons()
+end
+
+local function togglePredict()
+
+    lockonPredictEnabled =
+        not lockonPredictEnabled
+
+    if lockonPredictEnabled then
+        lockonEnabled = false
+        startLockon()
+    end
+
+    updateButtons()
+end
+
+local function toggleSnap()
+    snapEnabled = not snapEnabled
+    updateButtons()
+end
+
+local function toggleAutoSelect()
+
+    autoSelectEnabled =
+        not autoSelectEnabled
+
+    if autoSelectEnabled and commanderMode then
+        -- Turning on AutoSelect disables Commander Mode
+        commanderMode = false
+        if commanderToggle then
+            commanderToggle.Text = "Cmd Mode: OFF"
+            commanderToggle.BackgroundColor3 = Color3.fromRGB(70,0,0)
+        end
+    end
+
+    if not autoSelectEnabled then
+        selectedTargetPlayer = nil
+        hoveredTargetPlayer = nil
+    end
+
+    updateButtons()
+end
+
+btnToggle.MouseButton1Click:Connect(toggleLockon)
+btnPredict.MouseButton1Click:Connect(togglePredict)
+btnSnap.MouseButton1Click:Connect(toggleSnap)
+btnAutoSelect.MouseButton1Click:Connect(toggleAutoSelect)
+
+--------------------------------------------------------------------
+-- COMMANDER TOGGLE LOGIC
+--------------------------------------------------------------------
+
+local function toggleCommanderMode()
+    commanderMode = not commanderMode
+
+    if commanderMode and autoSelectEnabled then
+        -- Commander mode disables Auto Select
+        autoSelectEnabled = false
+    end
+
+    if commanderToggle then
+        commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "ON" or "OFF")
+        commanderToggle.BackgroundColor3 =
+            commanderMode and Color3.fromRGB(0,70,0) or Color3.fromRGB(70,0,0)
+    end
+
+    updateButtons()
+end
+
+if commanderToggle then
+    commanderToggle.MouseButton1Click:Connect(toggleCommanderMode)
+end
+
+--------------------------------------------------------------------
+-- KEYBINDS
+--------------------------------------------------------------------
+
+UserInput.InputBegan:Connect(function(input, gp)
+
+    if gp then
+        return
+    end
+
+    if input.KeyCode == Enum.KeyCode.Q then
+        txtUser:CaptureFocus()
+    end
+
+    if input.KeyCode == Enum.KeyCode.Return
+    or input.KeyCode == Enum.KeyCode.KeypadEnter then
+
+        if txtUser:IsFocused() then
+            txtUser:ReleaseFocus()
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- E = TOGGLE LOCK / UNLOCK
+    ----------------------------------------------------------------
+
+    if input.KeyCode == Enum.KeyCode.E then
+
+        if autoSelectEnabled then
+
+            -- UNLOCK
+            if selectedTargetPlayer then
+
+                selectedTargetPlayer = nil
+                lastTargetHRP = nil
+
+                targetFoundLabel.Text = "Unlocked"
+
+                task.delay(0.5, function()
+                    if targetFoundLabel and not selectedTargetPlayer then
+                        targetFoundLabel.Text = ""
+                    end
+                end)
+
+            -- LOCK
+            elseif hoveredTargetPlayer then
+
+                selectedTargetPlayer = hoveredTargetPlayer
+                lastTargetHRP = nil
+
+                targetFoundLabel.Text =
+                    "Locked: "..hoveredTargetPlayer.Name
+            end
+        end
+    end
+
+    if input.KeyCode == Enum.KeyCode.X then
+        toggleLockon()
+    end
+
+    if input.KeyCode == Enum.KeyCode.U then
+        togglePredict()
+    end
+end)
+
+--------------------------------------------------------------------
+-- COMMAND LISTENER (TextChatService) - EXTENDED
+--------------------------------------------------------------------
+
+local function trim(s)
+    return tostring(s):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function isCommander(name)
+    local list = string.split(commanderBox.Text or "", ",")
+    name = tostring(name or ""):lower()
+
+    for _, raw in ipairs(list) do
+        local partial = raw:lower():gsub("%s+", "")
+        if partial ~= "" and name:find(partial, 1, true) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function allPlayerNames(excludeCommanders)
+    local names = {}
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= localPlayer then
+            if excludeCommanders then
+                if not isCommander(pl.Name) then
+                    table.insert(names, pl.Name)
+                end
+            else
+                table.insert(names, pl.Name)
+            end
+        end
+    end
+    return names
+end
+
+local function setLastCommander(plr)
+    if plr and plr.UserId then
+        lastCommanderUserId = plr.UserId
+    end
+end
+
+local function hardOverridePreviousCommands()
+    -- Clear any selected target so camera will re-evaluate new txtUser
+    selectedTargetPlayer = nil
+    lastTargetHRP = nil
+
+    -- Ensure autoSelect disabled
+    if autoSelectEnabled then
+        autoSelectEnabled = false
+    end
+
+    -- Ensure lockon is enabled and lockon loop started
+    if not lockonEnabled then
+        lockonEnabled = true
+        startLockon()
+    end
+
+    updateButtons()
+end
+
+-- Robust command parsing and handling
+if TextChatService then
+    TextChatService.MessageReceived:Connect(function(msg)
+        if not commanderMode then return end
+        if not msg then return end
+
+        local source = msg.TextSource
+        if not source then return end
+
+        local userId = source.UserId
+        if not userId then return end
+
+        local plr = Players:GetPlayerByUserId(userId)
+        if not plr then return end
+
+        if not isCommander(plr.Name) then return end
+
+        -- newest commander overrides everything
+        setLastCommander(plr)
+        -- We'll hard override once we know the command is valid and will change txtUser
+
+        local text = tostring(msg.Text or "")
+        local lower = text:lower()
+
+        -- Extract command and argument robustly: command is first token after leading dot
+        local cmd, arg = lower:match("^%.([%w_]+)%s*(.*)$")
+        if not cmd then
+            return
+        end
+        arg = trim(arg or "")
+
+        -- Normalize synonyms
+        if cmd == "attack" then cmd = "atk" end
+        if cmd == "goto" then cmd = "follow" end
+
+        -- .stop command
+        if cmd == "stop" then
+            -- Hard override: clear and turn off lockon
+            txtUser.Text = ""
+            if lockonEnabled then
+                lockonEnabled = false
+            end
+            selectedTargetPlayer = nil
+            lastTargetHRP = nil
+            updateButtons()
+            return
+        end
+
+        -- .atk / .attack handling
+        if cmd == "atk" then
+            -- handle special keywords
+            local lowarg = arg:lower()
+
+            -- If no arg or "me" -> attack the commander who said it
+            if lowarg == "" or lowarg == "me" then
+                txtUser.Text = plr.Name
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
+            end
+
+            -- .atk random -> pick a random non-local, non-commander player
+            if lowarg == "random" then
+                local pool = {}
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= localPlayer and not isCommander(p.Name) then
+                        table.insert(pool, p)
+                    end
+                end
+                if #pool > 0 then
+                    local choice = pool[math.random(1, #pool)]
+                    txtUser.Text = choice.Name
+                    hardOverridePreviousCommands()
+                    updateButtons()
+                end
+                return
+            end
+
+            -- .atk others -> everyone except commanders
+            if lowarg == "others" then
+                local names = allPlayerNames(true)
+                txtUser.Text = table.concat(names, ", ")
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
+            end
+
+            -- .atk all / .atk everyone -> everyone in server (excluding local)
+            if lowarg == "all" or lowarg == "everyone" then
+                local names = allPlayerNames(false)
+                txtUser.Text = table.concat(names, ", ")
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
+            end
+
+            -- default: treat arg as list of users (raw after command)
+            if arg ~= "" then
+                txtUser.Text = arg
+                hardOverridePreviousCommands()
+                updateButtons()
+            end
+            return
+        end
+
+        -- .follow / .goto handling
+        if cmd == "follow" then
+            local lowarg = arg:lower()
+
+            -- If no arg or "me" -> follow the commander
+            if lowarg == "" or lowarg == "me" then
+                txtUser.Text = plr.Name
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
+            end
+
+            -- default: follow the provided name(s)
+            if arg ~= "" then
+                txtUser.Text = arg
+                hardOverridePreviousCommands()
+                updateButtons()
+            end
+            return
+        end
+
+        -- If command is unrecognized, ignore
+    end)
+end
+
+-- Ensure all GUI objects render above other UI by setting their ZIndex where applicable
+-- Use a single pass to set ZIndex for all GuiObjects under this ScreenGui
+for _, obj in ipairs(screenGui:GetDescendants()) do
+    if obj:IsA("GuiObject") then
+        pcall(function() obj.ZIndex = 9999 end)
+    end
+end
+
+updateButtons()
