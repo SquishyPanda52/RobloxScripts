@@ -9,7 +9,7 @@
   - Behavior: All attack modes and follow are toggled off on death/respawn.
   - Commander command listener (TextChatService) with UI textbox and toggle.
   - Commands: .atk/.attack, .follow/.goto, .hold, .stop, .atk random, .atk others, .atk all/everyone
-  - Notes: New commands override previous commands immediately.
+  - Fixes: newest commander command HARD overrides previous commands; normalized parsing to avoid stray characters.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -81,7 +81,7 @@ local localCharacterRemovingConn = nil
 
 -- Utils
 local function trim(s)
-    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+    return (tostring(s):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
 local function setBtnState(btn, on, label)
@@ -181,6 +181,41 @@ local function allPlayerNames(excludeCommanders)
         end
     end
     return names
+end
+
+-- Override previous commands cleanly (HARD override)
+local function hardOverridePreviousCommands()
+    -- Stop and clear everything so the new command starts from a clean state
+    if followConn then
+        followConn:Disconnect()
+        followConn = nil
+    end
+    if attackConn then
+        attackConn:Disconnect()
+        attackConn = nil
+    end
+    if teamAttackConn then
+        teamAttackConn:Disconnect()
+        teamAttackConn = nil
+    end
+
+    -- Clear flags and targets
+    followEnabled = false
+    followTargetPlayer = nil
+    attackEnabled = false
+    attackNames = {}
+    teamAttackEnabled = false
+    teamAttackNames = {}
+    holdMode = false
+    holdPosition = nil
+
+    -- Stop movement immediately
+    stopMovementImmediate()
+
+    -- Update UI states
+    setBtnState(followBtn, false, "Follow")
+    setBtnState(attackBtn, false, "Attack")
+    setBtnState(teamAttackBtn, false, "TeamAttack")
 end
 
 -- Follow routine
@@ -745,23 +780,6 @@ local function setLastCommander(plr)
     end
 end
 
-local function overrideAllModes()
-    -- Called when a new commander issues a command: stop conflicting modes so new command can take effect cleanly
-    -- We intentionally do not block the new command; we just ensure previous loops are stopped.
-    if followConn then
-        followConn:Disconnect()
-        followConn = nil
-    end
-    if attackConn then
-        attackConn:Disconnect()
-        attackConn = nil
-    end
-    if teamAttackConn then
-        teamAttackConn:Disconnect()
-        teamAttackConn = nil
-    end
-end
-
 -- Command handling (TextChatService)
 if TextChatService then
     TextChatService.MessageReceived:Connect(function(msg)
@@ -780,24 +798,26 @@ if TextChatService then
         -- Only accept commands from players listed in commanderBox
         if not isCommander(plr.Name) then return end
 
-        setLastCommander(plr) -- most recent commander overrides previous
+        -- newest commander overrides everything
+        setLastCommander(plr)
+        hardOverridePreviousCommands()
 
         local text = tostring(msg.Text or "")
         local lower = text:lower()
 
-        -- Normalize interchangeable commands
-        -- Accept ".attack" as ".atk", ".goto" as ".follow"
-        if lower:sub(1,7) == ".attack" then
-            lower = ".atk" .. lower:sub(7)
-            text = ".atk" .. text:sub(7)
+        -- Extract command and argument robustly: command is first token after leading dot
+        local cmd, arg = lower:match("^%.([%w_]+)%s*(.*)$")
+        if not cmd then
+            return
         end
-        if lower:sub(1,5) == ".goto" then
-            lower = ".follow" .. lower:sub(5)
-            text = ".follow" .. text:sub(5)
-        end
+        arg = trim(arg or "")
+
+        -- Normalize synonyms
+        if cmd == "attack" then cmd = "atk" end
+        if cmd == "goto" then cmd = "follow" end
 
         -- .stop command (any commander can stop)
-        if lower:match("^%.stop%s*$") or lower:match("^%.stop%s+") then
+        if cmd == "stop" then
             attackBox.Text = ""
             followBox.Text = ""
             teamAttackBox.Text = ""
@@ -810,11 +830,10 @@ if TextChatService then
         end
 
         -- .atk / .attack handling
-        if lower:sub(1,4) == ".atk" then
-            local after = text:match("^%.atk%s*(.+)$")
-            local arg = after and trim(after) or ""
-            -- special keywords
-            if arg == "" or arg:lower() == "me" then
+        if cmd == "atk" then
+            -- handle special keywords
+            local lowarg = arg:lower()
+            if lowarg == "" or lowarg == "me" then
                 -- attack the commander who said it
                 attackBox.Text = plr.Name
                 parseAttackNames(attackBox.Text)
@@ -823,16 +842,12 @@ if TextChatService then
                     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
                     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
                 end)
-                -- override previous modes and start attack
-                overrideAllModes()
                 attackEnabled = true
                 startAttack()
                 return
             end
 
-            local lowarg = arg:lower()
             if lowarg == "random" then
-                -- pick a random non-local, non-commander player
                 local pool = {}
                 for _, p in ipairs(Players:GetPlayers()) do
                     if p ~= localPlayer and not isCommander(p.Name) then
@@ -847,7 +862,6 @@ if TextChatService then
                         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
                         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
                     end)
-                    overrideAllModes()
                     attackEnabled = true
                     startAttack()
                 end
@@ -855,7 +869,6 @@ if TextChatService then
             end
 
             if lowarg == "others" then
-                -- attack everyone except commanders
                 local names = allPlayerNames(true)
                 attackBox.Text = table.concat(names, ", ")
                 parseAttackNames(attackBox.Text)
@@ -863,7 +876,6 @@ if TextChatService then
                     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
                     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
                 end)
-                overrideAllModes()
                 attackEnabled = true
                 startAttack()
                 return
@@ -877,37 +889,29 @@ if TextChatService then
                     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
                     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
                 end)
-                overrideAllModes()
                 attackEnabled = true
                 startAttack()
                 return
             end
 
-            -- default: treat after as list of users
-            attackBox.Text = after
+            -- default: treat arg as list of users
+            attackBox.Text = arg
             parseAttackNames(attackBox.Text)
             pcall(function()
                 VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
                 VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
             end)
-            overrideAllModes()
             attackEnabled = true
             startAttack()
             return
         end
 
         -- .follow / .goto handling
-        if lower:sub(1,7) == ".follow" then
-            local after = text:match("^%.follow%s*(.+)$")
-            local arg = after and trim(after) or ""
-            -- .follow or .follow me -> follow the commander
-            if arg == "" or arg:lower() == "me" then
+        if cmd == "follow" then
+            local lowarg = arg:lower()
+            if lowarg == "" or lowarg == "me" then
+                -- follow the commander
                 followBox.Text = plr.Name
-                overrideAllModes()
-                -- disable attack/teamattack if active
-                if attackEnabled then stopAttack() end
-                if teamAttackEnabled then stopTeamAttack() end
-                -- normal follow (updates target continuously)
                 followTargetPlayer = findClosestPlayer(followBox.Text)
                 if followTargetPlayer then
                     followEnabled = true
@@ -918,10 +922,7 @@ if TextChatService then
             end
 
             -- .follow <user> -> follow that user (continuous)
-            followBox.Text = after
-            overrideAllModes()
-            if attackEnabled then stopAttack() end
-            if teamAttackEnabled then stopTeamAttack() end
+            followBox.Text = arg
             followTargetPlayer = findClosestPlayer(followBox.Text)
             if followTargetPlayer then
                 followEnabled = true
@@ -932,26 +933,18 @@ if TextChatService then
         end
 
         -- .hold command: go to the commander's current position and stop there
-        if lower:sub(1,5) == ".hold" then
-            -- record the commander's current position
+        if cmd == "hold" then
             local cmdChar = plr.Character
             local cmdHRP = cmdChar and cmdChar:FindFirstChild("HumanoidRootPart")
             if cmdHRP then
                 holdPosition = cmdHRP.Position
                 holdMode = true
-                -- set followTarget to nil (we're using holdPosition)
                 followTargetPlayer = nil
-                -- override and start follow in hold mode
-                overrideAllModes()
-                if attackEnabled then stopAttack() end
-                if teamAttackEnabled then stopTeamAttack() end
                 followEnabled = true
                 startFollow()
             end
             return
         end
-
-        -- .autojump on/off handled previously in other versions; ignore here unless added
     end)
 end
 
@@ -959,15 +952,11 @@ end
 local function onFollowToggle()
     local newState = not followEnabled
     if newState then
+        -- manual toggle should HARD override previous commands
+        hardOverridePreviousCommands()
         -- turning follow on manually: clear holdMode
         holdMode = false
         holdPosition = nil
-        if attackEnabled then
-            stopAttack()
-        end
-        if teamAttackEnabled then
-            stopTeamAttack()
-        end
         local targetName = followBox.Text
         local target = findClosestPlayer(targetName)
         if not target then
@@ -986,12 +975,7 @@ end
 local function onAttackToggle()
     local newState = not attackEnabled
     if newState then
-        if followEnabled then
-            stopFollow()
-        end
-        if teamAttackEnabled then
-            stopTeamAttack()
-        end
+        hardOverridePreviousCommands()
         parseAttackNames(attackBox.Text)
         if #attackNames == 0 then
             setBtnState(attackBtn, false, "Attack")
@@ -1008,12 +992,7 @@ end
 local function onTeamAttackToggle()
     local newState = not teamAttackEnabled
     if newState then
-        if followEnabled then
-            stopFollow()
-        end
-        if attackEnabled then
-            stopAttack()
-        end
+        hardOverridePreviousCommands()
         parseTeamNames(teamAttackBox.Text)
         if #teamAttackNames == 0 then
             setBtnState(teamAttackBtn, false, "TeamAttack")
