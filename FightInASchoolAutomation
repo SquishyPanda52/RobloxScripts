@@ -15,6 +15,7 @@ if playerGui:FindFirstChild("AutoPress_UI") then
     return
 end
 
+-- State
 local enabled = false
 local destroyed = false
 local commanderMode = false
@@ -22,7 +23,6 @@ local commanderMode = false
 ---------------------------------------------------------------------
 -- KEY MAPS
 ---------------------------------------------------------------------
-
 local keyMap = {
     ["shift"] = Enum.KeyCode.LeftShift,
     ["lshift"] = Enum.KeyCode.LeftShift,
@@ -71,7 +71,6 @@ local function resolveKey(text)
     if keyMap[lower] then return keyMap[lower] end
     if numberKeyMap[lower] then return numberKeyMap[lower] end
 
-    -- single character letters/numbers
     if #text == 1 then
         local upper = string.upper(text)
         if Enum.KeyCode[upper] then
@@ -79,7 +78,6 @@ local function resolveKey(text)
         end
     end
 
-    -- try full enum name (e.g., "Comma", "Semicolon", "F")
     local upperName = text:upper()
     if Enum.KeyCode[upperName] then
         return Enum.KeyCode[upperName]
@@ -91,7 +89,6 @@ end
 ---------------------------------------------------------------------
 -- UI
 ---------------------------------------------------------------------
-
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AutoPress_UI"
 screenGui.ResetOnSpawn = false
@@ -101,13 +98,12 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 320)
-frame.Position = UDim2.new(0.5, -175, 0.5, -160)
+frame.Size = UDim2.new(0, 350, 0, 360)
+frame.Position = UDim2.new(0.5, -175, 0.5, -180)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.ZIndex = 999999
 frame.Parent = screenGui
-
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
 local title = Instance.new("TextLabel")
@@ -147,9 +143,8 @@ toggleButton.Parent = frame
 Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
 
 ---------------------------------------------------------------------
--- COMMANDER UI (added)
+-- COMMANDER UI
 ---------------------------------------------------------------------
-
 local commanderLabel = Instance.new("TextLabel")
 commanderLabel.Size = UDim2.new(0, 120, 0, 20)
 commanderLabel.Position = UDim2.new(0, 10, 0, 90)
@@ -184,13 +179,12 @@ commanderToggle.Parent = frame
 Instance.new("UICorner", commanderToggle).CornerRadius = UDim.new(0, 6)
 
 ---------------------------------------------------------------------
--- SCROLLING FRAME
+-- SCROLLING FRAME (holds 7 rows)
 ---------------------------------------------------------------------
-
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -20, 1, -160)
+scroll.Size = UDim2.new(1, -20, 0, 200)
 scroll.Position = UDim2.new(0, 10, 0, 150)
-scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 7 * 40 + 10)
 scroll.ScrollBarThickness = 6
 scroll.BackgroundTransparency = 1
 scroll.ZIndex = 999999
@@ -199,22 +193,20 @@ scroll.Parent = frame
 ---------------------------------------------------------------------
 -- DRAG
 ---------------------------------------------------------------------
-
 local dragging = false
 local dragStart
 local startPos
 
-frame.InputBegan:Connect(function(input)
+title.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = true
         dragStart = input.Position
         startPos = frame.Position
-    end
-end)
-
-frame.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
     end
 end)
 
@@ -235,15 +227,14 @@ end)
 -- Left: key name (string)
 -- Middle: cooldown (number) seconds between presses
 -- Right: hold (number) seconds to hold the key continuously
--- Implementation: lightweight row objects with parsed values and nextTime
 ---------------------------------------------------------------------
-
 local rows = {}
 
 local function parseNumberSafe(s)
     if not s then return nil end
-    local n = tonumber(tostring(s):gsub("%s+", ""))
-    return n
+    local cleaned = tostring(s):gsub("%s+", "")
+    if cleaned == "" then return nil end
+    return tonumber(cleaned)
 end
 
 local function makeRowObject(keyBox, intervalBox, holdBox)
@@ -251,25 +242,25 @@ local function makeRowObject(keyBox, intervalBox, holdBox)
         keyBox = keyBox,
         intervalBox = intervalBox,
         holdBox = holdBox,
-        keyCode = nil,         -- Enum.KeyCode or nil
-        interval = nil,        -- number seconds
-        hold = nil,            -- number seconds
-        nextTime = 0,          -- tick() when next press should occur
-        pressing = false,      -- whether currently holding
-        holdEndTime = 0        -- tick() when to release
+        keyCode = nil,
+        interval = nil,
+        hold = nil,
+        nextTime = 0,
+        pressing = false,
+        holdEndTime = 0,
+        _lastKeyText = nil,
+        _lastIntervalText = nil,
+        _lastHoldText = nil
     }
 end
 
 local function updateRowParsed(row)
-    -- parse key
     local keyText = tostring(row.keyBox.Text or "")
     row.keyCode = resolveKey(keyText)
 
-    -- parse interval and hold safely (do not error on partial input)
     local intervalNum = parseNumberSafe(row.intervalBox.Text)
     local holdNum = parseNumberSafe(row.holdBox.Text)
 
-    -- require positive interval; hold can be zero or positive
     if intervalNum and intervalNum > 0 then
         row.interval = intervalNum
     else
@@ -282,34 +273,33 @@ local function updateRowParsed(row)
         row.hold = nil
     end
 
-    -- if nextTime is 0 (first time) set it to now + small jitter so rows don't all fire same frame
     if row.nextTime == 0 then
         row.nextTime = tick() + (math.random() * 0.2)
     end
 end
 
-local function createRow(i)
+for i = 1, 7 do
     local y = (i - 1) * 40
 
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 60, 0, 30)
     keyBox.Position = UDim2.new(0, 0, 0, y)
     keyBox.ZIndex = 999999
-    keyBox.PlaceholderText = "" -- blank by default
+    keyBox.PlaceholderText = ""
     keyBox.Parent = scroll
 
     local intervalBox = Instance.new("TextBox")
     intervalBox.Size = UDim2.new(0, 80, 0, 30)
     intervalBox.Position = UDim2.new(0, 70, 0, y)
     intervalBox.ZIndex = 999999
-    intervalBox.PlaceholderText = "" -- blank by default
+    intervalBox.PlaceholderText = ""
     intervalBox.Parent = scroll
 
     local holdBox = Instance.new("TextBox")
     holdBox.Size = UDim2.new(0, 80, 0, 30)
     holdBox.Position = UDim2.new(0, 160, 0, y)
     holdBox.ZIndex = 999999
-    holdBox.PlaceholderText = "" -- blank by default
+    holdBox.PlaceholderText = ""
     holdBox.Parent = scroll
 
     local row = makeRowObject(keyBox, intervalBox, holdBox)
@@ -318,32 +308,24 @@ local function createRow(i)
     -- initial parse
     updateRowParsed(row)
 
-    -- When user edits a box and leaves focus, re-parse values immediately.
-    -- This is lightweight and won't block the UI.
+    -- re-parse on focus lost (safe, lightweight)
     local function onEdit()
         if destroyed then return end
         updateRowParsed(row)
     end
-
     keyBox.FocusLost:Connect(onEdit)
     intervalBox.FocusLost:Connect(onEdit)
     holdBox.FocusLost:Connect(onEdit)
-
-    scroll.CanvasSize = UDim2.new(0, 0, 0, y + 50)
 end
 
-for i = 1, 7 do
-    createRow(i)
-end
+-- Ensure scroll canvas size fits rows
+scroll.CanvasSize = UDim2.new(0, 0, 0, 7 * 40 + 10)
 
 ---------------------------------------------------------------------
 -- Central scheduler (single Heartbeat connection)
--- Checks each row once per frame and performs presses when due.
--- This avoids spawning many coroutines and prevents UI freezes.
 ---------------------------------------------------------------------
-
 local schedulerConn
-schedulerConn = RunService.Heartbeat:Connect(function(dt)
+schedulerConn = RunService.Heartbeat:Connect(function()
     if destroyed then
         if schedulerConn then
             schedulerConn:Disconnect()
@@ -354,52 +336,36 @@ schedulerConn = RunService.Heartbeat:Connect(function(dt)
 
     local now = tick()
 
-    -- iterate rows
     for _, row in ipairs(rows) do
-        -- ensure parsed values are up-to-date (in case user typed without leaving focus)
-        -- We avoid heavy parsing every frame; only re-parse if Text changed since last parse.
-        -- For simplicity and safety, do a cheap check: if any Text differs from resolved values, re-parse.
-        -- (This is still very cheap: string compares.)
+        -- cheap text-change detection to re-parse only when needed
         local keyText = tostring(row.keyBox.Text or "")
         local intervalText = tostring(row.intervalBox.Text or "")
         local holdText = tostring(row.holdBox.Text or "")
-        -- If any text doesn't match parsed values, re-parse.
-        local needParse = false
+
         if row._lastKeyText ~= keyText or row._lastIntervalText ~= intervalText or row._lastHoldText ~= holdText then
-            needParse = true
             row._lastKeyText = keyText
             row._lastIntervalText = intervalText
             row._lastHoldText = holdText
-        end
-        if needParse then
             updateRowParsed(row)
         end
 
-        -- Only proceed if row has valid config
         if row.keyCode and row.interval and row.hold then
-            -- If currently holding the key, check if it's time to release
             if row.pressing then
                 if now >= row.holdEndTime or not enabled or destroyed then
-                    -- release
                     pcall(function()
                         VirtualInputManager:SendKeyEvent(false, row.keyCode, false, game)
                     end)
                     row.pressing = false
-                    -- schedule next press
                     row.nextTime = now + (row.interval or 0)
                 end
             else
-                -- not pressing: check if it's time to press (and enabled)
                 if enabled and now >= row.nextTime then
-                    -- press
                     pcall(function()
                         VirtualInputManager:SendKeyEvent(true, row.keyCode, false, game)
                     end)
                     row.pressing = true
                     row.holdEndTime = now + (row.hold or 0)
-                    -- if hold is zero, release immediately next iteration (or release now)
                     if row.hold == 0 then
-                        -- release immediately but still allow a tiny yield to avoid tight loop
                         pcall(function()
                             VirtualInputManager:SendKeyEvent(false, row.keyCode, false, game)
                         end)
@@ -409,8 +375,7 @@ schedulerConn = RunService.Heartbeat:Connect(function(dt)
                 end
             end
         else
-            -- invalid config: ensure not pressing and set nextTime to now + small delay
-            if row.pressing then
+            if row.pressing and row.keyCode then
                 pcall(function()
                     VirtualInputManager:SendKeyEvent(false, row.keyCode, false, game)
                 end)
@@ -424,37 +389,36 @@ schedulerConn = RunService.Heartbeat:Connect(function(dt)
 end)
 
 ---------------------------------------------------------------------
--- TOGGLE
+-- Toggle handlers
 ---------------------------------------------------------------------
-
-local function updateToggle()
+local function updateToggleUI()
     toggleButton.Text = enabled and "ON" or "OFF"
+    toggleButton.BackgroundColor3 = enabled and Color3.fromRGB(46,204,113) or Color3.fromRGB(70,0,0)
 end
 
 toggleButton.MouseButton1Click:Connect(function()
     enabled = not enabled
-    updateToggle()
+    updateToggleUI()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.G then
         enabled = not enabled
-        updateToggle()
+        updateToggleUI()
     end
 end)
 
-updateToggle()
+updateToggleUI()
 
 ---------------------------------------------------------------------
--- DELETE
+-- Delete / Minimize
 ---------------------------------------------------------------------
-
 deleteButton.MouseButton1Click:Connect(function()
     destroyed = true
     enabled = false
+    updateToggleUI()
 
-    -- release any keys that might still be pressed
     for _, row in ipairs(rows) do
         if row.pressing and row.keyCode then
             pcall(function()
@@ -471,10 +435,6 @@ deleteButton.MouseButton1Click:Connect(function()
     script:Destroy()
 end)
 
----------------------------------------------------------------------
--- MINIMIZE BUTTON
----------------------------------------------------------------------
-
 minimizeButton.MouseButton1Click:Connect(function()
     local isMin = scroll.Visible
     scroll.Visible = not isMin
@@ -487,9 +447,8 @@ minimizeButton.MouseButton1Click:Connect(function()
 end)
 
 ---------------------------------------------------------------------
--- COMMANDER LOGIC
+-- Commander logic (toggle + chat listener)
 ---------------------------------------------------------------------
-
 local function splitCommaList(s)
     local out = {}
     if not s then return out end
@@ -525,7 +484,6 @@ commanderToggle.MouseButton1Click:Connect(function()
     end
 end)
 
--- Listen for chat commands from commanders and auto-enable/disable the script
 if TextChatService then
     TextChatService.MessageReceived:Connect(function(msg)
         if not commanderMode then return end
@@ -544,41 +502,35 @@ if TextChatService then
 
         local text = tostring(msg.Text or "")
         local lower = text:lower()
-
-        -- Extract command token after leading dot, if present
         local cmd = lower:match("^%.([%w_]+)")
         if not cmd then return end
 
-        -- Normalize synonyms
         if cmd == "attack" then cmd = "atk" end
         if cmd == "goto" then cmd = "follow" end
 
-        -- If commander says .atk or .attack -> enable auto-press
         if cmd == "atk" then
             enabled = true
-            updateToggle()
+            updateToggleUI()
             return
         end
 
-        -- If commander says .stop -> disable auto-press
         if cmd == "stop" then
             enabled = false
-            updateToggle()
+            updateToggleUI()
             return
         end
 
-        -- If commander says any of these non-attack commands, ensure auto-press is off
         if cmd == "follow" or cmd == "goto" or cmd == "hold" then
             enabled = false
-            updateToggle()
+            updateToggleUI()
             return
         end
-
-        -- Other commands are ignored for auto-press toggling
     end)
 end
 
--- Ensure UI renders above other UI
+---------------------------------------------------------------------
+-- Final ZIndex pass
+---------------------------------------------------------------------
 for _, obj in ipairs(screenGui:GetDescendants()) do
     if obj:IsA("GuiObject") then
         pcall(function() obj.ZIndex = 999999 end)
