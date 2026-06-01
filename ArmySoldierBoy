@@ -8,8 +8,8 @@
   - Team Attack mode (targets players by team name).
   - Behavior: All attack modes and follow are toggled off on death/respawn.
   - Commander command listener (TextChatService) with UI textbox and toggle.
-  - Fixes: commander .follow/.atk now update targets without turning the mode off;
-           .stop immediately halts movement and disables modes.
+  - Commands: .atk/.attack, .follow/.goto, .hold, .stop, .atk random, .atk others, .atk all/everyone
+  - Notes: New commands override previous commands immediately.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -36,6 +36,7 @@ local AUTOPRESS_HZ = 10
 local AUTOPRESS_MIN_HZ = 5
 local AUTOPRESS_MAX_HZ = 15
 local AUTOPRESS_START_DELAY = 0.35
+local HOLD_REACH_THRESHOLD = 3 -- studs to consider "reached" for .hold
 
 -- UI State
 local gui, mainFrame, titleBar, minBtn, closeBtn
@@ -58,8 +59,13 @@ local attackNames = {}
 local teamAttackEnabled = false
 local teamAttackNames = {}
 
+-- Hold mode
+local holdMode = false
+local holdPosition = nil
+
 -- Commander mode
 local commanderMode = false
+local lastCommanderUserId = nil -- track most recent commander who issued a command
 
 -- Auto-press binding
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
@@ -87,20 +93,19 @@ end
 local function findClosestPlayer(fragment)
     fragment = trim(fragment or ""):lower()
     if fragment == "" then return nil end
-    local best, bestScore
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl ~= localPlayer then
             local nm = pl.Name:lower()
             if nm:find(fragment, 1, true) then
                 return pl
             end
-            local score = math.abs(#nm - #fragment)
-            if not bestScore or score < bestScore then
-                bestScore, best = score, pl
-            end
         end
     end
-    return best
+    -- fallback: return any non-local player
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= localPlayer then return pl end
+    end
+    return nil
 end
 
 local function parseAttackNames(text)
@@ -136,7 +141,6 @@ local function getHumanoid(p)
 end
 
 local function stopMovementImmediate()
-    -- Stop local player's movement immediately by clearing MoveTo and stopping humanoid movement
     local char = localPlayer.Character
     if not char then return end
     local humanoid = char:FindFirstChildOfClass("Humanoid")
@@ -149,10 +153,42 @@ local function stopMovementImmediate()
     end
 end
 
+-- Ensure commands from any listed commander are accepted
+local function isCommander(name)
+    local list = string.split(commanderBox.Text or "", ",")
+    name = tostring(name or ""):lower()
+    for _, raw in ipairs(list) do
+        local partial = raw:lower():gsub("%s+", "")
+        if partial ~= "" and name:find(partial, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper: build list of all players' names (optionally exclude commanders)
+local function allPlayerNames(excludeCommanders)
+    local names = {}
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= localPlayer then
+            if excludeCommanders then
+                if not isCommander(pl.Name) then
+                    table.insert(names, pl.Name)
+                end
+            else
+                table.insert(names, pl.Name)
+            end
+        end
+    end
+    return names
+end
+
 -- Follow routine
 local function stopFollow()
     followEnabled = false
     followTargetPlayer = nil
+    holdMode = false
+    holdPosition = nil
     if followConn then
         followConn:Disconnect()
         followConn = nil
@@ -167,19 +203,41 @@ local function startFollow()
         followConn = nil
     end
     followConn = RunService.Heartbeat:Connect(function()
-        if not followEnabled or not followTargetPlayer then return end
+        if not followEnabled then return end
 
         local myHum = getHumanoid(localPlayer)
         local myRoot = getHRP(localPlayer)
-        local thHum = getHumanoid(followTargetPlayer)
-        local thRoot = getHRP(followTargetPlayer)
-
-        if not (myHum and myRoot and thHum and thRoot) or myHum.Health <= 0 or thHum.Health <= 0 then
+        if not (myHum and myRoot) or myHum.Health <= 0 then
             stopFollow()
             return
         end
 
-        -- NEW: If humanoid is sitting, make them jump / stop sitting
+        -- If holdMode: move to fixed holdPosition and stop when reached
+        if holdMode and holdPosition then
+            local dist = (holdPosition - myRoot.Position).Magnitude
+            if dist > HOLD_REACH_THRESHOLD then
+                myHum:MoveTo(holdPosition)
+            else
+                -- reached: turn off follow and holdMode
+                holdMode = false
+                holdPosition = nil
+                stopFollow()
+            end
+            return
+        end
+
+        if not followTargetPlayer then
+            return
+        end
+
+        local thHum = getHumanoid(followTargetPlayer)
+        local thRoot = getHRP(followTargetPlayer)
+        if not (thHum and thRoot) or thHum.Health <= 0 then
+            stopFollow()
+            return
+        end
+
+        -- If humanoid is sitting, make them jump / stop sitting
         if myHum.Sit then
             pcall(function()
                 myHum.Jump = true
@@ -202,6 +260,7 @@ end
 -- Attack routine
 local function stopAttack()
     attackEnabled = false
+    attackNames = {}
     if attackConn then
         attackConn:Disconnect()
         attackConn = nil
@@ -253,6 +312,7 @@ end
 -- Team attack helpers
 local function stopTeamAttack()
     teamAttackEnabled = false
+    teamAttackNames = {}
     if teamAttackConn then
         teamAttackConn:Disconnect()
         teamAttackConn = nil
@@ -279,7 +339,7 @@ local function startTeamAttack()
             return
         end
 
-        -- NEW: If humanoid is sitting, make them jump / stop sitting
+        -- If humanoid is sitting, make them jump / stop sitting
         if myHum.Sit then
             pcall(function()
                 myHum.Jump = true
@@ -334,7 +394,7 @@ local function startAttack()
             return
         end
 
-        -- NEW: If humanoid is sitting, make them jump / stop sitting
+        -- If humanoid is sitting, make them jump / stop sitting
         if myHum.Sit then
             pcall(function()
                 myHum.Jump = true
@@ -378,7 +438,7 @@ local function buildUI()
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "Main"
-    mainFrame.Size = UDim2.new(0, 300, 0, 300)
+    mainFrame.Size = UDim2.new(0, 300, 0, 340)
     mainFrame.Position = UDim2.new(0, 40, 0, 120)
     mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
     mainFrame.BorderSizePixel = 0
@@ -437,6 +497,38 @@ local function buildUI()
     local vlist = Instance.new("UIListLayout", content)
     vlist.SortOrder = Enum.SortOrder.LayoutOrder
     vlist.Padding = UDim.new(0, 8)
+
+    -- Commander row
+    local commanderRow = Instance.new("Frame")
+    commanderRow.Size = UDim2.new(1, 0, 0, 30)
+    commanderRow.BackgroundTransparency = 1
+    commanderRow.Parent = content
+
+    local cl = Instance.new("UIListLayout", commanderRow)
+    cl.FillDirection = Enum.FillDirection.Horizontal
+    cl.Padding = UDim.new(0, 6)
+
+    commanderToggle = Instance.new("TextButton")
+    commanderToggle.Size = UDim2.new(0, 120, 1, 0)
+    commanderToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
+    commanderToggle.TextColor3 = Color3.new(1, 1, 1)
+    commanderToggle.Font = Enum.Font.GothamBold
+    commanderToggle.TextSize = 14
+    commanderToggle.Text = "Cmd Mode: Off"
+    commanderToggle.Parent = commanderRow
+    Instance.new("UICorner", commanderToggle).CornerRadius = UDim.new(0, 6)
+
+    commanderBox = Instance.new("TextBox")
+    commanderBox.Size = UDim2.new(1, -126, 1, 0)
+    commanderBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    commanderBox.PlaceholderText = "Commander1, Commander2 (partial ok)"
+    commanderBox.Text = ""
+    commanderBox.TextColor3 = Color3.new(1, 1, 1)
+    commanderBox.Font = Enum.Font.Gotham
+    commanderBox.TextSize = 14
+    commanderBox.ClearTextOnFocus = false
+    commanderBox.Parent = commanderRow
+    Instance.new("UICorner", commanderBox).CornerRadius = UDim.new(0, 6)
 
     -- Follow row
     local followRow = Instance.new("Frame")
@@ -596,38 +688,6 @@ local function buildUI()
     ratePlusBtn.Parent = autoRow
     Instance.new("UICorner", ratePlusBtn).CornerRadius = UDim.new(0, 6)
 
-    -- Commander row
-    local commanderRow = Instance.new("Frame")
-    commanderRow.Size = UDim2.new(1, 0, 0, 30)
-    commanderRow.BackgroundTransparency = 1
-    commanderRow.Parent = content
-
-    local cl = Instance.new("UIListLayout", commanderRow)
-    cl.FillDirection = Enum.FillDirection.Horizontal
-    cl.Padding = UDim.new(0, 6)
-
-    commanderToggle = Instance.new("TextButton")
-    commanderToggle.Size = UDim2.new(0, 120, 1, 0)
-    commanderToggle.BackgroundColor3 = Color3.fromRGB(70, 0, 0)
-    commanderToggle.TextColor3 = Color3.new(1, 1, 1)
-    commanderToggle.Font = Enum.Font.GothamBold
-    commanderToggle.TextSize = 14
-    commanderToggle.Text = "Cmd Mode: Off"
-    commanderToggle.Parent = commanderRow
-    Instance.new("UICorner", commanderToggle).CornerRadius = UDim.new(0, 6)
-
-    commanderBox = Instance.new("TextBox")
-    commanderBox.Size = UDim2.new(1, -126, 1, 0)
-    commanderBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    commanderBox.PlaceholderText = "Commander1, Commander2 (partial ok)"
-    commanderBox.Text = ""
-    commanderBox.TextColor3 = Color3.new(1, 1, 1)
-    commanderBox.Font = Enum.Font.Gotham
-    commanderBox.TextSize = 14
-    commanderBox.ClearTextOnFocus = false
-    commanderBox.Parent = commanderRow
-    Instance.new("UICorner", commanderBox).CornerRadius = UDim.new(0, 6)
-
     -- Dragging
     local dragging, dragStart, startPos = false, nil, nil
     titleBar.InputBegan:Connect(function(input)
@@ -659,7 +719,7 @@ local function buildUI()
     minBtn.MouseButton1Click:Connect(function()
         isMinimized = not isMinimized
         content.Visible = not isMinimized
-        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 300)
+        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 340)
         minBtn.Text = isMinimized and "+" or "—"
     end)
 
@@ -678,16 +738,234 @@ local function buildUI()
     end
 end
 
--- Button logic
+-- Command processing helpers
+local function setLastCommander(plr)
+    if plr and plr.UserId then
+        lastCommanderUserId = plr.UserId
+    end
+end
+
+local function overrideAllModes()
+    -- Called when a new commander issues a command: stop conflicting modes so new command can take effect cleanly
+    -- We intentionally do not block the new command; we just ensure previous loops are stopped.
+    if followConn then
+        followConn:Disconnect()
+        followConn = nil
+    end
+    if attackConn then
+        attackConn:Disconnect()
+        attackConn = nil
+    end
+    if teamAttackConn then
+        teamAttackConn:Disconnect()
+        teamAttackConn = nil
+    end
+end
+
+-- Command handling (TextChatService)
+if TextChatService then
+    TextChatService.MessageReceived:Connect(function(msg)
+        if not commanderMode then return end
+        if not msg then return end
+
+        local source = msg.TextSource
+        if not source then return end
+
+        local userId = source.UserId
+        if not userId then return end
+
+        local plr = Players:GetPlayerByUserId(userId)
+        if not plr then return end
+
+        -- Only accept commands from players listed in commanderBox
+        if not isCommander(plr.Name) then return end
+
+        setLastCommander(plr) -- most recent commander overrides previous
+
+        local text = tostring(msg.Text or "")
+        local lower = text:lower()
+
+        -- Normalize interchangeable commands
+        -- Accept ".attack" as ".atk", ".goto" as ".follow"
+        if lower:sub(1,7) == ".attack" then
+            lower = ".atk" .. lower:sub(7)
+            text = ".atk" .. text:sub(7)
+        end
+        if lower:sub(1,5) == ".goto" then
+            lower = ".follow" .. lower:sub(5)
+            text = ".follow" .. text:sub(5)
+        end
+
+        -- .stop command (any commander can stop)
+        if lower:match("^%.stop%s*$") or lower:match("^%.stop%s+") then
+            attackBox.Text = ""
+            followBox.Text = ""
+            teamAttackBox.Text = ""
+            -- disable all modes and stop movement immediately
+            if followEnabled then stopFollow() end
+            if attackEnabled then stopAttack() end
+            if teamAttackEnabled then stopTeamAttack() end
+            stopMovementImmediate()
+            return
+        end
+
+        -- .atk / .attack handling
+        if lower:sub(1,4) == ".atk" then
+            local after = text:match("^%.atk%s*(.+)$")
+            local arg = after and trim(after) or ""
+            -- special keywords
+            if arg == "" or arg:lower() == "me" then
+                -- attack the commander who said it
+                attackBox.Text = plr.Name
+                parseAttackNames(attackBox.Text)
+                -- select first tool
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                end)
+                -- override previous modes and start attack
+                overrideAllModes()
+                attackEnabled = true
+                startAttack()
+                return
+            end
+
+            local lowarg = arg:lower()
+            if lowarg == "random" then
+                -- pick a random non-local, non-commander player
+                local pool = {}
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= localPlayer and not isCommander(p.Name) then
+                        table.insert(pool, p)
+                    end
+                end
+                if #pool > 0 then
+                    local choice = pool[math.random(1, #pool)]
+                    attackBox.Text = choice.Name
+                    parseAttackNames(attackBox.Text)
+                    pcall(function()
+                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                    end)
+                    overrideAllModes()
+                    attackEnabled = true
+                    startAttack()
+                end
+                return
+            end
+
+            if lowarg == "others" then
+                -- attack everyone except commanders
+                local names = allPlayerNames(true)
+                attackBox.Text = table.concat(names, ", ")
+                parseAttackNames(attackBox.Text)
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                end)
+                overrideAllModes()
+                attackEnabled = true
+                startAttack()
+                return
+            end
+
+            if lowarg == "all" or lowarg == "everyone" then
+                local names = allPlayerNames(false)
+                attackBox.Text = table.concat(names, ", ")
+                parseAttackNames(attackBox.Text)
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                end)
+                overrideAllModes()
+                attackEnabled = true
+                startAttack()
+                return
+            end
+
+            -- default: treat after as list of users
+            attackBox.Text = after
+            parseAttackNames(attackBox.Text)
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+            end)
+            overrideAllModes()
+            attackEnabled = true
+            startAttack()
+            return
+        end
+
+        -- .follow / .goto handling
+        if lower:sub(1,7) == ".follow" then
+            local after = text:match("^%.follow%s*(.+)$")
+            local arg = after and trim(after) or ""
+            -- .follow or .follow me -> follow the commander
+            if arg == "" or arg:lower() == "me" then
+                followBox.Text = plr.Name
+                overrideAllModes()
+                -- disable attack/teamattack if active
+                if attackEnabled then stopAttack() end
+                if teamAttackEnabled then stopTeamAttack() end
+                -- normal follow (updates target continuously)
+                followTargetPlayer = findClosestPlayer(followBox.Text)
+                if followTargetPlayer then
+                    followEnabled = true
+                    holdMode = false
+                    startFollow()
+                end
+                return
+            end
+
+            -- .follow <user> -> follow that user (continuous)
+            followBox.Text = after
+            overrideAllModes()
+            if attackEnabled then stopAttack() end
+            if teamAttackEnabled then stopTeamAttack() end
+            followTargetPlayer = findClosestPlayer(followBox.Text)
+            if followTargetPlayer then
+                followEnabled = true
+                holdMode = false
+                startFollow()
+            end
+            return
+        end
+
+        -- .hold command: go to the commander's current position and stop there
+        if lower:sub(1,5) == ".hold" then
+            -- record the commander's current position
+            local cmdChar = plr.Character
+            local cmdHRP = cmdChar and cmdChar:FindFirstChild("HumanoidRootPart")
+            if cmdHRP then
+                holdPosition = cmdHRP.Position
+                holdMode = true
+                -- set followTarget to nil (we're using holdPosition)
+                followTargetPlayer = nil
+                -- override and start follow in hold mode
+                overrideAllModes()
+                if attackEnabled then stopAttack() end
+                if teamAttackEnabled then stopTeamAttack() end
+                followEnabled = true
+                startFollow()
+            end
+            return
+        end
+
+        -- .autojump on/off handled previously in other versions; ignore here unless added
+    end)
+end
+
+-- Button logic (UI toggles)
 local function onFollowToggle()
     local newState = not followEnabled
     if newState then
+        -- turning follow on manually: clear holdMode
+        holdMode = false
+        holdPosition = nil
         if attackEnabled then
-            attackEnabled = false
             stopAttack()
         end
         if teamAttackEnabled then
-            teamAttackEnabled = false
             stopTeamAttack()
         end
         local targetName = followBox.Text
@@ -709,11 +987,9 @@ local function onAttackToggle()
     local newState = not attackEnabled
     if newState then
         if followEnabled then
-            followEnabled = false
             stopFollow()
         end
         if teamAttackEnabled then
-            teamAttackEnabled = false
             stopTeamAttack()
         end
         parseAttackNames(attackBox.Text)
@@ -733,11 +1009,9 @@ local function onTeamAttackToggle()
     local newState = not teamAttackEnabled
     if newState then
         if followEnabled then
-            followEnabled = false
             stopFollow()
         end
         if attackEnabled then
-            attackEnabled = false
             stopAttack()
         end
         parseTeamNames(teamAttackBox.Text)
@@ -863,159 +1137,6 @@ function _G.HiltonExec.Cleanup()
     _G.HiltonExec = nil
 end
 
--- COMMANDER UTILITIES
-local function isCommander(name)
-    local list = string.split(commanderBox.Text or "", ",")
-    name = tostring(name or ""):lower()
-    for _, raw in ipairs(list) do
-        local partial = raw:lower():gsub("%s+", "")
-        if partial ~= "" and name:find(partial, 1, true) then
-            return true
-        end
-    end
-    return false
-end
-
-local function toggleCommanderMode()
-    commanderMode = not commanderMode
-    if commanderToggle then
-        commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "On" or "Off")
-        commanderToggle.BackgroundColor3 = commanderMode and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
-    end
-end
-
--- Listen for messages from TextChatService and handle commands
-if TextChatService then
-    TextChatService.MessageReceived:Connect(function(msg)
-        if not commanderMode then return end
-        if not msg then return end
-
-        local source = msg.TextSource
-        if not source then return end
-
-        local userId = source.UserId
-        if not userId then return end
-
-        local plr = Players:GetPlayerByUserId(userId)
-        if not plr then return end
-
-        if not isCommander(plr.Name) then return end
-
-        local text = tostring(msg.Text or "")
-        local lower = text:lower()
-
-        -- .atk command
-        if lower:sub(1,4) == ".atk" then
-            local after = text:match("^%.atk%s*(.+)$")
-            if after then
-                -- Before enabling attack, auto-press '1' to select first tool
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-                end)
-
-                -- Paste into attack textbox
-                attackBox.Text = after
-
-                -- Ensure follow and team attack are off
-                if followEnabled then
-                    stopFollow()
-                end
-                if teamAttackEnabled then
-                    stopTeamAttack()
-                end
-
-                -- Update targets and start attack (do not toggle off if already on)
-                parseAttackNames(attackBox.Text)
-                if not attackEnabled then
-                    attackEnabled = true
-                    startAttack()
-                else
-                    if attackConn then
-                        attackConn:Disconnect()
-                        attackConn = nil
-                    end
-                    startAttack()
-                end
-            end
-            return
-        end
-
-        -- .stop command (clear and turn off modes except commander)
-        if lower:match("^%.stop%s*$") or lower:match("^%.stop%s+") then
-            attackBox.Text = ""
-            followBox.Text = ""
-            teamAttackBox.Text = ""
-            -- disable all modes except commander and stop movement immediately
-            if followEnabled then stopFollow() end
-            if attackEnabled then stopAttack() end
-            if teamAttackEnabled then stopTeamAttack() end
-            stopMovementImmediate()
-            return
-        end
-
-        -- .follow me command (paste commander into follow textbox and enable follow)
-        if lower:match("^%.follow%s+me") or lower:match("^%.followme") then
-            followBox.Text = plr.Name
-
-            if attackEnabled then
-                stopAttack()
-            end
-            if teamAttackEnabled then
-                stopTeamAttack()
-            end
-
-            -- Update target and start follow without toggling off
-            local target = findClosestPlayer(followBox.Text)
-            if target then
-                followTargetPlayer = target
-                if not followEnabled then
-                    followEnabled = true
-                    startFollow()
-                else
-                    if followConn then
-                        followConn:Disconnect()
-                        followConn = nil
-                    end
-                    startFollow()
-                end
-            end
-            return
-        end
-
-        -- .follow <user> command (follow specified user)
-        if lower:sub(1,7) == ".follow" then
-            local after = text:match("^%.follow%s*(.+)$")
-            if after and #trim(after) > 0 then
-                followBox.Text = after
-
-                if attackEnabled then
-                    stopAttack()
-                end
-                if teamAttackEnabled then
-                    stopTeamAttack()
-                end
-
-                local target = findClosestPlayer(followBox.Text)
-                if target then
-                    followTargetPlayer = target
-                    if not followEnabled then
-                        followEnabled = true
-                        startFollow()
-                    else
-                        if followConn then
-                            followConn:Disconnect()
-                            followConn = nil
-                        end
-                        startFollow()
-                    end
-                end
-            end
-            return
-        end
-    end)
-end
-
 -- Build and wire UI
 buildUI()
 
@@ -1029,7 +1150,7 @@ table.insert(connections, teamAttackBtn.MouseButton1Click:Connect(onTeamAttackTo
 
 table.insert(connections, followBox.FocusLost:Connect(function()
     if followEnabled then
-        -- If user edits the follow box while follow is active, update target without toggling off
+        -- update target without toggling off
         local target = findClosestPlayer(followBox.Text)
         if target then
             followTargetPlayer = target
@@ -1090,32 +1211,27 @@ end))
 
 -- Commander toggle wiring
 if commanderToggle then
-    table.insert(connections, commanderToggle.MouseButton1Click:Connect(toggleCommanderMode))
+    table.insert(connections, commanderToggle.MouseButton1Click:Connect(function()
+        commanderMode = not commanderMode
+        commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "On" or "Off")
+        commanderToggle.BackgroundColor3 = commanderMode and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
+    end))
 end
 
 -- 🔥 KEYBINDS: T focuses attackBox, R toggles Attack, Y toggles Follow
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
 
-    -- T = focus Attack textbox
     if input.KeyCode == Enum.KeyCode.T then
-        if attackBox then
-            attackBox:CaptureFocus()
-        end
+        if attackBox then attackBox:CaptureFocus() end
     end
 
-    -- R = toggle Attack ONLY if attackBox is not focused
     if input.KeyCode == Enum.KeyCode.R then
-        if attackBox and not attackBox:IsFocused() then
-            onAttackToggle()
-        end
+        if attackBox and not attackBox:IsFocused() then onAttackToggle() end
     end
 
-    -- Y = toggle Follow ONLY if followBox is not focused
     if input.KeyCode == Enum.KeyCode.Y then
-        if followBox and not followBox:IsFocused() then
-            onFollowToggle()
-        end
+        if followBox and not followBox:IsFocused() then onFollowToggle() end
     end
 end))
 
