@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -88,8 +89,8 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 260)
-frame.Position = UDim2.new(0.5, -175, 0.5, -130)
+frame.Size = UDim2.new(0, 350, 0, 320)
+frame.Position = UDim2.new(0.5, -175, 0.5, -160)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.ZIndex = 999999
@@ -134,12 +135,49 @@ toggleButton.Parent = frame
 Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
 
 ---------------------------------------------------------------------
+-- COMMANDER UI (added)
+---------------------------------------------------------------------
+
+local commanderLabel = Instance.new("TextLabel")
+commanderLabel.Size = UDim2.new(0, 120, 0, 20)
+commanderLabel.Position = UDim2.new(0, 10, 0, 90)
+commanderLabel.BackgroundTransparency = 1
+commanderLabel.Text = "Commanders"
+commanderLabel.TextColor3 = Color3.fromRGB(200,200,200)
+commanderLabel.Font = Enum.Font.SourceSansBold
+commanderLabel.TextSize = 14
+commanderLabel.TextXAlignment = Enum.TextXAlignment.Left
+commanderLabel.ZIndex = 999999
+commanderLabel.Parent = frame
+
+local commanderBox = Instance.new("TextBox")
+commanderBox.Size = UDim2.new(0, 220, 0, 28)
+commanderBox.Position = UDim2.new(0, 10, 0, 110)
+commanderBox.PlaceholderText = "Commander1, Commander2..."
+commanderBox.ClearTextOnFocus = false
+commanderBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+commanderBox.TextColor3 = Color3.fromRGB(255,255,255)
+commanderBox.Font = Enum.Font.SourceSans
+commanderBox.TextSize = 14
+commanderBox.ZIndex = 999999
+commanderBox.Parent = frame
+Instance.new("UICorner", commanderBox).CornerRadius = UDim.new(0, 6)
+
+local commanderToggle = Instance.new("TextButton")
+commanderToggle.Size = UDim2.new(0, 100, 0, 28)
+commanderToggle.Position = UDim2.new(0, 240, 0, 110)
+commanderToggle.Text = "Cmd Mode: OFF"
+commanderToggle.ZIndex = 999999
+commanderToggle.Parent = frame
+Instance.new("UICorner", commanderToggle).CornerRadius = UDim.new(0, 6)
+
+---------------------------------------------------------------------
 -- SCROLLING FRAME
 ---------------------------------------------------------------------
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -20, 1, -100)
-scroll.Position = UDim2.new(0, 10, 0, 80)
+scroll.Size = UDim2.new(1, -20, 1, -160)
+scroll.Position = UDim2.new(0, 10, 0, 150)
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.ScrollBarThickness = 6
 scroll.BackgroundTransparency = 1
@@ -299,3 +337,100 @@ deleteButton.MouseButton1Click:Connect(function()
 
     script:Destroy()
 end)
+
+---------------------------------------------------------------------
+-- MINIMIZE BUTTON
+---------------------------------------------------------------------
+
+minimizeButton.MouseButton1Click:Connect(function()
+    local isMin = scroll.Visible
+    scroll.Visible = not isMin
+    for _, obj in ipairs({ title, toggleButton, deleteButton, commanderLabel, commanderBox, commanderToggle }) do
+        if obj then
+            obj.Visible = not isMin
+        end
+    end
+    minimizeButton.Text = isMin and "+" or "-"
+end)
+
+---------------------------------------------------------------------
+-- COMMANDER LOGIC
+---------------------------------------------------------------------
+
+local function splitCommaList(s)
+    local out = {}
+    if not s then return out end
+    for part in tostring(s):gmatch("([^,]+)") do
+        local t = part:gsub("^%s+", ""):gsub("%s+$", "")
+        if t ~= "" then
+            table.insert(out, t)
+        end
+    end
+    return out
+end
+
+local function isCommanderName(name)
+    local list = splitCommaList(commanderBox.Text or "")
+    name = tostring(name or ""):lower()
+    for _, raw in ipairs(list) do
+        local partial = raw:lower():gsub("%s+", "")
+        if partial ~= "" and name:find(partial, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function toggleCommanderMode()
+    commanderToggle.Text = commanderToggle.Text:match("ON") and "Cmd Mode: OFF" or "Cmd Mode: ON"
+end
+
+commanderToggle.MouseButton1Click:Connect(function()
+    commanderMode = not commanderMode
+    if commanderMode then
+        commanderToggle.Text = "Cmd Mode: ON"
+        commanderToggle.BackgroundColor3 = Color3.fromRGB(46,204,113)
+    else
+        commanderToggle.Text = "Cmd Mode: OFF"
+        commanderToggle.BackgroundColor3 = Color3.fromRGB(70,0,0)
+    end
+end)
+
+-- Listen for chat commands from commanders and auto-enable the script on .atk/.attack
+if TextChatService then
+    TextChatService.MessageReceived:Connect(function(msg)
+        if not commanderMode then return end
+        if not msg then return end
+
+        local source = msg.TextSource
+        if not source then return end
+
+        local userId = source.UserId
+        if not userId then return end
+
+        local plr = Players:GetPlayerByUserId(userId)
+        if not plr then return end
+
+        if not isCommanderName(plr.Name) then return end
+
+        local text = tostring(msg.Text or "")
+        local lower = text:lower()
+
+        -- check for .atk or .attack at start
+        local cmd = lower:match("^%.([%w_]+)")
+        if cmd then
+            if cmd == "atk" or cmd == "attack" then
+                -- enable the auto-press toggle when a commander issues an attack command
+                enabled = true
+                updateToggle()
+            end
+        end
+    end)
+end
+
+-- Ensure UI renders above other UI
+for _, obj in ipairs(screenGui:GetDescendants()) do
+    if obj:IsA("GuiObject") then
+        pcall(function() obj.ZIndex = 999999 end)
+    end
+end
