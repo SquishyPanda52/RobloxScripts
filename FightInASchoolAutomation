@@ -64,8 +64,7 @@ local numberKeyMap = {
 
 local function resolveKey(text)
     if not text or text == "" then return nil end
-    text = tostring(text)
-    text = text:gsub("^%s+", ""):gsub("%s+$", "")
+    text = tostring(text):gsub("^%s+", ""):gsub("%s+$", "")
     if text == "" then return nil end
 
     local lower = string.lower(text)
@@ -80,13 +79,12 @@ local function resolveKey(text)
         end
     end
 
-    -- try full enum name (e.g., "F", "A", "Z", "Comma", "Semicolon")
+    -- try full enum name (e.g., "Comma", "Semicolon", "F")
     local upperName = text:upper()
     if Enum.KeyCode[upperName] then
         return Enum.KeyCode[upperName]
     end
 
-    -- fallback: try to match common names (e.g., "mouse1" not supported here)
     return nil
 end
 
@@ -237,78 +235,57 @@ end)
 -- Left: key name (string)
 -- Middle: cooldown (number) seconds between presses
 -- Right: hold (number) seconds to hold the key continuously
+-- Implementation: lightweight row objects with parsed values and nextTime
 ---------------------------------------------------------------------
 
 local rows = {}
 
--- Utility to stop a row's running coroutine
-local function stopRow(row)
-    if row and row.running then
-        row.running = false
-        row.thread = nil
-    end
+local function parseNumberSafe(s)
+    if not s then return nil end
+    local n = tonumber(tostring(s):gsub("%s+", ""))
+    return n
 end
 
--- Start a loop for a row. The loop will run continuously but only perform presses when:
---  - the row has valid key/interval/hold values
---  - enabled == true
--- The loop checks values each iteration so edits take effect immediately.
-local function startLoop(row)
-    stopRow(row)
+local function makeRowObject(keyBox, intervalBox, holdBox)
+    return {
+        keyBox = keyBox,
+        intervalBox = intervalBox,
+        holdBox = holdBox,
+        keyCode = nil,         -- Enum.KeyCode or nil
+        interval = nil,        -- number seconds
+        hold = nil,            -- number seconds
+        nextTime = 0,          -- tick() when next press should occur
+        pressing = false,      -- whether currently holding
+        holdEndTime = 0        -- tick() when to release
+    }
+end
 
-    row.running = true
-    row.thread = coroutine.create(function()
-        while row.running and not destroyed do
-            -- read current values (allow dynamic edits)
-            local keyText = tostring(row.key.Text or "")
-            local intervalNum = tonumber(row.interval.Text)
-            local holdNum = tonumber(row.hold.Text)
+local function updateRowParsed(row)
+    -- parse key
+    local keyText = tostring(row.keyBox.Text or "")
+    row.keyCode = resolveKey(keyText)
 
-            local keyCode = resolveKey(keyText)
+    -- parse interval and hold safely (do not error on partial input)
+    local intervalNum = parseNumberSafe(row.intervalBox.Text)
+    local holdNum = parseNumberSafe(row.holdBox.Text)
 
-            if keyCode and intervalNum and holdNum and intervalNum > 0 and holdNum >= 0 then
-                -- Only perform presses when enabled
-                if enabled and not destroyed then
-                    -- Press and hold
-                    pcall(function()
-                        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-                    end)
-                    -- hold for specified time (allow early exit)
-                    local holdStart = tick()
-                    while tick() - holdStart < holdNum do
-                        if not enabled or destroyed or not row.running then break end
-                        task.wait(0.01)
-                    end
-                    pcall(function()
-                        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-                    end)
-                end
+    -- require positive interval; hold can be zero or positive
+    if intervalNum and intervalNum > 0 then
+        row.interval = intervalNum
+    else
+        row.interval = nil
+    end
 
-                -- Wait for cooldown interval before next press (allow early exit)
-                local waitStart = tick()
-                while tick() - waitStart < intervalNum do
-                    if not enabled or destroyed or not row.running then break end
-                    task.wait(0.05)
-                end
-            else
-                -- invalid config: sleep briefly and re-check later
-                task.wait(0.25)
-            end
-        end
-    end)
+    if holdNum and holdNum >= 0 then
+        row.hold = holdNum
+    else
+        row.hold = nil
+    end
 
-    -- resume coroutine in a safe spawn so it doesn't block
-    task.spawn(function()
-        if row.thread and coroutine.status(row.thread) == "suspended" then
-            local ok, err = pcall(coroutine.resume, row.thread)
-            if not ok then
-                -- stop on error
-                row.running = false
-                row.thread = nil
-                warn("AutoPress row thread error:", err)
-            end
-        end
-    end)
+    -- if nextTime is 0 (first time) set it to now + small jitter so rows don't all fire same frame
+    if row.nextTime == 0 then
+        row.nextTime = tick() + (math.random() * 0.2)
+    end
 end
 
 local function createRow(i)
@@ -335,22 +312,17 @@ local function createRow(i)
     holdBox.PlaceholderText = "" -- blank by default
     holdBox.Parent = scroll
 
-    rows[i] = {
-        key = keyBox,
-        interval = intervalBox,
-        hold = holdBox,
-        running = false,
-        thread = nil
-    }
+    local row = makeRowObject(keyBox, intervalBox, holdBox)
+    rows[i] = row
 
-    -- Start the loop for this row immediately so it reacts to enabled toggles
-    startLoop(rows[i])
+    -- initial parse
+    updateRowParsed(row)
 
-    -- When user edits a box and leaves focus, restart the row to pick up new values immediately
+    -- When user edits a box and leaves focus, re-parse values immediately.
+    -- This is lightweight and won't block the UI.
     local function onEdit()
         if destroyed then return end
-        -- restart the loop to pick up new values
-        startLoop(rows[i])
+        updateRowParsed(row)
     end
 
     keyBox.FocusLost:Connect(onEdit)
@@ -363,6 +335,93 @@ end
 for i = 1, 7 do
     createRow(i)
 end
+
+---------------------------------------------------------------------
+-- Central scheduler (single Heartbeat connection)
+-- Checks each row once per frame and performs presses when due.
+-- This avoids spawning many coroutines and prevents UI freezes.
+---------------------------------------------------------------------
+
+local schedulerConn
+schedulerConn = RunService.Heartbeat:Connect(function(dt)
+    if destroyed then
+        if schedulerConn then
+            schedulerConn:Disconnect()
+            schedulerConn = nil
+        end
+        return
+    end
+
+    local now = tick()
+
+    -- iterate rows
+    for _, row in ipairs(rows) do
+        -- ensure parsed values are up-to-date (in case user typed without leaving focus)
+        -- We avoid heavy parsing every frame; only re-parse if Text changed since last parse.
+        -- For simplicity and safety, do a cheap check: if any Text differs from resolved values, re-parse.
+        -- (This is still very cheap: string compares.)
+        local keyText = tostring(row.keyBox.Text or "")
+        local intervalText = tostring(row.intervalBox.Text or "")
+        local holdText = tostring(row.holdBox.Text or "")
+        -- If any text doesn't match parsed values, re-parse.
+        local needParse = false
+        if row._lastKeyText ~= keyText or row._lastIntervalText ~= intervalText or row._lastHoldText ~= holdText then
+            needParse = true
+            row._lastKeyText = keyText
+            row._lastIntervalText = intervalText
+            row._lastHoldText = holdText
+        end
+        if needParse then
+            updateRowParsed(row)
+        end
+
+        -- Only proceed if row has valid config
+        if row.keyCode and row.interval and row.hold then
+            -- If currently holding the key, check if it's time to release
+            if row.pressing then
+                if now >= row.holdEndTime or not enabled or destroyed then
+                    -- release
+                    pcall(function()
+                        VirtualInputManager:SendKeyEvent(false, row.keyCode, false, game)
+                    end)
+                    row.pressing = false
+                    -- schedule next press
+                    row.nextTime = now + (row.interval or 0)
+                end
+            else
+                -- not pressing: check if it's time to press (and enabled)
+                if enabled and now >= row.nextTime then
+                    -- press
+                    pcall(function()
+                        VirtualInputManager:SendKeyEvent(true, row.keyCode, false, game)
+                    end)
+                    row.pressing = true
+                    row.holdEndTime = now + (row.hold or 0)
+                    -- if hold is zero, release immediately next iteration (or release now)
+                    if row.hold == 0 then
+                        -- release immediately but still allow a tiny yield to avoid tight loop
+                        pcall(function()
+                            VirtualInputManager:SendKeyEvent(false, row.keyCode, false, game)
+                        end)
+                        row.pressing = false
+                        row.nextTime = now + (row.interval or 0)
+                    end
+                end
+            end
+        else
+            -- invalid config: ensure not pressing and set nextTime to now + small delay
+            if row.pressing then
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(false, row.keyCode, false, game)
+                end)
+                row.pressing = false
+            end
+            if row.nextTime == 0 then
+                row.nextTime = now + 0.1
+            end
+        end
+    end
+end)
 
 ---------------------------------------------------------------------
 -- TOGGLE
@@ -395,8 +454,14 @@ deleteButton.MouseButton1Click:Connect(function()
     destroyed = true
     enabled = false
 
+    -- release any keys that might still be pressed
     for _, row in ipairs(rows) do
-        stopRow(row)
+        if row.pressing and row.keyCode then
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(false, row.keyCode, false, game)
+            end)
+            row.pressing = false
+        end
     end
 
     if screenGui then
