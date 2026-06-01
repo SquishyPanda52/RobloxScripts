@@ -26,6 +26,7 @@ local hoveredTargetPlayer = nil
 
 -- COMMANDER MODE
 local commanderMode = false
+local lastCommanderUserId = nil -- track most recent commander who issued a command
 
 -- BIGGER HITBOX SETTINGS
 local targetRadius = 120
@@ -574,7 +575,7 @@ local function startLockon()
                                 alpha
                             )
 
-                        RunService.RenderStepped:Wait()
+                        RunService.RenderSteipped and RunService.RenderStepped:Wait() or RunService.Heartbeat:Wait()
 
                     until alpha >= 1
 
@@ -799,12 +800,16 @@ UserInput.InputBegan:Connect(function(input, gp)
 end)
 
 --------------------------------------------------------------------
--- COMMAND LISTENER (TextChatService)
+-- COMMAND LISTENER (TextChatService) - EXTENDED
 --------------------------------------------------------------------
+
+local function trim(s)
+    return tostring(s):gsub("^%s+", ""):gsub("%s+$", "")
+end
 
 local function isCommander(name)
     local list = string.split(commanderBox.Text or "", ",")
-    name = name:lower()
+    name = tostring(name or ""):lower()
 
     for _, raw in ipairs(list) do
         local partial = raw:lower():gsub("%s+", "")
@@ -816,7 +821,48 @@ local function isCommander(name)
     return false
 end
 
--- Listen for messages from TextChatService
+local function allPlayerNames(excludeCommanders)
+    local names = {}
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= localPlayer then
+            if excludeCommanders then
+                if not isCommander(pl.Name) then
+                    table.insert(names, pl.Name)
+                end
+            else
+                table.insert(names, pl.Name)
+            end
+        end
+    end
+    return names
+end
+
+local function setLastCommander(plr)
+    if plr and plr.UserId then
+        lastCommanderUserId = plr.UserId
+    end
+end
+
+local function hardOverridePreviousCommands()
+    -- Clear any selected target so camera will re-evaluate new txtUser
+    selectedTargetPlayer = nil
+    lastTargetHRP = nil
+
+    -- Ensure autoSelect disabled
+    if autoSelectEnabled then
+        autoSelectEnabled = false
+    end
+
+    -- Ensure lockon is enabled and lockon loop started
+    if not lockonEnabled then
+        lockonEnabled = true
+        startLockon()
+    end
+
+    updateButtons()
+end
+
+-- Robust command parsing and handling
 if TextChatService then
     TextChatService.MessageReceived:Connect(function(msg)
         if not commanderMode then return end
@@ -833,71 +879,116 @@ if TextChatService then
 
         if not isCommander(plr.Name) then return end
 
+        -- newest commander overrides everything
+        setLastCommander(plr)
+        -- We'll hard override once we know the command is valid and will change txtUser
+
         local text = tostring(msg.Text or "")
         local lower = text:lower()
 
-        -- .atk command
-        if lower:sub(1,4) == ".atk" then
-            local after = text:match("^%.atk%s*(.+)$")
-            if after then
-                txtUser.Text = after
-
-                if autoSelectEnabled then
-                    autoSelectEnabled = false
-                end
-
-                if not lockonEnabled then
-                    toggleLockon()
-                end
-
-                updateButtons()
-            end
+        -- Extract command and argument robustly: command is first token after leading dot
+        local cmd, arg = lower:match("^%.([%w_]+)%s*(.*)$")
+        if not cmd then
             return
         end
+        arg = trim(arg or "")
 
-        -- .stop command (clear the lockon textbox)
-        if lower:match("^%.stop%s*$") or lower:match("^%.stop%s+") then
+        -- Normalize synonyms
+        if cmd == "attack" then cmd = "atk" end
+        if cmd == "goto" then cmd = "follow" end
+
+        -- .stop command
+        if cmd == "stop" then
+            -- Hard override: clear and turn off lockon
             txtUser.Text = ""
+            if lockonEnabled then
+                lockonEnabled = false
+            end
+            selectedTargetPlayer = nil
+            lastTargetHRP = nil
             updateButtons()
             return
         end
 
-        -- .follow me command (paste commander into lockon textbox)
-        if lower:match("^%.follow%s+me") or lower:match("^%.followme") then
-            -- Use the player's exact Name for the textbox
-            txtUser.Text = plr.Name
+        -- .atk / .attack handling
+        if cmd == "atk" then
+            -- handle special keywords
+            local lowarg = arg:lower()
 
-            if autoSelectEnabled then
-                autoSelectEnabled = false
+            -- If no arg or "me" -> attack the commander who said it
+            if lowarg == "" or lowarg == "me" then
+                txtUser.Text = plr.Name
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
             end
 
-            if not lockonEnabled then
-                toggleLockon()
+            -- .atk random -> pick a random non-local, non-commander player
+            if lowarg == "random" then
+                local pool = {}
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= localPlayer and not isCommander(p.Name) then
+                        table.insert(pool, p)
+                    end
+                end
+                if #pool > 0 then
+                    local choice = pool[math.random(1, #pool)]
+                    txtUser.Text = choice.Name
+                    hardOverridePreviousCommands()
+                    updateButtons()
+                end
+                return
             end
 
-            updateButtons()
-            return
-        end
+            -- .atk others -> everyone except commanders
+            if lowarg == "others" then
+                local names = allPlayerNames(true)
+                txtUser.Text = table.concat(names, ", ")
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
+            end
 
-        -- Additional: support ".follow PlayerName" to follow another player explicitly
-        if lower:sub(1,7) == ".follow" then
-            local after = text:match("^%.follow%s*(.+)$")
-            if after then
-                -- paste whatever follows into txtUser (could be a name or comma list)
-                txtUser.Text = after
+            -- .atk all / .atk everyone -> everyone in server (excluding local)
+            if lowarg == "all" or lowarg == "everyone" then
+                local names = allPlayerNames(false)
+                txtUser.Text = table.concat(names, ", ")
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
+            end
 
-                if autoSelectEnabled then
-                    autoSelectEnabled = false
-                end
-
-                if not lockonEnabled then
-                    toggleLockon()
-                end
-
+            -- default: treat arg as list of users (raw after command)
+            if arg ~= "" then
+                txtUser.Text = arg
+                hardOverridePreviousCommands()
                 updateButtons()
             end
             return
         end
+
+        -- .follow / .goto handling
+        if cmd == "follow" then
+            local lowarg = arg:lower()
+
+            -- If no arg or "me" -> follow the commander
+            if lowarg == "" or lowarg == "me" then
+                txtUser.Text = plr.Name
+                hardOverridePreviousCommands()
+                updateButtons()
+                return
+            end
+
+            -- default: follow the provided name(s)
+            if arg ~= "" then
+                txtUser.Text = arg
+                hardOverridePreviousCommands()
+                updateButtons()
+            end
+            return
+        end
+
+        -- If command is unrecognized, ignore
     end)
 end
 
