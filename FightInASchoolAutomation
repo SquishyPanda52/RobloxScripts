@@ -17,6 +17,7 @@ end
 
 local enabled = false
 local destroyed = false
+local commanderMode = false
 
 ---------------------------------------------------------------------
 -- KEY MAPS
@@ -381,10 +382,6 @@ local function isCommanderName(name)
     return false
 end
 
-local function toggleCommanderMode()
-    commanderToggle.Text = commanderToggle.Text:match("ON") and "Cmd Mode: OFF" or "Cmd Mode: ON"
-end
-
 commanderToggle.MouseButton1Click:Connect(function()
     commanderMode = not commanderMode
     if commanderMode then
@@ -396,7 +393,7 @@ commanderToggle.MouseButton1Click:Connect(function()
     end
 end)
 
--- Listen for chat commands from commanders and auto-enable the script on .atk/.attack
+-- Listen for chat commands from commanders and auto-enable/disable the script
 if TextChatService then
     TextChatService.MessageReceived:Connect(function(msg)
         if not commanderMode then return end
@@ -416,15 +413,36 @@ if TextChatService then
         local text = tostring(msg.Text or "")
         local lower = text:lower()
 
-        -- check for .atk or .attack at start
+        -- Extract command token after leading dot, if present
         local cmd = lower:match("^%.([%w_]+)")
-        if cmd then
-            if cmd == "atk" or cmd == "attack" then
-                -- enable the auto-press toggle when a commander issues an attack command
-                enabled = true
-                updateToggle()
-            end
+        if not cmd then return end
+
+        -- Normalize synonyms
+        if cmd == "attack" then cmd = "atk" end
+        if cmd == "goto" then cmd = "follow" end
+
+        -- If commander says .atk or .attack -> enable auto-press
+        if cmd == "atk" then
+            enabled = true
+            updateToggle()
+            return
         end
+
+        -- If commander says .stop -> disable auto-press
+        if cmd == "stop" then
+            enabled = false
+            updateToggle()
+            return
+        end
+
+        -- If commander says any of these non-attack commands, ensure auto-press is off
+        if cmd == "follow" or cmd == "goto" or cmd == "hold" then
+            enabled = false
+            updateToggle()
+            return
+        end
+
+        -- Other commands are ignored for auto-press toggling
     end)
 end
 
