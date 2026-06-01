@@ -575,7 +575,7 @@ local function startLockon()
                                 alpha
                             )
 
-                        RunService.RenderStepped and RunService.RenderStepped:Wait() or RunService.Heartbeat:Wait()
+                        RunService.RenderSteipped and RunService.RenderStepped:Wait() or RunService.Heartbeat:Wait()
 
                     until alpha >= 1
 
@@ -881,15 +881,17 @@ if TextChatService then
 
         -- newest commander overrides everything
         setLastCommander(plr)
+        -- We'll hard override once we know the command is valid and will change txtUser
 
         local text = tostring(msg.Text or "")
-        -- Extract command and argument preserving original casing for argument
-        local cmdRaw, argRaw = text:match("^%.([%w_]+)%s*(.*)$")
-        if not cmdRaw then
+        local lower = text:lower()
+
+        -- Extract command and argument robustly: command is first token after leading dot
+        local cmd, arg = lower:match("^%.([%w_]+)%s*(.*)$")
+        if not cmd then
             return
         end
-        local cmd = cmdRaw:lower()
-        local arg = trim(argRaw or "")
+        arg = trim(arg or "")
 
         -- Normalize synonyms
         if cmd == "attack" then cmd = "atk" end
@@ -908,8 +910,9 @@ if TextChatService then
             return
         end
 
-        -- .atk / .attack handling (cmd normalized to "atk")
+        -- .atk / .attack handling
         if cmd == "atk" then
+            -- handle special keywords
             local lowarg = arg:lower()
 
             -- If no arg or "me" -> attack the commander who said it
@@ -920,7 +923,7 @@ if TextChatService then
                 return
             end
 
-            -- .atk random (optional) - pick a random non-local, non-commander player
+            -- .atk random -> pick a random non-local, non-commander player
             if lowarg == "random" then
                 local pool = {}
                 for _, p in ipairs(Players:GetPlayers()) do
@@ -955,7 +958,7 @@ if TextChatService then
                 return
             end
 
-            -- default: treat arg as list of users (preserve original casing)
+            -- default: treat arg as list of users (raw after command)
             if arg ~= "" then
                 txtUser.Text = arg
                 hardOverridePreviousCommands()
@@ -964,7 +967,7 @@ if TextChatService then
             return
         end
 
-        -- .follow / .goto handling (cmd normalized to "follow")
+        -- .follow / .goto handling
         if cmd == "follow" then
             local lowarg = arg:lower()
 
@@ -976,7 +979,7 @@ if TextChatService then
                 return
             end
 
-            -- default: follow the provided name(s) (preserve original casing)
+            -- default: follow the provided name(s)
             if arg ~= "" then
                 txtUser.Text = arg
                 hardOverridePreviousCommands()
@@ -985,7 +988,7 @@ if TextChatService then
             return
         end
 
-        -- Unrecognized commands are ignored
+        -- If command is unrecognized, ignore
     end)
 end
 
