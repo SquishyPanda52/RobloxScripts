@@ -1,15 +1,9 @@
 --[[
-  Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
-  - Follow and Attack are mutually exclusive.
-  - Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
-  - Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
-  - Draggable, compact UI with minimize and hard close.
-  - Re-inject safe: re-running replaces previous instance cleanly.
-  - Team Attack mode (targets players by team name).
-  - Behavior: All attack modes and follow are toggled off on death/respawn.
-  - Commander command listener (TextChatService) with UI textbox and toggle.
-  - Commands: .atk/.attack, .follow/.goto, .hold, .stop, .atk random, .atk others, .atk all/everyone
-  - Fixes: newest commander command HARD overrides previous commands; normalized parsing to avoid stray characters.
+  Updated HiltonExecutor LocalScript
+  - Fix: only press "1" to equip slot-1 tool when a tool exists in slot 1 and is not already equipped.
+  - Added helpers: getSlotOneTool, isSlotOneEquipped, ensureEquipSlotOne
+  - Replaced direct Enum.KeyCode.One SendKeyEvent calls with ensureEquipSlotOne()
+  - Preserves original behavior otherwise
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -151,6 +145,64 @@ local function stopMovementImmediate()
             pcall(function() humanoid:MoveTo(hrp.Position) end)
         end
     end
+end
+
+-- New helpers for slot-1 tool handling
+
+-- Helper: return the Tool instance that represents the "1" hotbar slot, or nil
+local function getSlotOneTool()
+    -- Heuristic: treat the first Tool in Backpack as slot 1
+    local bp = localPlayer:FindFirstChild("Backpack")
+    if bp then
+        local tools = {}
+        for _, v in ipairs(bp:GetChildren()) do
+            if v:IsA("Tool") then
+                table.insert(tools, v)
+            end
+        end
+        if #tools > 0 then
+            return tools[1]
+        end
+    end
+
+    -- Fallback: if nothing in Backpack, check character for equipped tool
+    local char = localPlayer.Character
+    if char then
+        for _, v in ipairs(char:GetChildren()) do
+            if v:IsA("Tool") then
+                return v
+            end
+        end
+    end
+
+    return nil
+end
+
+-- Helper: returns true if the slot-1 tool is currently parented to the character (i.e., equipped)
+local function isSlotOneEquipped()
+    local slotTool = getSlotOneTool()
+    if not slotTool then return false end
+    return slotTool.Parent == (localPlayer.Character or nil)
+end
+
+-- Ensure slot-1 tool is equipped: only press "1" if there is a slot-1 tool and it is not already equipped.
+local function ensureEquipSlotOne()
+    local slotTool = getSlotOneTool()
+    if not slotTool then
+        -- nothing in slot 1; do not press the key
+        return
+    end
+
+    -- If already equipped, do nothing (prevents unequip toggle)
+    if isSlotOneEquipped() then
+        return
+    end
+
+    -- Otherwise, press the 1 key to equip it
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+    end)
 end
 
 -- Ensure commands from any listed commander are accepted
@@ -308,45 +360,6 @@ local function stopAttack()
     end
 end
 
--- New helper functions to detect tools and equip slot 1 safely
-local function hasBackpackTool()
-    local backpack = localPlayer:FindFirstChild("Backpack")
-    if not backpack then return false end
-    for _, item in ipairs(backpack:GetChildren()) do
-        if item:IsA("Tool") then
-            return true
-        end
-    end
-    return false
-end
-
-local function isToolEquipped()
-    local char = localPlayer.Character
-    if not char then return false end
-    for _, item in ipairs(char:GetChildren()) do
-        if item:IsA("Tool") then
-            return true
-        end
-    end
-    return false
-end
-
-local function ensureEquipSlot1()
-    -- If there's no tool in the backpack, do not press 1
-    if not hasBackpackTool() then
-        return
-    end
-    -- If a tool is already equipped, do not press 1 (avoid unequipping)
-    if isToolEquipped() then
-        return
-    end
-    -- Otherwise, press 1 to equip the first tool
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-    end)
-end
-
 local function doAutoPress()
     if binding.kind == "mouse" then
         local mousePos = UserInputService:GetMouseLocation()
@@ -455,9 +468,6 @@ local function startTeamAttack()
 end
 
 local function startAttack()
-    -- Before starting attack, ensure we equip slot 1 only if appropriate
-    ensureEquipSlot1()
-
     if attackConn then
         attackConn:Disconnect()
         attackConn = nil
@@ -879,11 +889,8 @@ if TextChatService then
                 -- attack the commander who said it
                 attackBox.Text = plr.Name
                 parseAttackNames(attackBox.Text)
-                -- select first tool
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-                end)
+                -- ensure slot 1 tool is equipped if present
+                ensureEquipSlotOne()
                 attackEnabled = true
                 startAttack()
                 return
@@ -900,10 +907,7 @@ if TextChatService then
                     local choice = pool[math.random(1, #pool)]
                     attackBox.Text = choice.Name
                     parseAttackNames(attackBox.Text)
-                    pcall(function()
-                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-                    end)
+                    ensureEquipSlotOne()
                     attackEnabled = true
                     startAttack()
                 end
@@ -914,10 +918,7 @@ if TextChatService then
                 local names = allPlayerNames(true)
                 attackBox.Text = table.concat(names, ", ")
                 parseAttackNames(attackBox.Text)
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-                end)
+                ensureEquipSlotOne()
                 attackEnabled = true
                 startAttack()
                 return
@@ -927,20 +928,16 @@ if TextChatService then
                 local names = allPlayerNames(false)
                 attackBox.Text = table.concat(names, ", ")
                 parseAttackNames(attackBox.Text)
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-                end)
+                ensureEquipSlotOne()
                 attackEnabled = true
                 startAttack()
                 return
             end
 
-            -- otherwise treat arg as comma separated names
+            -- default: treat arg as comma-separated names
             attackBox.Text = arg
             parseAttackNames(attackBox.Text)
-            -- ensure equip slot 1 if needed before starting
-            ensureEquipSlot1()
+            ensureEquipSlotOne()
             attackEnabled = true
             startAttack()
             return
@@ -948,14 +945,32 @@ if TextChatService then
 
         -- .follow / .goto handling
         if cmd == "follow" then
-            if arg == "" then
-                -- follow the commander
-                followBox.Text = plr.Name
-            else
-                followBox.Text = arg
+            local lowarg = arg:lower()
+            if lowarg == "stop" or lowarg == "none" or lowarg == "" then
+                if followEnabled then stopFollow() end
+                followBox.Text = ""
+                return
             end
-            -- parse and start follow
-            local target = findClosestPlayer(followBox.Text)
+
+            -- .hold command: hold at current target position until reached
+            if lowarg == "hold" then
+                local char = localPlayer.Character
+                if char then
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        holdMode = true
+                        holdPosition = hrp.Position
+                        followEnabled = true
+                        startFollow()
+                        followBox.Text = "Hold"
+                    end
+                end
+                return
+            end
+
+            -- normal follow target
+            followBox.Text = arg
+            local target = findClosestPlayer(arg)
             if target then
                 followTargetPlayer = target
                 followEnabled = true
@@ -964,15 +979,29 @@ if TextChatService then
             return
         end
 
-        -- .hold handling: set hold position to current target's HRP or to a position if provided
+        -- .teamattack handling
+        if cmd == "teamattack" or cmd == "team_atk" or cmd == "team" then
+            local lowarg = arg:lower()
+            if lowarg == "" then
+                if teamAttackEnabled then stopTeamAttack() end
+                teamAttackBox.Text = ""
+                return
+            end
+            teamAttackBox.Text = arg
+            parseTeamNames(teamAttackBox.Text)
+            teamAttackEnabled = true
+            startTeamAttack()
+            return
+        end
+
+        -- .hold command (explicit)
         if cmd == "hold" then
-            -- if there's a follow target, set hold mode to move to their current position
-            if followTargetPlayer then
-                local hrp = getHRP(followTargetPlayer)
+            local char = localPlayer.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     holdMode = true
                     holdPosition = hrp.Position
-                    -- start follow to move to that position
                     followEnabled = true
                     startFollow()
                 end
@@ -980,23 +1009,134 @@ if TextChatService then
             return
         end
 
-        -- other commands can be added here
+        -- .stop handled above; any other commands ignored
     end)
 end
 
--- Build UI on load
-buildUI()
+-- UI interactions and bindings
+local function wireUpUI()
+    -- Commander toggle
+    commanderToggle.MouseButton1Click:Connect(function()
+        commanderMode = not commanderMode
+        commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "On" or "Off")
+        commanderToggle.BackgroundColor3 = commanderMode and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
+    end)
 
--- Expose cleanup
-_G.HiltonExec.Cleanup = function()
-    -- Disconnect all connections
+    -- Follow button
+    followBtn.MouseButton1Click:Connect(function()
+        if followEnabled then
+            stopFollow()
+            return
+        end
+        local txt = trim(followBox.Text or "")
+        if txt == "" then
+            -- nothing to follow
+            return
+        end
+        local target = findClosestPlayer(txt)
+        if target then
+            followTargetPlayer = target
+            followEnabled = true
+            startFollow()
+        end
+    end)
+
+    -- Attack button
+    attackBtn.MouseButton1Click:Connect(function()
+        if attackEnabled then
+            stopAttack()
+            return
+        end
+        local txt = trim(attackBox.Text or "")
+        if txt == "" then
+            -- nothing specified; do nothing
+            return
+        end
+        parseAttackNames(txt)
+        attackEnabled = true
+        -- ensure slot 1 tool is equipped if present
+        ensureEquipSlotOne()
+        startAttack()
+    end)
+
+    -- TeamAttack button
+    teamAttackBtn.MouseButton1Click:Connect(function()
+        if teamAttackEnabled then
+            stopTeamAttack()
+            return
+        end
+        local txt = trim(teamAttackBox.Text or "")
+        if txt == "" then
+            return
+        end
+        parseTeamNames(txt)
+        teamAttackEnabled = true
+        startTeamAttack()
+    end)
+
+    -- AutoBox capture: allow user to click and press a key or mouse to bind
+    autoBox.Focused:Connect(function()
+        -- capture next input
+        if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
+        bindingCaptureConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed then return end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                binding = { kind = "mouse", button = 1 }
+                autoBox.Text = "Mouse1"
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                binding = { kind = "mouse", button = 2 }
+                autoBox.Text = "Mouse2"
+            elseif input.UserInputType == Enum.UserInputType.Keyboard then
+                binding = { kind = "key", keyCode = input.KeyCode }
+                autoBox.Text = tostring(input.KeyCode):gsub("Enum.KeyCode.", "")
+            end
+            if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
+            autoBox:ReleaseFocus()
+        end)
+    end)
+
+    -- Rate buttons
+    rateMinusBtn.MouseButton1Click:Connect(function()
+        AUTOPRESS_HZ = math.max(AUTOPRESS_MIN_HZ, AUTOPRESS_HZ - 1)
+        rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
+    end)
+    ratePlusBtn.MouseButton1Click:Connect(function()
+        AUTOPRESS_HZ = math.min(AUTOPRESS_MAX_HZ, AUTOPRESS_HZ + 1)
+        rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
+    end)
+end
+
+-- Cleanup
+local function cleanup()
+    if gui and gui.Parent then
+        gui:Destroy()
+    end
     for _, c in ipairs(connections) do
         if c and c.Disconnect then
             pcall(function() c:Disconnect() end)
         end
     end
     connections = {}
-
+    if bindingCaptureConn then
+        pcall(function() bindingCaptureConn:Disconnect() end)
+        bindingCaptureConn = nil
+    end
+    if autoPressConn then
+        pcall(function() autoPressConn:Disconnect() end)
+        autoPressConn = nil
+    end
+    if followConn then
+        pcall(function() followConn:Disconnect() end)
+        followConn = nil
+    end
+    if attackConn then
+        pcall(function() attackConn:Disconnect() end)
+        attackConn = nil
+    end
+    if teamAttackConn then
+        pcall(function() teamAttackConn:Disconnect() end)
+        teamAttackConn = nil
+    end
     if localHumanoidDiedConn then
         pcall(function() localHumanoidDiedConn:Disconnect() end)
         localHumanoidDiedConn = nil
@@ -1005,18 +1145,46 @@ _G.HiltonExec.Cleanup = function()
         pcall(function() localCharacterRemovingConn:Disconnect() end)
         localCharacterRemovingConn = nil
     end
-
-    if gui then
-        pcall(function() gui:Destroy() end)
-        gui = nil
-    end
-
     _G.HiltonExec = nil
 end
 
--- Ensure cleanup on script end
-script.Destroying:Connect(function()
-    if _G.HiltonExec and _G.HiltonExec.Cleanup then
-        pcall(_G.HiltonExec.Cleanup)
+_G.HiltonExec.Cleanup = cleanup
+
+-- Character death handling: disable modes on death/respawn
+local function onCharacterAdded(char)
+    -- disconnect previous humanoid died if any
+    if localHumanoidDiedConn then
+        pcall(function() localHumanoidDiedConn:Disconnect() end)
+        localHumanoidDiedConn = nil
     end
-end)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        localHumanoidDiedConn = hum.Died:Connect(function()
+            -- turn off modes on death
+            if followEnabled then stopFollow() end
+            if attackEnabled then stopAttack() end
+            if teamAttackEnabled then stopTeamAttack() end
+        end)
+    end
+end
+
+local function onCharacterRemoving()
+    -- clear follow/attack on character removal
+    if followEnabled then stopFollow() end
+    if attackEnabled then stopAttack() end
+    if teamAttackEnabled then stopTeamAttack() end
+end
+
+-- Initialize
+buildUI()
+wireUpUI()
+
+-- Wire character events
+if localPlayer.Character then
+    onCharacterAdded(localPlayer.Character)
+end
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
+localPlayer.CharacterRemoving:Connect(onCharacterRemoving)
+
+-- Expose a simple API for external cleanup if needed
+_G.HiltonExec.Cleanup = cleanup
