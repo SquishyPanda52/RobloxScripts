@@ -88,8 +88,8 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 260)
-frame.Position = UDim2.new(0.5, -175, 0.5, -130)
+frame.Size = UDim2.new(0, 350, 0, 320) -- increased height for layout
+frame.Position = UDim2.new(0.5, -175, 0.5, -160)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.ZIndex = 999999
@@ -127,7 +127,7 @@ Instance.new("UICorner", deleteButton).CornerRadius = UDim.new(0, 6)
 
 local toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0, 120, 0, 35)
-toggleButton.Position = UDim2.new(0.5, -60, 0, 45)
+toggleButton.Position = UDim2.new(1, -140, 0, 45) -- moved to the right to avoid overlap
 toggleButton.Text = "OFF"
 toggleButton.ZIndex = 999999
 toggleButton.Parent = frame
@@ -141,15 +141,15 @@ local playerConnections = {} -- store chat connections per player
 
 local cmdButton = Instance.new("TextButton")
 cmdButton.Size = UDim2.new(0, 60, 0, 30)
-cmdButton.Position = UDim2.new(0.5, -140, 0, 50) -- placed to the left of the main toggle
+cmdButton.Position = UDim2.new(0, 10, 0, 45) -- placed to the left for clear layout
 cmdButton.Text = "Cmd: OFF"
 cmdButton.ZIndex = 999999
 cmdButton.Parent = frame
 Instance.new("UICorner", cmdButton).CornerRadius = UDim.new(0, 6)
 
 local cmdBox = Instance.new("TextBox")
-cmdBox.Size = UDim2.new(0, 150, 0, 30)
-cmdBox.Position = UDim2.new(0.5, -70, 0, 50) -- next to the Cmd button
+cmdBox.Size = UDim2.new(0, 170, 0, 30)
+cmdBox.Position = UDim2.new(0, 80, 0, 45) -- next to the Cmd button with more space
 cmdBox.PlaceholderText = "Commanders (comma separated)"
 cmdBox.Text = ""
 cmdBox.ClearTextOnFocus = false
@@ -162,8 +162,8 @@ Instance.new("UICorner", cmdBox).CornerRadius = UDim.new(0, 6)
 ---------------------------------------------------------------------
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -20, 1, -100)
-scroll.Position = UDim2.new(0, 10, 0, 80)
+scroll.Size = UDim2.new(1, -20, 1, -130) -- adjusted to account for larger top area
+scroll.Position = UDim2.new(0, 10, 0, 90) -- moved down to make room for cmd UI
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.ScrollBarThickness = 6
 scroll.BackgroundTransparency = 1
