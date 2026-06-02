@@ -10,6 +10,11 @@
   - Commander command listener (TextChatService) with UI textbox and toggle.
   - Commands: .atk/.attack, .follow/.goto, .hold, .stop, .atk random, .atk others, .atk all/everyone
   - Fixes: newest commander command HARD overrides previous commands; normalized parsing to avoid stray characters.
+  - Updates:
+    * Only press "1" to equip slot-1 tool when a tool exists in slot 1 and is not already equipped.
+    * Commander handling: newest commander command hard-overrides previous commands.
+    * .follow me and .goto me paste the commander's username into the follow textbox and follow that player.
+    * When following a fragment, the follow textbox is filled with the matched player's full username.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -66,6 +71,7 @@ local holdPosition = nil
 -- Commander mode
 local commanderMode = false
 local lastCommanderUserId = nil -- track most recent commander who issued a command
+local lastCommanderPlayer = nil -- store Player object for "me" resolution
 
 -- Auto-press binding
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
@@ -153,13 +159,9 @@ local function stopMovementImmediate()
     end
 end
 
--- === NEW: Slot-1 equip helpers ===
--- These helpers are the only additions. The rest of the original script is kept intact.
--- They ensure the script only presses "1" when a slot-1 tool exists and is not already equipped.
-
+-- === Slot-1 equip helpers (only additions) ===
 -- Heuristic: treat the first Tool in Backpack as hotbar slot 1.
 local function getSlotOneTool()
-    -- Prefer Backpack order: first Tool child is treated as slot 1
     local bp = localPlayer:FindFirstChild("Backpack")
     if bp then
         for _, v in ipairs(bp:GetChildren()) do
@@ -168,8 +170,7 @@ local function getSlotOneTool()
             end
         end
     end
-
-    -- Fallback: if nothing in Backpack, check if a tool is currently equipped (character)
+    -- Fallback: check character for equipped tool
     local char = localPlayer.Character
     if char then
         for _, v in ipairs(char:GetChildren()) do
@@ -178,37 +179,29 @@ local function getSlotOneTool()
             end
         end
     end
-
     return nil
 end
 
--- Returns true if the slot-1 tool is currently parented to the character (equipped)
 local function isSlotOneEquipped()
     local slotTool = getSlotOneTool()
     if not slotTool then return false end
     return slotTool.Parent == (localPlayer.Character or nil)
 end
 
--- Ensure slot-1 tool is equipped: only press "1" if there is a slot-1 tool and it is not already equipped.
 local function ensureEquipSlotOne()
     local slotTool = getSlotOneTool()
     if not slotTool then
-        -- nothing in slot 1; do not press the key
         return
     end
-
-    -- If already equipped, do nothing (prevents unequip toggle)
     if isSlotOneEquipped() then
         return
     end
-
-    -- Otherwise, press the 1 key to equip it
     pcall(function()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
     end)
 end
--- === END new helpers ===
+-- === end slot-1 helpers ===
 
 -- Ensure commands from any listed commander are accepted
 local function isCommander(name)
@@ -834,6 +827,7 @@ end
 local function setLastCommander(plr)
     if plr and plr.UserId then
         lastCommanderUserId = plr.UserId
+        lastCommanderPlayer = plr
     end
 end
 
@@ -855,7 +849,7 @@ if TextChatService then
         -- Only accept commands from players listed in commanderBox
         if not isCommander(plr.Name) then return end
 
-        -- newest commander overrides everything
+        -- newest commander overrides everything: record and hard-override
         setLastCommander(plr)
         hardOverridePreviousCommands()
 
@@ -888,13 +882,11 @@ if TextChatService then
 
         -- .atk / .attack handling
         if cmd == "atk" then
-            -- handle special keywords
             local lowarg = arg:lower()
             if lowarg == "" or lowarg == "me" then
-                -- attack the commander who said it
+                -- attack the commander who said it (use full username)
                 attackBox.Text = plr.Name
                 parseAttackNames(attackBox.Text)
-                -- ensure slot 1 tool is equipped if present (NEW: uses helper)
                 ensureEquipSlotOne()
                 attackEnabled = true
                 startAttack()
@@ -939,7 +931,7 @@ if TextChatService then
                 return
             end
 
-            -- default: treat arg as comma-separated names
+            -- default: treat arg as comma-separated names (use fragments as provided)
             attackBox.Text = arg
             parseAttackNames(attackBox.Text)
             ensureEquipSlotOne()
@@ -957,7 +949,15 @@ if TextChatService then
                 return
             end
 
-            -- .hold command: hold at current target position until reached
+            if lowarg == "me" then
+                -- follow the commander who said it; paste full username
+                followBox.Text = plr.Name
+                followTargetPlayer = plr
+                followEnabled = true
+                startFollow()
+                return
+            end
+
             if lowarg == "hold" then
                 local char = localPlayer.Character
                 if char then
@@ -973,13 +973,16 @@ if TextChatService then
                 return
             end
 
-            -- normal follow target
-            followBox.Text = arg
+            -- normal follow target: resolve fragment to full username if possible
             local target = findClosestPlayer(arg)
             if target then
+                followBox.Text = target.Name
                 followTargetPlayer = target
                 followEnabled = true
                 startFollow()
+            else
+                -- if no player found, still paste the fragment (keeps original behavior)
+                followBox.Text = arg
             end
             return
         end
@@ -1014,7 +1017,7 @@ if TextChatService then
             return
         end
 
-        -- .stop handled above; any other commands ignored
+        -- other commands ignored
     end)
 end
 
@@ -1040,9 +1043,13 @@ local function wireUpUI()
         end
         local target = findClosestPlayer(txt)
         if target then
+            followBox.Text = target.Name
             followTargetPlayer = target
             followEnabled = true
             startFollow()
+        else
+            -- if no player found, still set followTargetPlayer nil and do nothing
+            followBox.Text = txt
         end
     end)
 
@@ -1059,7 +1066,7 @@ local function wireUpUI()
         end
         parseAttackNames(txt)
         attackEnabled = true
-        -- ensure slot 1 tool is equipped if present (NEW: uses helper)
+        -- ensure slot 1 tool is equipped if present
         ensureEquipSlotOne()
         startAttack()
     end)
