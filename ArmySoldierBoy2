@@ -15,6 +15,7 @@
     * .follow me and .goto me paste the commander's username into the follow textbox and follow that player.
     * When following a fragment, the follow textbox is filled with the matched player's full username.
     * Robust override: each commander command increments a session token so any older running routines immediately stop, preventing jitter between overlapping commands.
+    * Additional safety: after hard-override, the handler briefly yields and re-checks the session token so only the most recent command proceeds — this guarantees older, near-simultaneous messages cannot continue and cause jitter.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -907,9 +908,21 @@ if TextChatService then
         -- Only accept commands from players listed in commanderBox
         if not isCommander(plr.Name) then return end
 
-        -- newest commander overrides everything: record, increment session, and hard-override
+        -- newest commander overrides everything: record, hard-override
         setLastCommander(plr)
         hardOverridePreviousCommands()
+
+        -- IMPORTANT: yield briefly and re-check session token so that if another command
+        -- arrived immediately after this one, this handler will abort and not proceed.
+        -- This prevents near-simultaneous commands from different commanders from both
+        -- executing and causing jitter.
+        local mySession = commandSession
+        -- small yield to allow disconnects to take effect; tiny value to minimize latency
+        task.wait(0.02)
+        if mySession ~= commandSession then
+            -- a newer command arrived; abort processing this message
+            return
+        end
 
         local text = tostring(msg.Text or "")
         local lower = text:lower()
