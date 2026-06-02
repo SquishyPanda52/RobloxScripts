@@ -162,7 +162,7 @@ Instance.new("UICorner", cmdBox).CornerRadius = UDim.new(0, 6)
 ---------------------------------------------------------------------
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -20, 0, 220) -- fixed height to leave space for notes at bottom
+scroll.Size = UDim2.new(1, -20, 0, 220) -- fixed height to leave space for notes at bottom of frame
 scroll.Position = UDim2.new(0, 10, 0, 90) -- moved down to make room for cmd UI
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.ScrollBarThickness = 6
@@ -209,6 +209,18 @@ end)
 ---------------------------------------------------------------------
 
 local rows = {}
+local ROW_HEIGHT = 40
+local ROW_PADDING_BOTTOM = 10
+local NOTES_HEIGHT = 80
+local NOTES_PADDING = 10
+
+local function recalcCanvasSize()
+    local totalRows = #rows
+    local contentHeight = totalRows * ROW_HEIGHT
+    -- include notes area at bottom
+    local canvasTotal = contentHeight + NOTES_HEIGHT + NOTES_PADDING * 2
+    scroll.CanvasSize = UDim2.new(0, 0, 0, canvasTotal)
+end
 
 local function startLoop(row)
     if row.loop then
@@ -248,7 +260,7 @@ local function startLoop(row)
 end
 
 local function createRow(i)
-    local y = (i - 1) * 40
+    local y = (i - 1) * ROW_HEIGHT
 
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 60, 0, 30)
@@ -297,12 +309,42 @@ local function createRow(i)
     cooldownBox.FocusLost:Connect(update)
     delayBox.FocusLost:Connect(update)
 
-    scroll.CanvasSize = UDim2.new(0, 0, 0, y + 50)
+    recalcCanvasSize()
 end
 
 for i = 1, 7 do
     createRow(i)
 end
+
+---------------------------------------------------------------------
+-- NOTES AT BOTTOM OF SCROLLING FRAME (after rows)
+---------------------------------------------------------------------
+
+local function createNotes()
+    -- Determine Y position based on number of rows
+    local totalRows = #rows
+    local y = totalRows * ROW_HEIGHT + NOTES_PADDING
+
+    local notes = Instance.new("TextLabel")
+    notes.Size = UDim2.new(1, -20, 0, NOTES_HEIGHT)
+    notes.Position = UDim2.new(0, 10, 0, y)
+    notes.BackgroundTransparency = 1
+    notes.TextColor3 = Color3.fromRGB(220, 220, 220)
+    notes.TextSize = 14
+    notes.Font = Enum.Font.Gotham
+    notes.TextWrapped = true
+    notes.TextScaled = true
+    notes.TextXAlignment = Enum.TextXAlignment.Left
+    notes.TextYAlignment = Enum.TextYAlignment.Top
+    notes.ZIndex = 999999
+    notes.Parent = scroll
+    notes.Text = "Box 1: Key to press (e.g., 1, a, space, shift).\nBox 2: Number of clicks per cycle.\nBox 3: Cooldown seconds after clicks complete.\nBox 4: Additional delay seconds after cooldown before the next cycle starts.\nExample: Key=1, Clicks=3, Cooldown=5, Delay=3 -> press 1 three times, wait 5s, wait 3s, then repeat."
+
+    -- Ensure canvas size includes notes
+    recalcCanvasSize()
+end
+
+createNotes()
 
 ---------------------------------------------------------------------
 -- TOGGLE
@@ -432,25 +474,6 @@ cmdBox.FocusLost:Connect(function()
 end)
 
 updateCmdButton()
-
----------------------------------------------------------------------
--- NOTES AT BOTTOM
----------------------------------------------------------------------
-
-local notes = Instance.new("TextLabel")
-notes.Size = UDim2.new(1, -20, 0, 80)
-notes.Position = UDim2.new(0, 10, 1, -90) -- sits above bottom edge with padding
-notes.BackgroundTransparency = 1
-notes.TextColor3 = Color3.fromRGB(220, 220, 220)
-notes.TextSize = 14
-notes.Font = Enum.Font.Gotham
-notes.TextWrapped = true
-notes.TextScaled = true
-notes.TextXAlignment = Enum.TextXAlignment.Left
-notes.TextYAlignment = Enum.TextYAlignment.Top
-notes.ZIndex = 999999
-notes.Parent = frame
-notes.Text = "Box 1: Key to press (e.g., 1, a, space, shift).  Box 2: Number of clicks per cycle.  Box 3: Cooldown seconds after clicks complete.  Box 4: Additional delay seconds after cooldown before the next cycle starts.  Example: Key=1, Clicks=3, Cooldown=5, Delay=3 -> press 1 three times, wait 5s, wait 3s, then repeat."
 
 ---------------------------------------------------------------------
 -- DELETE
