@@ -88,7 +88,7 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 320) -- increased height for layout
+frame.Size = UDim2.new(0, 350, 0, 320)
 frame.Position = UDim2.new(0.5, -175, 0.5, -160)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
@@ -108,7 +108,6 @@ title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.ZIndex = 999999
 title.Parent = frame
-title.Active = true
 
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Size = UDim2.new(0, 25, 0, 25)
@@ -128,21 +127,20 @@ Instance.new("UICorner", deleteButton).CornerRadius = UDim.new(0, 6)
 
 local toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0, 120, 0, 35)
-toggleButton.Position = UDim2.new(1, -140, 0, 45) -- moved to the right to avoid overlap
+toggleButton.Position = UDim2.new(1, -140, 0, 45)
 toggleButton.Text = "OFF"
 toggleButton.ZIndex = 999999
 toggleButton.Parent = frame
 Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
 
--- New: Cmd toggle button and commanders textbox
 local cmdEnabled = false
-local commandersText = "" -- raw text from textbox
-local commanders = {} -- parsed list of commander substrings
-local playerConnections = {} -- store chat connections per player
+local commandersText = ""
+local commanders = {}
+local playerConnections = {}
 
 local cmdButton = Instance.new("TextButton")
 cmdButton.Size = UDim2.new(0, 60, 0, 30)
-cmdButton.Position = UDim2.new(0, 10, 0, 45) -- placed to the left for clear layout
+cmdButton.Position = UDim2.new(0, 10, 0, 45)
 cmdButton.Text = "Cmd: OFF"
 cmdButton.ZIndex = 999999
 cmdButton.Parent = frame
@@ -150,7 +148,7 @@ Instance.new("UICorner", cmdButton).CornerRadius = UDim.new(0, 6)
 
 local cmdBox = Instance.new("TextBox")
 cmdBox.Size = UDim2.new(0, 170, 0, 30)
-cmdBox.Position = UDim2.new(0, 80, 0, 45) -- next to the Cmd button with more space
+cmdBox.Position = UDim2.new(0, 80, 0, 45)
 cmdBox.PlaceholderText = "Commanders (comma separated)"
 cmdBox.Text = ""
 cmdBox.ClearTextOnFocus = false
@@ -163,8 +161,8 @@ Instance.new("UICorner", cmdBox).CornerRadius = UDim.new(0, 6)
 ---------------------------------------------------------------------
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -20, 1, -130) -- adjusted to account for larger top area
-scroll.Position = UDim2.new(0, 10, 0, 90) -- moved down to make room for cmd UI
+scroll.Size = UDim2.new(1, -20, 1, -130)
+scroll.Position = UDim2.new(0, 10, 0, 90)
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.ScrollBarThickness = 6
 scroll.BackgroundTransparency = 1
@@ -172,44 +170,49 @@ scroll.ZIndex = 999999
 scroll.Parent = frame
 
 ---------------------------------------------------------------------
--- DRAG (top bar drag handle - works for mouse and touch)
+-- DRAG (FIXED MOBILE + PC)
 ---------------------------------------------------------------------
 
 local dragging = false
-local dragStart = Vector2.new(0, 0)
-local startPos = frame.Position
-local activeInput = nil
+local dragInput
+local dragStart
+local startPos
 
--- Start drag when interacting with the title bar (top area)
-title.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+    frame.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
         dragging = true
-        activeInput = input
         dragStart = input.Position
         startPos = frame.Position
+        dragInput = input
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+                dragInput = nil
+            end
+        end)
     end
 end)
 
--- Update position while moving (mouse movement or touch)
 UserInputService.InputChanged:Connect(function(input)
     if not dragging then return end
-    if input ~= activeInput then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-end)
 
--- End drag on input end
-UserInputService.InputEnded:Connect(function(input)
-    if input == activeInput then
-        dragging = false
-        activeInput = nil
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        updateDrag(input)
     end
 end)
 
@@ -348,14 +351,12 @@ local function onPlayerChatted(p, message)
     local msg = tostring(message)
     local msgLower = string.lower(msg):gsub("^%s+", "")
 
-    -- Attack commands -> toggle on
     if msgLower:match("^%.atk") or msgLower:match("^%.attack") then
         enabled = true
         updateToggle()
         return
     end
 
-    -- Stop/follow/goto/hold -> toggle off
     if msgLower:match("^%.stop") or msgLower:match("^%.follow") or msgLower:match("^%.goto") or msgLower:match("^%.hold") then
         enabled = false
         updateToggle()
@@ -379,12 +380,10 @@ local function disconnectPlayerChat(p)
     end
 end
 
--- Connect existing players
 for _, p in ipairs(Players:GetPlayers()) do
     connectPlayerChat(p)
 end
 
--- Connect future players
 Players.PlayerAdded:Connect(function(p)
     connectPlayerChat(p)
 end)
@@ -393,7 +392,6 @@ Players.PlayerRemoving:Connect(function(p)
     disconnectPlayerChat(p)
 end)
 
--- Cmd button toggle
 local function updateCmdButton()
     cmdButton.Text = cmdEnabled and "Cmd: ON" or "Cmd: OFF"
 end
@@ -403,13 +401,11 @@ cmdButton.MouseButton1Click:Connect(function()
     updateCmdButton()
 end)
 
--- Update commanders list when textbox loses focus
-cmdBox.FocusLost:Connect(function(enterPressed)
+cmdBox.FocusLost:Connect(function()
     commandersText = cmdBox.Text or ""
     commanders = parseCommanders(commandersText)
 end)
 
--- Also parse immediately if user types and presses Enter
 cmdBox.FocusLost:Connect(function()
     commandersText = cmdBox.Text or ""
     commanders = parseCommanders(commandersText)
@@ -432,7 +428,6 @@ deleteButton.MouseButton1Click:Connect(function()
         end
     end
 
-    -- Disconnect chat connections
     for p, conn in pairs(playerConnections) do
         if conn then
             conn:Disconnect()
