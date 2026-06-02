@@ -16,6 +16,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AutoStartClickUI"
 ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global -- << ALWAYS ON TOP
 ScreenGui.Parent = PlayerGui
 
 local MainFrame = Instance.new("Frame")
@@ -73,58 +74,66 @@ MarkerCorner.CornerRadius = UDim.new(1, 0)
 MarkerCorner.Parent = ClickMarker
 
 ---------------------------------------------------------------------
+-- FORCE MAX ZINDEX FOR ALL UI
+---------------------------------------------------------------------
+
+for _, ui in ipairs({MainFrame, Title, Minimize, TextBox, Toggle, ClickMarker}) do
+    ui.ZIndex = 999999
+end
+
+---------------------------------------------------------------------
 -- DRAGGING SUPPORT
 ---------------------------------------------------------------------
 
 local function makeDraggable(gui)
-	local dragging = false
-	local dragStart
-	local startPos
+    local dragging = false
+    local dragStart
+    local startPos
 
-	local function update(input)
-		local delta = input.Position - dragStart
-		gui.Position = UDim2.new(
-			startPos.X.Scale,
-			startPos.X.Offset + delta.X,
-			startPos.Y.Scale,
-			startPos.Y.Offset + delta.Y
-		)
-	end
+    local function update(input)
+        local delta = input.Position - dragStart
+        gui.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
 
-	gui.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
+    gui.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
 
-			dragging = true
-			dragStart = input.Position
-			startPos = gui.Position
+            dragging = true
+            dragStart = input.Position
+            startPos = gui.Position
 
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
-			end)
-		end
-	end)
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
 
-	gui.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch then
+    gui.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
 
-			if dragging then
-				update(input)
-			end
-		end
-	end)
+            if dragging then
+                update(input)
+            end
+        end
+    end)
 
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging then
-			if input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch then
-				update(input)
-			end
-		end
-	end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging then
+            if input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch then
+                update(input)
+            end
+        end
+    end)
 end
 
 makeDraggable(MainFrame)
@@ -137,17 +146,17 @@ makeDraggable(ClickMarker)
 local minimized = false
 
 Minimize.MouseButton1Click:Connect(function()
-	minimized = not minimized
+    minimized = not minimized
 
-	if minimized then
-		TextBox.Visible = false
-		Toggle.Visible = false
-		MainFrame.Size = UDim2.new(0, 260, 0, 25)
-	else
-		TextBox.Visible = true
-		Toggle.Visible = true
-		MainFrame.Size = UDim2.new(0, 260, 0, 95)
-	end
+    if minimized then
+        TextBox.Visible = false
+        Toggle.Visible = false
+        MainFrame.Size = UDim2.new(0, 260, 0, 25)
+    else
+        TextBox.Visible = true
+        Toggle.Visible = true
+        MainFrame.Size = UDim2.new(0, 260, 0, 95)
+    end
 end)
 
 ---------------------------------------------------------------------
@@ -157,12 +166,12 @@ end)
 local ListenerEnabled = false
 
 local function updateToggle()
-	Toggle.Text = ListenerEnabled and "ON" or "OFF"
+    Toggle.Text = ListenerEnabled and "ON" or "OFF"
 end
 
 Toggle.MouseButton1Click:Connect(function()
-	ListenerEnabled = not ListenerEnabled
-	updateToggle()
+    ListenerEnabled = not ListenerEnabled
+    updateToggle()
 end)
 
 updateToggle()
@@ -172,25 +181,25 @@ updateToggle()
 ---------------------------------------------------------------------
 
 local function isCommander(playerName)
-	local entered = string.lower(TextBox.Text)
+    local entered = string.lower(TextBox.Text)
 
-	if entered == "" then
-		return false
-	end
+    if entered == "" then
+        return false
+    end
 
-	local targetName = string.lower(playerName)
+    local targetName = string.lower(playerName)
 
-	for entry in string.gmatch(entered, "[^,]+") do
-		entry = string.lower(entry:gsub("^%s+", ""):gsub("%s+$", ""))
+    for entry in string.gmatch(entered, "[^,]+") do
+        entry = string.lower(entry:gsub("^%s+", ""):gsub("%s+$", ""))
 
-		if entry ~= "" then
-			if string.find(targetName, entry, 1, true) then
-				return true
-			end
-		end
-	end
+        if entry ~= "" then
+            if string.find(targetName, entry, 1, true) then
+                return true
+            end
+        end
+    end
 
-	return false
+    return false
 end
 
 ---------------------------------------------------------------------
@@ -198,49 +207,49 @@ end
 ---------------------------------------------------------------------
 
 local function performClick()
-	local absPos = ClickMarker.AbsolutePosition
-	local absSize = ClickMarker.AbsoluteSize
+    local absPos = ClickMarker.AbsolutePosition
+    local absSize = ClickMarker.AbsoluteSize
 
-	local x = absPos.X + (absSize.X / 2)
-	local y = absPos.Y + (absSize.Y / 2)
+    local x = absPos.X + (absSize.X / 2)
+    local y = absPos.Y + (absSize.Y / 2)
 
-	-- Mouse click
-	pcall(function()
-		VirtualInputManager:SendMouseButtonEvent(
-			x,
-			y,
-			0,
-			true,
-			game,
-			0
-		)
+    -- Mouse click
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(
+            x,
+            y,
+            0,
+            true,
+            game,
+            0
+        )
 
-		VirtualInputManager:SendMouseButtonEvent(
-			x,
-			y,
-			0,
-			false,
-			game,
-			0
-		)
-	end)
+        VirtualInputManager:SendMouseButtonEvent(
+            x,
+            y,
+            0,
+            false,
+            game,
+            0
+        )
+    end)
 
-	-- Touch tap (helps mobile compatibility)
-	pcall(function()
-		VirtualInputManager:SendTouchEvent(
-			x,
-			y,
-			Enum.UserInputState.Begin,
-			game
-		)
+    -- Touch tap (mobile)
+    pcall(function()
+        VirtualInputManager:SendTouchEvent(
+            x,
+            y,
+            Enum.UserInputState.Begin,
+            game
+        )
 
-		VirtualInputManager:SendTouchEvent(
-			x,
-			y,
-			Enum.UserInputState.End,
-			game
-		)
-	end)
+        VirtualInputManager:SendTouchEvent(
+            x,
+            y,
+            Enum.UserInputState.End,
+            game
+        )
+    end)
 end
 
 ---------------------------------------------------------------------
@@ -248,38 +257,38 @@ end
 ---------------------------------------------------------------------
 
 local function processMessage(textSource, messageText)
-	if not ListenerEnabled then
-		return
-	end
+    if not ListenerEnabled then
+        return
+    end
 
-	if not textSource then
-		return
-	end
+    if not textSource then
+        return
+    end
 
-	local userId = textSource.UserId
-	if not userId then
-		return
-	end
+    local userId = textSource.UserId
+    if not userId then
+        return
+    end
 
-	local speaker = Players:GetPlayerByUserId(userId)
-	if not speaker then
-		return
-	end
+    local speaker = Players:GetPlayerByUserId(userId)
+    if not speaker then
+        return
+    end
 
-	if not isCommander(speaker.Name) then
-		return
-	end
+    if not isCommander(speaker.Name) then
+        return
+    end
 
-	if string.lower(messageText) == ".start" then
-		performClick()
-	end
+    if string.lower(messageText) == ".start" then
+        performClick()
+    end
 end
 
 TextChatService.MessageReceived:Connect(function(message)
-	processMessage(
-		message.TextSource,
-		message.Text
-	)
+    processMessage(
+        message.TextSource,
+        message.Text
+    )
 end)
 
 print("Auto Start Click loaded.")
