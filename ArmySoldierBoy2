@@ -1,9 +1,15 @@
 --[[
-  HiltonExecutor LocalScript (updated)
-  - Fix: only press "1" to equip slot-1 tool when a tool exists in slot 1 and is not already equipped.
-  - Added helpers: getSlotOneTool, isSlotOneEquipped, ensureEquipSlotOne
-  - Replaced direct Enum.KeyCode.One SendKeyEvent calls with ensureEquipSlotOne()
-  - Preserves original behavior otherwise
+  Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
+  - Follow and Attack are mutually exclusive.
+  - Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
+  - Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
+  - Draggable, compact UI with minimize and hard close.
+  - Re-inject safe: re-running replaces previous instance cleanly.
+  - Team Attack mode (targets players by team name).
+  - Behavior: All attack modes and follow are toggled off on death/respawn.
+  - Commander command listener (TextChatService) with UI textbox and toggle.
+  - Commands: .atk/.attack, .follow/.goto, .hold, .stop, .atk random, .atk others, .atk all/everyone
+  - Fixes: newest commander command HARD overrides previous commands; normalized parsing to avoid stray characters.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -147,25 +153,23 @@ local function stopMovementImmediate()
     end
 end
 
--- New helpers for slot-1 tool handling
+-- === NEW: Slot-1 equip helpers ===
+-- These helpers are the only additions. The rest of the original script is kept intact.
+-- They ensure the script only presses "1" when a slot-1 tool exists and is not already equipped.
 
--- Helper: return the Tool instance that represents the "1" hotbar slot, or nil
+-- Heuristic: treat the first Tool in Backpack as hotbar slot 1.
 local function getSlotOneTool()
-    -- Heuristic: treat the first Tool in Backpack as slot 1
+    -- Prefer Backpack order: first Tool child is treated as slot 1
     local bp = localPlayer:FindFirstChild("Backpack")
     if bp then
-        local tools = {}
         for _, v in ipairs(bp:GetChildren()) do
             if v:IsA("Tool") then
-                table.insert(tools, v)
+                return v
             end
-        end
-        if #tools > 0 then
-            return tools[1]
         end
     end
 
-    -- Fallback: if nothing in Backpack, check character for equipped tool
+    -- Fallback: if nothing in Backpack, check if a tool is currently equipped (character)
     local char = localPlayer.Character
     if char then
         for _, v in ipairs(char:GetChildren()) do
@@ -178,7 +182,7 @@ local function getSlotOneTool()
     return nil
 end
 
--- Helper: returns true if the slot-1 tool is currently parented to the character (i.e., equipped)
+-- Returns true if the slot-1 tool is currently parented to the character (equipped)
 local function isSlotOneEquipped()
     local slotTool = getSlotOneTool()
     if not slotTool then return false end
@@ -204,6 +208,7 @@ local function ensureEquipSlotOne()
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
     end)
 end
+-- === END new helpers ===
 
 -- Ensure commands from any listed commander are accepted
 local function isCommander(name)
@@ -889,7 +894,7 @@ if TextChatService then
                 -- attack the commander who said it
                 attackBox.Text = plr.Name
                 parseAttackNames(attackBox.Text)
-                -- ensure slot 1 tool is equipped if present
+                -- ensure slot 1 tool is equipped if present (NEW: uses helper)
                 ensureEquipSlotOne()
                 attackEnabled = true
                 startAttack()
@@ -1054,7 +1059,7 @@ local function wireUpUI()
         end
         parseAttackNames(txt)
         attackEnabled = true
-        -- ensure slot 1 tool is equipped if present
+        -- ensure slot 1 tool is equipped if present (NEW: uses helper)
         ensureEquipSlotOne()
         startAttack()
     end)
