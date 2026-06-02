@@ -1,290 +1,248 @@
 -- LocalScript
--- Place inside StarterPlayerScripts
+-- Place in StarterPlayerScripts or execute at runtime
 
 local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
-
--- Prevent duplicates
-if playerGui:FindFirstChild("AutoPress_UI") then
-    return
-end
-
-local enabled = false
-local destroyed = false
-
----------------------------------------------------------------------
--- KEY MAPS
----------------------------------------------------------------------
-
-local keyMap = {
-    ["shift"] = Enum.KeyCode.LeftShift,
-    ["lshift"] = Enum.KeyCode.LeftShift,
-    ["rshift"] = Enum.KeyCode.RightShift,
-
-    ["ctrl"] = Enum.KeyCode.LeftControl,
-    ["control"] = Enum.KeyCode.LeftControl,
-    ["lctrl"] = Enum.KeyCode.LeftControl,
-    ["rctrl"] = Enum.KeyCode.RightControl,
-
-    ["alt"] = Enum.KeyCode.LeftAlt,
-    ["lalt"] = Enum.KeyCode.LeftAlt,
-    ["ralt"] = Enum.KeyCode.RightAlt,
-
-    ["tab"] = Enum.KeyCode.Tab,
-    ["caps"] = Enum.KeyCode.CapsLock,
-
-    ["enter"] = Enum.KeyCode.Return,
-    ["return"] = Enum.KeyCode.Return,
-
-    ["backspace"] = Enum.KeyCode.Backspace,
-    ["delete"] = Enum.KeyCode.Delete,
-
-    ["space"] = Enum.KeyCode.Space,
-}
-
-local numberKeyMap = {
-    ["0"] = Enum.KeyCode.Zero,
-    ["1"] = Enum.KeyCode.One,
-    ["2"] = Enum.KeyCode.Two,
-    ["3"] = Enum.KeyCode.Three,
-    ["4"] = Enum.KeyCode.Four,
-    ["5"] = Enum.KeyCode.Five,
-    ["6"] = Enum.KeyCode.Six,
-    ["7"] = Enum.KeyCode.Seven,
-    ["8"] = Enum.KeyCode.Eight,
-    ["9"] = Enum.KeyCode.Nine,
-}
-
-local function resolveKey(text)
-    if not text or text == "" then return nil end
-    text = string.lower(text)
-
-    if keyMap[text] then return keyMap[text] end
-    if numberKeyMap[text] then return numberKeyMap[text] end
-
-    local upper = string.upper(text)
-    if Enum.KeyCode[upper] then
-        return Enum.KeyCode[upper]
-    end
-
-    return nil
-end
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 ---------------------------------------------------------------------
 -- UI
 ---------------------------------------------------------------------
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AutoPress_UI"
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.Parent = playerGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoStartClickUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 999999 -- ensures it renders above most ScreenGuis
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 260)
-frame.Position = UDim2.new(0.5, -175, 0.5, -130)
-frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 95)
+MainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = ScreenGui
+MainFrame.ZIndex = 1000
 
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+local UICorner = Instance.new("UICorner")
+UICorner.Parent = MainFrame
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -40, 0, 30)
-title.Position = UDim2.new(0, 10, 0, 5)
-title.BackgroundTransparency = 1
-title.Text = "Auto Press"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 20
-title.Font = Enum.Font.GothamBold
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = frame
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -55, 0, 25)
+Title.BackgroundTransparency = 1
+Title.Text = "Auto Start Click"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.Parent = MainFrame
+Title.ZIndex = 1001
 
-local minimizeButton = Instance.new("TextButton")
-minimizeButton.Size = UDim2.new(0, 25, 0, 25)
-minimizeButton.Position = UDim2.new(1, -60, 0, 5)
-minimizeButton.Text = "-"
-minimizeButton.Parent = frame
-Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 6)
+local Minimize = Instance.new("TextButton")
+Minimize.Size = UDim2.new(0, 25, 0, 25)
+Minimize.Position = UDim2.new(1, -30, 0, 0)
+Minimize.Text = "-"
+Minimize.Parent = MainFrame
+Minimize.ZIndex = 1002
 
-local deleteButton = Instance.new("TextButton")
-deleteButton.Size = UDim2.new(0, 25, 0, 25)
-deleteButton.Position = UDim2.new(1, -30, 0, 5)
-deleteButton.Text = "X"
-deleteButton.Parent = frame
-Instance.new("UICorner", deleteButton).CornerRadius = UDim.new(0, 6)
+local TextBox = Instance.new("TextBox")
+TextBox.Name = "Command Listener"
+TextBox.PlaceholderText = "Player1, Player2"
+TextBox.Text = ""
+TextBox.Size = UDim2.new(1, -70, 0, 30)
+TextBox.Position = UDim2.new(0, 5, 0, 35)
+TextBox.Parent = MainFrame
+TextBox.ZIndex = 1001
 
-local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.new(0, 120, 0, 35)
-toggleButton.Position = UDim2.new(0.5, -60, 0, 45)
-toggleButton.Text = "OFF"
-toggleButton.Parent = frame
-Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
-
----------------------------------------------------------------------
--- SCROLLING FRAME (ADDED)
----------------------------------------------------------------------
-
-local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -20, 1, -100)
-scroll.Position = UDim2.new(0, 10, 0, 80)
-scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-scroll.ScrollBarThickness = 6
-scroll.BackgroundTransparency = 1
-scroll.Parent = frame
+local Toggle = Instance.new("TextButton")
+Toggle.Size = UDim2.new(0, 55, 0, 30)
+Toggle.Position = UDim2.new(1, -60, 0, 35)
+Toggle.Text = "OFF"
+Toggle.Parent = MainFrame
+Toggle.ZIndex = 1001
 
 ---------------------------------------------------------------------
--- DRAG
+-- DRAGGABLE CLICK MARKER
 ---------------------------------------------------------------------
 
-local dragging = false
-local dragStart
-local startPos
+local ClickMarker = Instance.new("TextButton")
+ClickMarker.Size = UDim2.new(0, 40, 0, 40)
+ClickMarker.Position = UDim2.new(0.5, -20, 0.5, -20)
+ClickMarker.Text = ""
+ClickMarker.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
+ClickMarker.Parent = ScreenGui
+ClickMarker.ZIndex = 1000
 
-frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = frame.Position
-    end
-end)
-
-frame.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-end)
+local MarkerCorner = Instance.new("UICorner")
+MarkerCorner.CornerRadius = UDim.new(1, 0)
+MarkerCorner.Parent = ClickMarker
 
 ---------------------------------------------------------------------
--- ROWS
+-- DRAGGING SUPPORT
 ---------------------------------------------------------------------
 
-local rows = {}
+local function makeDraggable(gui)
+	local dragging = false
+	local dragStart
+	local startPos
 
-local function startLoop(row)
-    if row.loop then
-        row.loop:Disconnect()
-        row.loop = nil
-    end
+	local function update(input)
+		local delta = input.Position - dragStart
+		gui.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
 
-    local keyCode = resolveKey(row.key.Text)
-    local interval = tonumber(row.interval.Text)
-    local hold = tonumber(row.hold.Text)
+	gui.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
 
-    if not keyCode or not interval or not hold then return end
+			dragging = true
+			dragStart = input.Position
+			startPos = gui.Position
 
-    row.loop = RunService.Heartbeat:Connect(function()
-        if enabled and not destroyed then
-            task.spawn(function()
-                VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-                task.wait(hold)
-                VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-            end)
-            task.wait(interval)
-        end
-    end)
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	gui.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			if dragging then
+				update(input)
+			end
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging then
+			if input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch then
+				update(input)
+			end
+		end
+	end)
 end
 
-local function createRow(i)
-    local y = (i - 1) * 40
+makeDraggable(MainFrame)
+makeDraggable(ClickMarker)
 
-    local keyBox = Instance.new("TextBox")
-    keyBox.Size = UDim2.new(0, 60, 0, 30)
-    keyBox.Position = UDim2.new(0, 0, 0, y)
-    keyBox.Parent = scroll
+---------------------------------------------------------------------
+-- MINIMIZE
+---------------------------------------------------------------------
 
-    local intervalBox = Instance.new("TextBox")
-    intervalBox.Size = UDim2.new(0, 80, 0, 30)
-    intervalBox.Position = UDim2.new(0, 70, 0, y)
-    intervalBox.Parent = scroll
+local minimized = false
 
-    local holdBox = Instance.new("TextBox")
-    holdBox.Size = UDim2.new(0, 80, 0, 30)
-    holdBox.Position = UDim2.new(0, 160, 0, y)
-    holdBox.Parent = scroll
+Minimize.MouseButton1Click:Connect(function()
+	minimized = not minimized
 
-    rows[i] = {
-        key = keyBox,
-        interval = intervalBox,
-        hold = holdBox,
-        loop = nil
-    }
-
-    local function update()
-        if not destroyed then
-            startLoop(rows[i])
-        end
-    end
-
-    keyBox.FocusLost:Connect(update)
-    intervalBox.FocusLost:Connect(update)
-    holdBox.FocusLost:Connect(update)
-
-    scroll.CanvasSize = UDim2.new(0, 0, 0, y + 50)
-end
-
-for i = 1, 7 do
-    createRow(i)
-end
+	if minimized then
+		TextBox.Visible = false
+		Toggle.Visible = false
+		MainFrame.Size = UDim2.new(0, 260, 0, 25)
+	else
+		TextBox.Visible = true
+		Toggle.Visible = true
+		MainFrame.Size = UDim2.new(0, 260, 0, 95)
+	end
+end)
 
 ---------------------------------------------------------------------
 -- TOGGLE
 ---------------------------------------------------------------------
 
+local ListenerEnabled = false
+
 local function updateToggle()
-    toggleButton.Text = enabled and "ON" or "OFF"
+	Toggle.Text = ListenerEnabled and "ON" or "OFF"
 end
 
-toggleButton.MouseButton1Click:Connect(function()
-    enabled = not enabled
-    updateToggle()
-end)
-
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.U then
-        enabled = not enabled
-        updateToggle()
-    end
+Toggle.MouseButton1Click:Connect(function()
+	ListenerEnabled = not ListenerEnabled
+	updateToggle()
 end)
 
 updateToggle()
 
 ---------------------------------------------------------------------
--- DELETE (FULL CLEANUP FIX)
+-- COMMANDER CHECK
 ---------------------------------------------------------------------
 
-deleteButton.MouseButton1Click:Connect(function()
-    destroyed = true
-    enabled = false
+local function isCommander(playerName)
+	local entered = string.lower(TextBox.Text)
 
-    for _, row in ipairs(rows) do
-        if row.loop then
-            row.loop:Disconnect()
-            row.loop = nil
-        end
-    end
+	if entered == "" then
+		return false
+	end
 
-    if screenGui then
-        screenGui:Destroy()
-    end
+	local targetName = string.lower(playerName)
 
-    script:Destroy()
+	for entry in string.gmatch(entered, "[^,]+") do
+		entry = string.lower(entry:gsub("^%s+", ""):gsub("%s+$", ""))
+
+		if entry ~= "" then
+			if string.find(targetName, entry, 1, true) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+---------------------------------------------------------------------
+-- AUTO CLICK
+---------------------------------------------------------------------
+
+local function performClick()
+	local absPos = ClickMarker.AbsolutePosition
+	local absSize = ClickMarker.AbsoluteSize
+
+	local x = absPos.X + (absSize.X / 2)
+	local y = absPos.Y + (absSize.Y / 2)
+
+	pcall(function()
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end)
+
+	pcall(function()
+		VirtualInputManager:SendTouchEvent(x, y, Enum.UserInputState.Begin, game)
+		VirtualInputManager:SendTouchEvent(x, y, Enum.UserInputState.End, game)
+	end)
+end
+
+---------------------------------------------------------------------
+-- TEXTCHATSERVICE LISTENER
+---------------------------------------------------------------------
+
+local function processMessage(textSource, messageText)
+	if not ListenerEnabled then return end
+	if not textSource then return end
+
+	local speaker = Players:GetPlayerByUserId(textSource.UserId)
+	if not speaker then return end
+
+	if not isCommander(speaker.Name) then return end
+
+	if string.lower(messageText) == ".start" then
+		performClick()
+	end
+end
+
+TextChatService.MessageReceived:Connect(function(message)
+	processMessage(message.TextSource, message.Text)
 end)
+
+print("Auto Start Click loaded.")
