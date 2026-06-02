@@ -74,7 +74,8 @@ do
     local dragging, dragInput, dragStart, startPos
 
     local function update(input)
-        local delta = input.Position - dragStart
+        local currentPos = input.Position
+        local delta = currentPos - dragStart
         mainFrame.Position = UDim2.new(
             startPos.X.Scale,
             startPos.X.Offset + delta.X,
@@ -84,10 +85,13 @@ do
     end
 
     titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        -- Support both mouse and touch start
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = mainFrame.Position
+
+            -- Track when this particular input ends
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
@@ -97,11 +101,13 @@ do
     end)
 
     titleBar.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
+        -- Accept either mouse movement or touch movement as the drag input
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
 
+    -- Global input changed to update while dragging (works for both mouse and touch)
     UserInput.InputChanged:Connect(function(input)
         if dragging and input == dragInput then
             update(input)
