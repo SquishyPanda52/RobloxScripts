@@ -9,12 +9,12 @@
   - Behavior: All attack modes and follow are toggled off on death/respawn.
   - Commander command listener (TextChatService) with UI textbox and toggle.
   - Commands: .atk/.attack, .follow/.goto, .hold, .stop, .atk random, .atk others, .atk all/everyone
-  - Fixes: newest commander command HARD overrides previous commands; normalized parsing to avoid stray characters.
-  - Updates:
+  - Fixes:
     * Only press "1" to equip slot-1 tool when a tool exists in slot 1 and is not already equipped.
-    * Commander handling: newest commander command hard-overrides previous commands.
+    * Commander handling: newest commander command HARD overrides previous commands.
     * .follow me and .goto me paste the commander's username into the follow textbox and follow that player.
     * When following a fragment, the follow textbox is filled with the matched player's full username.
+    * Robust override: each commander command increments a session token so any older running routines immediately stop, preventing jitter between overlapping commands.
 ]]
 
 -- Singleton cleanup (prevent duplicates)
@@ -72,6 +72,9 @@ local holdPosition = nil
 local commanderMode = false
 local lastCommanderUserId = nil -- track most recent commander who issued a command
 local lastCommanderPlayer = nil -- store Player object for "me" resolution
+
+-- Command session token to invalidate older routines when a new commander issues a command
+local commandSession = 0
 
 -- Auto-press binding
 -- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
@@ -235,18 +238,25 @@ end
 
 -- Override previous commands cleanly (HARD override)
 local function hardOverridePreviousCommands()
+    -- increment session token to invalidate any running routines
+    commandSession = commandSession + 1
+
     -- Stop and clear everything so the new command starts from a clean state
     if followConn then
-        followConn:Disconnect()
+        pcall(function() followConn:Disconnect() end)
         followConn = nil
     end
     if attackConn then
-        attackConn:Disconnect()
+        pcall(function() attackConn:Disconnect() end)
         attackConn = nil
     end
     if teamAttackConn then
-        teamAttackConn:Disconnect()
+        pcall(function() teamAttackConn:Disconnect() end)
         teamAttackConn = nil
+    end
+    if autoPressConn then
+        pcall(function() autoPressConn:Disconnect() end)
+        autoPressConn = nil
     end
 
     -- Clear flags and targets
@@ -275,7 +285,7 @@ local function stopFollow()
     holdMode = false
     holdPosition = nil
     if followConn then
-        followConn:Disconnect()
+        pcall(function() followConn:Disconnect() end)
         followConn = nil
     end
     stopMovementImmediate()
@@ -283,11 +293,23 @@ local function stopFollow()
 end
 
 local function startFollow()
+    -- capture the session token at start
+    local mySession = commandSession
+
     if followConn then
-        followConn:Disconnect()
+        pcall(function() followConn:Disconnect() end)
         followConn = nil
     end
     followConn = RunService.Heartbeat:Connect(function()
+        -- if session changed, stop this routine immediately
+        if mySession ~= commandSession then
+            if followConn then
+                pcall(function() followConn:Disconnect() end)
+                followConn = nil
+            end
+            return
+        end
+
         if not followEnabled then return end
 
         local myHum = getHumanoid(localPlayer)
@@ -347,13 +369,13 @@ local function stopAttack()
     attackEnabled = false
     attackNames = {}
     if attackConn then
-        attackConn:Disconnect()
+        pcall(function() attackConn:Disconnect() end)
         attackConn = nil
     end
     stopMovementImmediate()
     setBtnState(attackBtn, false, "Attack")
     if autoPressConn and not (attackEnabled or teamAttackEnabled) then
-        autoPressConn:Disconnect()
+        pcall(function() autoPressConn:Disconnect() end)
         autoPressConn = nil
     end
 end
@@ -375,13 +397,25 @@ local function doAutoPress()
 end
 
 local function startAutoPress()
+    -- capture session
+    local mySession = commandSession
+
     if autoPressConn then
-        autoPressConn:Disconnect()
+        pcall(function() autoPressConn:Disconnect() end)
         autoPressConn = nil
     end
     local last = 0
     local blockUntil = time() + AUTOPRESS_START_DELAY
     autoPressConn = RunService.RenderStepped:Connect(function()
+        -- session check
+        if mySession ~= commandSession then
+            if autoPressConn then
+                pcall(function() autoPressConn:Disconnect() end)
+                autoPressConn = nil
+            end
+            return
+        end
+
         if not (attackEnabled or teamAttackEnabled) then return end
         local now = time()
         if now < blockUntil then return end
@@ -399,23 +433,35 @@ local function stopTeamAttack()
     teamAttackEnabled = false
     teamAttackNames = {}
     if teamAttackConn then
-        teamAttackConn:Disconnect()
+        pcall(function() teamAttackConn:Disconnect() end)
         teamAttackConn = nil
     end
     stopMovementImmediate()
     setBtnState(teamAttackBtn, false, "TeamAttack")
     if autoPressConn and not (attackEnabled or teamAttackEnabled) then
-        autoPressConn:Disconnect()
+        pcall(function() autoPressConn:Disconnect() end)
         autoPressConn = nil
     end
 end
 
 local function startTeamAttack()
+    -- capture session
+    local mySession = commandSession
+
     if teamAttackConn then
-        teamAttackConn:Disconnect()
+        pcall(function() teamAttackConn:Disconnect() end)
         teamAttackConn = nil
     end
     teamAttackConn = RunService.Heartbeat:Connect(function()
+        -- session check
+        if mySession ~= commandSession then
+            if teamAttackConn then
+                pcall(function() teamAttackConn:Disconnect() end)
+                teamAttackConn = nil
+            end
+            return
+        end
+
         if not teamAttackEnabled or #teamAttackNames == 0 then return end
 
         local myHum = getHumanoid(localPlayer)
@@ -466,11 +512,23 @@ local function startTeamAttack()
 end
 
 local function startAttack()
+    -- capture session
+    local mySession = commandSession
+
     if attackConn then
-        attackConn:Disconnect()
+        pcall(function() attackConn:Disconnect() end)
         attackConn = nil
     end
     attackConn = RunService.Heartbeat:Connect(function()
+        -- session check
+        if mySession ~= commandSession then
+            if attackConn then
+                pcall(function() attackConn:Disconnect() end)
+                attackConn = nil
+            end
+            return
+        end
+
         if not attackEnabled or #attackNames == 0 then return end
 
         local myHum = getHumanoid(localPlayer)
@@ -849,7 +907,7 @@ if TextChatService then
         -- Only accept commands from players listed in commanderBox
         if not isCommander(plr.Name) then return end
 
-        -- newest commander overrides everything: record and hard-override
+        -- newest commander overrides everything: record, increment session, and hard-override
         setLastCommander(plr)
         hardOverridePreviousCommands()
 
