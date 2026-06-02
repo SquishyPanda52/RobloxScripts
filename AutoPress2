@@ -108,6 +108,7 @@ title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.ZIndex = 999999
 title.Parent = frame
+title.Active = true
 
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Size = UDim2.new(0, 25, 0, 25)
@@ -171,7 +172,7 @@ scroll.ZIndex = 999999
 scroll.Parent = frame
 
 ---------------------------------------------------------------------
--- DRAG (robust for mouse and touch)
+-- DRAG (top bar drag handle - works for mouse and touch)
 ---------------------------------------------------------------------
 
 local dragging = false
@@ -179,9 +180,8 @@ local dragStart = Vector2.new(0, 0)
 local startPos = frame.Position
 local activeInput = nil
 
--- Start drag on mouse button or touch begin
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
+-- Start drag when interacting with the title bar (top area)
+title.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         activeInput = input
@@ -205,13 +205,11 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- End drag on mouse button or touch end
+-- End drag on input end
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        if input == activeInput then
-            dragging = false
-            activeInput = nil
-        end
+    if input == activeInput then
+        dragging = false
+        activeInput = nil
     end
 end)
 
