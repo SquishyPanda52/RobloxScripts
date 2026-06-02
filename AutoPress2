@@ -93,7 +93,6 @@ frame.Position = UDim2.new(0.5, -175, 0.5, -160)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.ZIndex = 999999
-frame.ClipsDescendants = false
 frame.Parent = screenGui
 
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
@@ -107,18 +106,14 @@ title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextSize = 20
 title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.ZIndex = 1000010
-title.TextScaled = true
-title.TextWrapped = true
-title.Active = true
+title.ZIndex = 999999
 title.Parent = frame
 
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Size = UDim2.new(0, 25, 0, 25)
 minimizeButton.Position = UDim2.new(1, -60, 0, 5)
 minimizeButton.Text = "-"
-minimizeButton.ZIndex = 1000010
-minimizeButton.TextScaled = true
+minimizeButton.ZIndex = 999999
 minimizeButton.Parent = frame
 Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 6)
 
@@ -126,8 +121,7 @@ local deleteButton = Instance.new("TextButton")
 deleteButton.Size = UDim2.new(0, 25, 0, 25)
 deleteButton.Position = UDim2.new(1, -30, 0, 5)
 deleteButton.Text = "X"
-deleteButton.ZIndex = 1000010
-deleteButton.TextScaled = true
+deleteButton.ZIndex = 999999
 deleteButton.Parent = frame
 Instance.new("UICorner", deleteButton).CornerRadius = UDim.new(0, 6)
 
@@ -136,7 +130,6 @@ toggleButton.Size = UDim2.new(0, 120, 0, 35)
 toggleButton.Position = UDim2.new(1, -140, 0, 45) -- moved to the right to avoid overlap
 toggleButton.Text = "OFF"
 toggleButton.ZIndex = 999999
-toggleButton.TextScaled = true
 toggleButton.Parent = frame
 Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
 
@@ -151,7 +144,6 @@ cmdButton.Size = UDim2.new(0, 60, 0, 30)
 cmdButton.Position = UDim2.new(0, 10, 0, 45) -- placed to the left for clear layout
 cmdButton.Text = "Cmd: OFF"
 cmdButton.ZIndex = 999999
-cmdButton.TextScaled = true
 cmdButton.Parent = frame
 Instance.new("UICorner", cmdButton).CornerRadius = UDim.new(0, 6)
 
@@ -162,8 +154,6 @@ cmdBox.PlaceholderText = "Commanders (comma separated)"
 cmdBox.Text = ""
 cmdBox.ClearTextOnFocus = false
 cmdBox.ZIndex = 999999
-cmdBox.TextScaled = true
-cmdBox.TextWrapped = true
 cmdBox.Parent = frame
 Instance.new("UICorner", cmdBox).CornerRadius = UDim.new(0, 6)
 
@@ -177,58 +167,88 @@ scroll.Position = UDim2.new(0, 10, 0, 90) -- moved down to make room for cmd UI
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.ScrollBarThickness = 6
 scroll.BackgroundTransparency = 1
-scroll.ZIndex = 999998 -- ensure it's behind the top bar
-scroll.Active = true
+scroll.ZIndex = 999999
 scroll.Parent = frame
 
+-- Important: allow parent to receive touch/mouse input on mobile by disabling Active on scroll.
+-- This reduces the chance the ScrollingFrame will steal the initial InputBegan for dragging.
+scroll.Active = false
+
 ---------------------------------------------------------------------
--- DRAG (top bar drag handle - works for mouse and touch)
+-- DRAG
 ---------------------------------------------------------------------
 
 local dragging = false
-local dragStart = Vector2.new(0, 0)
-local startPos = frame.Position
-local activeInput = nil
+local dragStart
+local startPos
+local activeInput -- store the input object so we only track the one that started the drag
 
--- Start drag when interacting with the title bar (top area)
-title.InputBegan:Connect(function(input)
+-- helper to start drag from any UI input source
+local function startDragFromInput(input)
+    if destroyed then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         activeInput = input
         dragStart = input.Position
         startPos = frame.Position
     end
+end
+
+local function endDragFromInput(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if activeInput and input == activeInput then
+            dragging = false
+            activeInput = nil
+        end
+    end
+end
+
+-- Frame input handlers (primary)
+frame.InputBegan:Connect(function(input)
+    startDragFromInput(input)
 end)
 
--- Also allow starting drag when pressing and dragging on the title area via InputChanged on the title itself
-title.InputChanged:Connect(function(input)
-    if not dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        -- nothing here; actual movement handled by UserInputService.InputChanged below
-    end
+frame.InputEnded:Connect(function(input)
+    endDragFromInput(input)
 end)
 
--- Update position while moving (mouse movement or touch)
-UserInputService.InputChanged:Connect(function(input)
-    if not dragging then return end
-    if input ~= activeInput then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
+-- Also listen on the title so dragging works when touching the title label
+title.InputBegan:Connect(function(input)
+    startDragFromInput(input)
+end)
+title.InputEnded:Connect(function(input)
+    endDragFromInput(input)
 end)
 
--- End drag on input end
-UserInputService.InputEnded:Connect(function(input)
-    if input == activeInput then
-        dragging = false
-        activeInput = nil
-    end
+-- Also listen on the scrolling frame so touches on the scroll area can start dragging
+scroll.InputBegan:Connect(function(input)
+    -- If the user is interacting with the scroll (e.g., trying to scroll), we still allow drag start.
+    -- We set scroll.Active = false above to reduce interference; this handler ensures drag works on mobile.
+    startDragFromInput(input)
 end)
+scroll.InputEnded:Connect(function(input)
+    endDragFromInput(input)
+end)
+
+-- For TextBoxes: only start drag when the TextBox is NOT focused.
+-- This preserves typing behavior: if the user taps a TextBox to type, it will focus and not start a drag.
+-- If the TextBox is not focused and the user touches/presses, we allow dragging (useful for mobile where TextBoxes steal input).
+local function attachTextBoxDragHandlers(textBox)
+    -- Ensure the TextBox doesn't permanently steal Active input on mobile
+    textBox.Active = false
+
+    textBox.InputBegan:Connect(function(input)
+        -- If the TextBox is already focused, the user intends to type; do not start drag.
+        if textBox:IsFocused() then
+            return
+        end
+        startDragFromInput(input)
+    end)
+
+    textBox.InputEnded:Connect(function(input)
+        endDragFromInput(input)
+    end)
+end
 
 ---------------------------------------------------------------------
 -- ROWS
@@ -267,27 +287,18 @@ local function createRow(i)
     keyBox.Size = UDim2.new(0, 60, 0, 30)
     keyBox.Position = UDim2.new(0, 0, 0, y)
     keyBox.ZIndex = 999999
-    keyBox.TextScaled = true
-    keyBox.TextWrapped = true
-    keyBox.ClearTextOnFocus = false
     keyBox.Parent = scroll
 
     local intervalBox = Instance.new("TextBox")
     intervalBox.Size = UDim2.new(0, 80, 0, 30)
     intervalBox.Position = UDim2.new(0, 70, 0, y)
     intervalBox.ZIndex = 999999
-    intervalBox.TextScaled = true
-    intervalBox.TextWrapped = true
-    intervalBox.ClearTextOnFocus = false
     intervalBox.Parent = scroll
 
     local holdBox = Instance.new("TextBox")
     holdBox.Size = UDim2.new(0, 80, 0, 30)
     holdBox.Position = UDim2.new(0, 160, 0, y)
     holdBox.ZIndex = 999999
-    holdBox.TextScaled = true
-    holdBox.TextWrapped = true
-    holdBox.ClearTextOnFocus = false
     holdBox.Parent = scroll
 
     rows[i] = {
@@ -296,6 +307,11 @@ local function createRow(i)
         hold = holdBox,
         loop = nil
     }
+
+    -- Attach drag handlers to each TextBox so they don't block dragging when not focused
+    attachTextBoxDragHandlers(keyBox)
+    attachTextBoxDragHandlers(intervalBox)
+    attachTextBoxDragHandlers(holdBox)
 
     local function update()
         if not destroyed then
@@ -313,6 +329,28 @@ end
 for i = 1, 7 do
     createRow(i)
 end
+
+-- Attach drag handler to the commanders textbox as well
+attachTextBoxDragHandlers(cmdBox)
+
+---------------------------------------------------------------------
+-- DRAG MOVEMENT (InputChanged)
+---------------------------------------------------------------------
+
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input ~= activeInput then return end
+
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
 
 ---------------------------------------------------------------------
 -- TOGGLE
