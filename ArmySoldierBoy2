@@ -1,5 +1,5 @@
 --[[
-  Updated HiltonExecutor LocalScript
+  HiltonExecutor LocalScript (updated)
   - Fix: only press "1" to equip slot-1 tool when a tool exists in slot 1 and is not already equipped.
   - Added helpers: getSlotOneTool, isSlotOneEquipped, ensureEquipSlotOne
   - Replaced direct Enum.KeyCode.One SendKeyEvent calls with ensureEquipSlotOne()
