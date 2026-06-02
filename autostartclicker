@@ -1,377 +1,285 @@
--- LocalScript: AutoStartClick_ClientOnly
--- Place in StarterPlayer > StarterPlayerScripts
--- Client-only: activates GUI buttons under the draggable circle and raycasts to report world hits.
--- Listens for ".start" via TextChatService (with Player.Chatted fallback).
--- Command listener accepts comma-separated partial names (case-insensitive).
+-- LocalScript
+-- Place in StarterPlayerScripts or execute at runtime
 
 local Players = game:GetService("Players")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local GuiService = game:GetService("GuiService")
-local Workspace = game:GetService("Workspace")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Create ScreenGui
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AutoStartClickGui"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = playerGui
-screenGui.DisplayOrder = 1000
+---------------------------------------------------------------------
+-- UI
+---------------------------------------------------------------------
 
--- Main compact frame
-local frame = Instance.new("Frame")
-frame.Name = "MainFrame"
-frame.Size = UDim2.new(0, 260, 0, 40)
-frame.Position = UDim2.new(0.02, 0, 0.02, 0)
-frame.BackgroundColor3 = Color3.fromRGB(28,28,28)
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
-frame.Active = true
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoStartClickUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
 
-local frameCorner = Instance.new("UICorner")
-frameCorner.CornerRadius = UDim.new(0,8)
-frameCorner.Parent = frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 95)
+MainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = ScreenGui
 
-local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.Size = UDim2.new(1, -40, 1, 0)
-title.Position = UDim2.new(0, 8, 0, 0)
-title.BackgroundTransparency = 1
-title.Text = "Auto start click"
-title.TextColor3 = Color3.fromRGB(235,235,235)
-title.Font = Enum.Font.SourceSansBold
-title.TextSize = 16
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = frame
+local UICorner = Instance.new("UICorner")
+UICorner.Parent = MainFrame
 
-local collapseBtn = Instance.new("TextButton")
-collapseBtn.Name = "Collapse"
-collapseBtn.Size = UDim2.new(0, 32, 0, 28)
-collapseBtn.Position = UDim2.new(1, -38, 0, 6)
-collapseBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
-collapseBtn.Text = "—"
-collapseBtn.TextColor3 = Color3.fromRGB(230,230,230)
-collapseBtn.Font = Enum.Font.SourceSansBold
-collapseBtn.TextSize = 18
-collapseBtn.Parent = frame
-Instance.new("UICorner", collapseBtn).CornerRadius = UDim.new(0,6)
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -55, 0, 25)
+Title.BackgroundTransparency = 1
+Title.Text = "Auto Start Click"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.Parent = MainFrame
 
--- Expandable content
-local content = Instance.new("Frame")
-content.Name = "Content"
-content.Size = UDim2.new(1, 0, 0, 92)
-content.Position = UDim2.new(0, 0, 1, 6)
-content.BackgroundTransparency = 1
-content.Visible = false
-content.Parent = frame
+local Minimize = Instance.new("TextButton")
+Minimize.Size = UDim2.new(0, 25, 0, 25)
+Minimize.Position = UDim2.new(1, -30, 0, 0)
+Minimize.Text = "-"
+Minimize.Parent = MainFrame
 
-local cmdLabel = Instance.new("TextLabel")
-cmdLabel.Name = "CmdLabel"
-cmdLabel.Size = UDim2.new(1, -12, 0, 18)
-cmdLabel.Position = UDim2.new(0, 6, 0, 4)
-cmdLabel.BackgroundTransparency = 1
-cmdLabel.Text = "Command listener (comma-separated partial names):"
-cmdLabel.TextColor3 = Color3.fromRGB(200,200,200)
-cmdLabel.Font = Enum.Font.SourceSans
-cmdLabel.TextSize = 13
-cmdLabel.TextXAlignment = Enum.TextXAlignment.Left
-cmdLabel.Parent = content
+local TextBox = Instance.new("TextBox")
+TextBox.Name = "Command Listener"
+TextBox.PlaceholderText = "Player1, Player2"
+TextBox.Text = ""
+TextBox.Size = UDim2.new(1, -70, 0, 30)
+TextBox.Position = UDim2.new(0, 5, 0, 35)
+TextBox.Parent = MainFrame
 
-local cmdBox = Instance.new("TextBox")
-cmdBox.Name = "CommandBox"
-cmdBox.Size = UDim2.new(1, -12, 0, 28)
-cmdBox.Position = UDim2.new(0, 6, 0, 26)
-cmdBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
-cmdBox.TextColor3 = Color3.fromRGB(230,230,230)
-cmdBox.Text = ""
-cmdBox.PlaceholderText = "e.g. Alice, bob, partOfName"
-cmdBox.Font = Enum.Font.SourceSans
-cmdBox.TextSize = 14
-cmdBox.ClearTextOnFocus = false
-cmdBox.Parent = content
-Instance.new("UICorner", cmdBox).CornerRadius = UDim.new(0,6)
+local Toggle = Instance.new("TextButton")
+Toggle.Size = UDim2.new(0, 55, 0, 30)
+Toggle.Position = UDim2.new(1, -60, 0, 35)
+Toggle.Text = "OFF"
+Toggle.Parent = MainFrame
 
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Name = "ToggleCmd"
-toggleBtn.Size = UDim2.new(0, 86, 0, 26)
-toggleBtn.Position = UDim2.new(1, -94, 0, 56)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(70,70,70)
-toggleBtn.TextColor3 = Color3.fromRGB(230,230,230)
-toggleBtn.Text = "Enabled"
-toggleBtn.Font = Enum.Font.SourceSansBold
-toggleBtn.TextSize = 14
-toggleBtn.Parent = content
-Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0,6)
+---------------------------------------------------------------------
+-- DRAGGABLE CLICK MARKER
+---------------------------------------------------------------------
 
--- Draggable small circle icon
-local circle = Instance.new("ImageButton")
-circle.Name = "DragCircle"
-circle.Size = UDim2.new(0, 40, 0, 40)
-circle.Position = UDim2.new(0.5, 0, 0.5, 0)
-circle.AnchorPoint = Vector2.new(0.5, 0.5)
-circle.BackgroundColor3 = Color3.fromRGB(255,120,80)
-circle.Image = ""
-circle.Parent = screenGui
-circle.AutoButtonColor = false
-Instance.new("UICorner", circle).CornerRadius = UDim.new(1,0)
+local ClickMarker = Instance.new("TextButton")
+ClickMarker.Size = UDim2.new(0, 40, 0, 40)
+ClickMarker.Position = UDim2.new(0.5, -20, 0.5, -20)
+ClickMarker.Text = ""
+ClickMarker.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
+ClickMarker.Parent = ScreenGui
 
-local circleLabel = Instance.new("TextLabel")
-circleLabel.Size = UDim2.new(1,0,1,0)
-circleLabel.BackgroundTransparency = 1
-circleLabel.Text = ""
-circleLabel.Parent = circle
+local MarkerCorner = Instance.new("UICorner")
+MarkerCorner.CornerRadius = UDim.new(1, 0)
+MarkerCorner.Parent = ClickMarker
 
--- Visual indicator for last click
-local flash = Instance.new("Frame")
-flash.Name = "Flash"
-flash.Size = UDim2.new(0, 12, 0, 12)
-flash.AnchorPoint = Vector2.new(0.5, 0.5)
-flash.BackgroundColor3 = Color3.fromRGB(255,255,255)
-flash.Position = UDim2.new(0.5, 0.5, 0.5, 0)
-flash.Visible = false
-flash.Parent = circle
-Instance.new("UICorner", flash).CornerRadius = UDim.new(1,0)
+---------------------------------------------------------------------
+-- DRAGGING SUPPORT
+---------------------------------------------------------------------
 
--- State
-local expanded = false
-local listenerEnabled = true
-local commanders = {} -- lowercase partial tokens
+local function makeDraggable(gui)
+	local dragging = false
+	local dragStart
+	local startPos
 
--- Parse comma-separated partial names into lowercase tokens
-local function parseCommanders(text)
-    local out = {}
-    if not text then return out end
-    for token in string.gmatch(text, "[^,]+") do
-        local s = token:match("^%s*(.-)%s*$")
-        if s ~= "" then
-            out[#out+1] = string.lower(s)
-        end
-    end
-    return out
+	local function update(input)
+		local delta = input.Position - dragStart
+		gui.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+
+	gui.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			dragging = true
+			dragStart = input.Position
+			startPos = gui.Position
+
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	gui.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			if dragging then
+				update(input)
+			end
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging then
+			if input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch then
+				update(input)
+			end
+		end
+	end)
 end
 
--- Collapse/expand
-collapseBtn.MouseButton1Click:Connect(function()
-    expanded = not expanded
-    content.Visible = expanded
-    collapseBtn.Text = expanded and "×" or "—"
-    if expanded then
-        frame.Size = UDim2.new(0, 360, 0, 140)
-    else
-        frame.Size = UDim2.new(0, 260, 0, 40)
-    end
+makeDraggable(MainFrame)
+makeDraggable(ClickMarker)
+
+---------------------------------------------------------------------
+-- MINIMIZE
+---------------------------------------------------------------------
+
+local minimized = false
+
+Minimize.MouseButton1Click:Connect(function()
+	minimized = not minimized
+
+	if minimized then
+		TextBox.Visible = false
+		Toggle.Visible = false
+		MainFrame.Size = UDim2.new(0, 260, 0, 25)
+	else
+		TextBox.Visible = true
+		Toggle.Visible = true
+		MainFrame.Size = UDim2.new(0, 260, 0, 95)
+	end
 end)
 
--- Toggle listener
-toggleBtn.MouseButton1Click:Connect(function()
-    listenerEnabled = not listenerEnabled
-    toggleBtn.Text = listenerEnabled and "Enabled" or "Disabled"
-    toggleBtn.BackgroundColor3 = listenerEnabled and Color3.fromRGB(70,70,70) or Color3.fromRGB(110,30,30)
+---------------------------------------------------------------------
+-- TOGGLE
+---------------------------------------------------------------------
+
+local ListenerEnabled = false
+
+local function updateToggle()
+	Toggle.Text = ListenerEnabled and "ON" or "OFF"
+end
+
+Toggle.MouseButton1Click:Connect(function()
+	ListenerEnabled = not ListenerEnabled
+	updateToggle()
 end)
 
--- Update commanders on focus lost
-cmdBox.FocusLost:Connect(function()
-    commanders = parseCommanders(cmdBox.Text or "")
+updateToggle()
+
+---------------------------------------------------------------------
+-- COMMANDER CHECK
+---------------------------------------------------------------------
+
+local function isCommander(playerName)
+	local entered = string.lower(TextBox.Text)
+
+	if entered == "" then
+		return false
+	end
+
+	local targetName = string.lower(playerName)
+
+	for entry in string.gmatch(entered, "[^,]+") do
+		entry = string.lower(entry:gsub("^%s+", ""):gsub("%s+$", ""))
+
+		if entry ~= "" then
+			if string.find(targetName, entry, 1, true) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+---------------------------------------------------------------------
+-- AUTO CLICK
+---------------------------------------------------------------------
+
+local function performClick()
+	local absPos = ClickMarker.AbsolutePosition
+	local absSize = ClickMarker.AbsoluteSize
+
+	local x = absPos.X + (absSize.X / 2)
+	local y = absPos.Y + (absSize.Y / 2)
+
+	-- Mouse click
+	pcall(function()
+		VirtualInputManager:SendMouseButtonEvent(
+			x,
+			y,
+			0,
+			true,
+			game,
+			0
+		)
+
+		VirtualInputManager:SendMouseButtonEvent(
+			x,
+			y,
+			0,
+			false,
+			game,
+			0
+		)
+	end)
+
+	-- Touch tap (helps mobile compatibility)
+	pcall(function()
+		VirtualInputManager:SendTouchEvent(
+			x,
+			y,
+			Enum.UserInputState.Begin,
+			game
+		)
+
+		VirtualInputManager:SendTouchEvent(
+			x,
+			y,
+			Enum.UserInputState.End,
+			game
+		)
+	end)
+end
+
+---------------------------------------------------------------------
+-- TEXTCHATSERVICE LISTENER
+---------------------------------------------------------------------
+
+local function processMessage(textSource, messageText)
+	if not ListenerEnabled then
+		return
+	end
+
+	if not textSource then
+		return
+	end
+
+	local userId = textSource.UserId
+	if not userId then
+		return
+	end
+
+	local speaker = Players:GetPlayerByUserId(userId)
+	if not speaker then
+		return
+	end
+
+	if not isCommander(speaker.Name) then
+		return
+	end
+
+	if string.lower(messageText) == ".start" then
+		performClick()
+	end
+end
+
+TextChatService.MessageReceived:Connect(function(message)
+	processMessage(
+		message.TextSource,
+		message.Text
+	)
 end)
 
--- Draggable frame (mouse + touch)
-do
-    local dragging = false
-    local dragStart = Vector2.new()
-    local startPos = UDim2.new()
-    frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = Vector2.new(input.Position.X, input.Position.Y)
-            startPos = frame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-    RunService.RenderStepped:Connect(function()
-        if dragging then
-            local mousePos = UserInputService:GetMouseLocation()
-            local delta = mousePos - dragStart
-            local newX = startPos.X.Offset + delta.X
-            local newY = startPos.Y.Offset + delta.Y
-            local screenW = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.X or 1280
-            local screenH = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.Y or 720
-            newX = math.clamp(newX, 0, screenW - frame.AbsoluteSize.X)
-            newY = math.clamp(newY, 0, screenH - frame.AbsoluteSize.Y)
-            frame.Position = UDim2.new(0, newX, 0, newY)
-        end
-    end)
-end
-
--- Draggable circle (mouse + touch), constrained to screen
-do
-    local dragging = false
-    local offset = Vector2.new()
-    circle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            local mousePos = UserInputService:GetMouseLocation()
-            offset = Vector2.new(mousePos.X, mousePos.Y) - Vector2.new(circle.AbsolutePosition.X, circle.AbsolutePosition.Y)
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-    RunService.RenderStepped:Connect(function()
-        if dragging then
-            local mousePos = UserInputService:GetMouseLocation()
-            local newX = mousePos.X - offset.X
-            local newY = mousePos.Y - offset.Y
-            local screenW = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.X or 1280
-            local screenH = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.Y or 720
-            newX = math.clamp(newX, 0, screenW - circle.AbsoluteSize.X)
-            newY = math.clamp(newY, 0, screenH - circle.AbsoluteSize.Y)
-            circle.Position = UDim2.new(0, newX, 0, newY)
-        end
-    end)
-end
-
--- Commander matching (partial, case-insensitive)
-local function isCommander(name)
-    if not name or #commanders == 0 then return false end
-    local s = string.lower(name)
-    for _, token in ipairs(commanders) do
-        if token ~= "" and string.find(s, token, 1, true) then
-            return true
-        end
-    end
-    return false
-end
-
--- Visual flash when click happens
-local function flashCircle()
-    flash.Visible = true
-    flash.BackgroundTransparency = 0
-    flash.Size = UDim2.new(0, 12, 0, 12)
-    flash.Position = UDim2.new(0.5, 0, 0.5, 0)
-    spawn(function()
-        for i = 1, 12 do
-            flash.BackgroundTransparency = i/12
-            wait(0.02)
-        end
-        flash.Visible = false
-    end)
-end
-
--- Perform single auto-click: activate GUI buttons under circle; raycast and report world hit
-local function performAutoClick()
-    -- compute center of circle in screen coordinates
-    local centerX = circle.AbsolutePosition.X + circle.AbsoluteSize.X/2
-    local centerY = circle.AbsolutePosition.Y + circle.AbsoluteSize.Y/2
-
-    -- 1) Activate GUI buttons under the point
-    local guiObjects = GuiService:GetGuiObjectsAtPosition(centerX, centerY)
-    for _, obj in ipairs(guiObjects) do
-        if obj and obj:IsA("GuiButton") then
-            pcall(function() obj:Activate() end)
-            flashCircle()
-            return
-        end
-    end
-
-    -- 2) Raycast into the world and report hit (client-only)
-    local camera = Workspace.CurrentCamera
-    if not camera then return end
-    local unitRay = camera:ScreenPointToRay(centerX, centerY)
-    local origin = unitRay.Origin
-    local direction = unitRay.Direction * 1000
-
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {player.Character or player}
-    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-
-    local result = Workspace:Raycast(origin, direction, raycastParams)
-    if result and result.Instance then
-        -- Client-only behavior: highlight the hit part briefly and print info for testing
-        local hitPart = result.Instance
-        -- Create a temporary highlight (SelectionBox-like) for visual feedback
-        local adorn = Instance.new("SelectionBox")
-        adorn.Adornee = hitPart
-        adorn.LineThickness = 0.02
-        adorn.Color3 = Color3.fromRGB(0, 200, 255)
-        adorn.Parent = hitPart
-        flashCircle()
-        spawn(function()
-            wait(0.45)
-            if adorn and adorn.Parent then
-                adorn:Destroy()
-            end
-        end)
-        -- Print/log the hit for debugging
-        warn("[AutoStartClick] Raycast hit:", hitPart:GetFullName())
-        -- Optionally, if the hit has a ProximityPrompt, show its info (client-only)
-        local prompt = hitPart:FindFirstChildOfClass("ProximityPrompt") or hitPart:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then
-            warn("[AutoStartClick] Found ProximityPrompt on hit:", prompt.Name)
-            -- Note: triggering ProximityPrompt programmatically requires server validation; not attempted here.
-        end
-    else
-        -- Nothing hit
-        warn("[AutoStartClick] No world object hit at circle position.")
-        flashCircle()
-    end
-end
-
--- Chat message handler (TextChatService preferred)
-local function handleIncomingMessage(msg)
-    -- msg is a TextChatMessage object
-    local text = ""
-    local senderName = ""
-    pcall(function()
-        text = msg.Text or ""
-        if msg.TextSource then
-            -- TextSource may have Name or UserId
-            if msg.TextSource.Name then
-                senderName = msg.TextSource.Name
-            elseif msg.TextSource.UserId then
-                local p = Players:GetPlayerByUserId(msg.TextSource.UserId)
-                if p then senderName = p.Name end
-            end
-        end
-    end)
-    if text and string.lower(text):match("^%.start%s*$") then
-        if listenerEnabled and isCommander(senderName) then
-            performAutoClick()
-        end
-    end
-end
-
--- Connect TextChatService.OnIncomingMessage if available
-local connected = false
-if TextChatService and TextChatService.OnIncomingMessage then
-    pcall(function()
-        TextChatService.OnIncomingMessage:Connect(handleIncomingMessage)
-        connected = true
-    end)
-end
-
--- Fallback: Player.Chatted (client-side only; does not reliably receive other players' messages in all chat systems)
-if not connected then
-    player.Chatted:Connect(function(msg)
-        if string.lower(msg):match("^%.start%s*$") then
-            -- This fallback only reliably detects the local player's chat in many environments.
-            if listenerEnabled and isCommander(player.Name) then
-                performAutoClick()
-            end
-        end
-    end)
-end
-
--- Initialize commander list from textbox (empty by default)
-commanders = parseCommanders(cmdBox.Text or "")
-
--- Ensure mobile touch works: touch input handled by InputBegan checks above
--- End of LocalScript
+print("Auto Start Click loaded.")
