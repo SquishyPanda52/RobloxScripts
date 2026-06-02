@@ -88,8 +88,8 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 320) -- increased height for layout
-frame.Position = UDim2.new(0.5, -175, 0.5, -160)
+frame.Size = UDim2.new(0, 350, 0, 360) -- increased height for layout and notes
+frame.Position = UDim2.new(0.5, -175, 0.5, -180)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.ZIndex = 999999
@@ -162,7 +162,7 @@ Instance.new("UICorner", cmdBox).CornerRadius = UDim.new(0, 6)
 ---------------------------------------------------------------------
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -20, 1, -130) -- adjusted to account for larger top area
+scroll.Size = UDim2.new(1, -20, 0, 220) -- fixed height to leave space for notes at bottom
 scroll.Position = UDim2.new(0, 10, 0, 90) -- moved down to make room for cmd UI
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.ScrollBarThickness = 6
@@ -205,7 +205,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 ---------------------------------------------------------------------
--- ROWS
+-- ROWS (now with 4 boxes: key, clicks, cooldown, delay)
 ---------------------------------------------------------------------
 
 local rows = {}
@@ -217,19 +217,32 @@ local function startLoop(row)
     end
 
     local keyCode = resolveKey(row.key.Text)
-    local interval = tonumber(row.interval.Text)
-    local hold = tonumber(row.hold.Text)
+    local clicks = tonumber(row.clicks.Text)
+    local cooldown = tonumber(row.cooldown.Text)
+    local delay = tonumber(row.delay.Text)
 
-    if not keyCode or not interval or not hold then return end
+    if not keyCode or not clicks or not cooldown or not delay then return end
+    if clicks < 1 then return end
 
     row.loop = RunService.Heartbeat:Connect(function()
         if enabled and not destroyed then
+            -- perform the configured number of clicks
             task.spawn(function()
-                VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-                task.wait(hold)
-                VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+                for i = 1, clicks do
+                    if destroyed then break end
+                    VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+                    task.wait(0.05)
+                    VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+                    -- small gap between repeated clicks
+                    if i < clicks then
+                        task.wait(0.05)
+                    end
+                end
             end)
-            task.wait(interval)
+            -- wait the cooldown period (box 3)
+            task.wait(cooldown)
+            -- wait the additional delay before restarting (box 4)
+            task.wait(delay)
         end
     end)
 end
@@ -242,23 +255,34 @@ local function createRow(i)
     keyBox.Position = UDim2.new(0, 0, 0, y)
     keyBox.ZIndex = 999999
     keyBox.Parent = scroll
+    keyBox.PlaceholderText = "Key"
 
-    local intervalBox = Instance.new("TextBox")
-    intervalBox.Size = UDim2.new(0, 80, 0, 30)
-    intervalBox.Position = UDim2.new(0, 70, 0, y)
-    intervalBox.ZIndex = 999999
-    intervalBox.Parent = scroll
+    local clicksBox = Instance.new("TextBox")
+    clicksBox.Size = UDim2.new(0, 60, 0, 30)
+    clicksBox.Position = UDim2.new(0, 70, 0, y)
+    clicksBox.ZIndex = 999999
+    clicksBox.Parent = scroll
+    clicksBox.PlaceholderText = "Clicks"
 
-    local holdBox = Instance.new("TextBox")
-    holdBox.Size = UDim2.new(0, 80, 0, 30)
-    holdBox.Position = UDim2.new(0, 160, 0, y)
-    holdBox.ZIndex = 999999
-    holdBox.Parent = scroll
+    local cooldownBox = Instance.new("TextBox")
+    cooldownBox.Size = UDim2.new(0, 80, 0, 30)
+    cooldownBox.Position = UDim2.new(0, 140, 0, y)
+    cooldownBox.ZIndex = 999999
+    cooldownBox.Parent = scroll
+    cooldownBox.PlaceholderText = "Cooldown (s)"
+
+    local delayBox = Instance.new("TextBox")
+    delayBox.Size = UDim2.new(0, 80, 0, 30)
+    delayBox.Position = UDim2.new(0, 230, 0, y)
+    delayBox.ZIndex = 999999
+    delayBox.Parent = scroll
+    delayBox.PlaceholderText = "Delay (s)"
 
     rows[i] = {
         key = keyBox,
-        interval = intervalBox,
-        hold = holdBox,
+        clicks = clicksBox,
+        cooldown = cooldownBox,
+        delay = delayBox,
         loop = nil
     }
 
@@ -269,8 +293,9 @@ local function createRow(i)
     end
 
     keyBox.FocusLost:Connect(update)
-    intervalBox.FocusLost:Connect(update)
-    holdBox.FocusLost:Connect(update)
+    clicksBox.FocusLost:Connect(update)
+    cooldownBox.FocusLost:Connect(update)
+    delayBox.FocusLost:Connect(update)
 
     scroll.CanvasSize = UDim2.new(0, 0, 0, y + 50)
 end
@@ -407,6 +432,25 @@ cmdBox.FocusLost:Connect(function()
 end)
 
 updateCmdButton()
+
+---------------------------------------------------------------------
+-- NOTES AT BOTTOM
+---------------------------------------------------------------------
+
+local notes = Instance.new("TextLabel")
+notes.Size = UDim2.new(1, -20, 0, 80)
+notes.Position = UDim2.new(0, 10, 1, -90) -- sits above bottom edge with padding
+notes.BackgroundTransparency = 1
+notes.TextColor3 = Color3.fromRGB(220, 220, 220)
+notes.TextSize = 14
+notes.Font = Enum.Font.Gotham
+notes.TextWrapped = true
+notes.TextScaled = true
+notes.TextXAlignment = Enum.TextXAlignment.Left
+notes.TextYAlignment = Enum.TextYAlignment.Top
+notes.ZIndex = 999999
+notes.Parent = frame
+notes.Text = "Box 1: Key to press (e.g., 1, a, space, shift).  Box 2: Number of clicks per cycle.  Box 3: Cooldown seconds after clicks complete.  Box 4: Additional delay seconds after cooldown before the next cycle starts.  Example: Key=1, Clicks=3, Cooldown=5, Delay=3 -> press 1 three times, wait 5s, wait 3s, then repeat."
 
 ---------------------------------------------------------------------
 -- DELETE
