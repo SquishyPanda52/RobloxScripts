@@ -9,6 +9,7 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+-- Prevent duplicates
 if playerGui:FindFirstChild("AutoPress_UI") then
     return
 end
@@ -17,7 +18,7 @@ local enabled = false
 local destroyed = false
 
 ---------------------------------------------------------------------
--- KEY MAPS (UNCHANGED)
+-- KEY MAPS
 ---------------------------------------------------------------------
 
 local keyMap = {
@@ -87,13 +88,12 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 350, 0, 320)
+frame.Size = UDim2.new(0, 350, 0, 320) -- increased height for layout
 frame.Position = UDim2.new(0.5, -175, 0.5, -160)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 0
 frame.ZIndex = 999999
 frame.Parent = screenGui
-frame.Active = true
 
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
@@ -109,47 +109,100 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.ZIndex = 999999
 title.Parent = frame
 
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 25, 0, 25)
+minimizeButton.Position = UDim2.new(1, -60, 0, 5)
+minimizeButton.Text = "-"
+minimizeButton.ZIndex = 999999
+minimizeButton.Parent = frame
+Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 6)
+
+local deleteButton = Instance.new("TextButton")
+deleteButton.Size = UDim2.new(0, 25, 0, 25)
+deleteButton.Position = UDim2.new(1, -30, 0, 5)
+deleteButton.Text = "X"
+deleteButton.ZIndex = 999999
+deleteButton.Parent = frame
+Instance.new("UICorner", deleteButton).CornerRadius = UDim.new(0, 6)
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 120, 0, 35)
+toggleButton.Position = UDim2.new(1, -140, 0, 45) -- moved to the right to avoid overlap
+toggleButton.Text = "OFF"
+toggleButton.ZIndex = 999999
+toggleButton.Parent = frame
+Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
+
+-- New: Cmd toggle button and commanders textbox
+local cmdEnabled = false
+local commandersText = "" -- raw text from textbox
+local commanders = {} -- parsed list of commander substrings
+local playerConnections = {} -- store chat connections per player
+
+local cmdButton = Instance.new("TextButton")
+cmdButton.Size = UDim2.new(0, 60, 0, 30)
+cmdButton.Position = UDim2.new(0, 10, 0, 45) -- placed to the left for clear layout
+cmdButton.Text = "Cmd: OFF"
+cmdButton.ZIndex = 999999
+cmdButton.Parent = frame
+Instance.new("UICorner", cmdButton).CornerRadius = UDim.new(0, 6)
+
+local cmdBox = Instance.new("TextBox")
+cmdBox.Size = UDim2.new(0, 170, 0, 30)
+cmdBox.Position = UDim2.new(0, 80, 0, 45) -- next to the Cmd button with more space
+cmdBox.PlaceholderText = "Commanders (comma separated)"
+cmdBox.Text = ""
+cmdBox.ClearTextOnFocus = false
+cmdBox.ZIndex = 999999
+cmdBox.Parent = frame
+Instance.new("UICorner", cmdBox).CornerRadius = UDim.new(0, 6)
+
 ---------------------------------------------------------------------
--- DRAG FIX (CORRECT VERSION)
+-- SCROLLING FRAME
 ---------------------------------------------------------------------
 
-local dragHandle = Instance.new("Frame")
-dragHandle.Size = UDim2.new(1, 0, 0, 40) -- ONLY top bar area
-dragHandle.Position = UDim2.new(0, 0, 0, 0)
-dragHandle.BackgroundTransparency = 1
-dragHandle.ZIndex = 9999999
-dragHandle.Active = true
-dragHandle.Selectable = false -- IMPORTANT FIX
-dragHandle.Parent = frame
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -20, 1, -130) -- adjusted to account for larger top area
+scroll.Position = UDim2.new(0, 10, 0, 90) -- moved down to make room for cmd UI
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.ScrollBarThickness = 6
+scroll.BackgroundTransparency = 1
+scroll.ZIndex = 999999
+scroll.Parent = frame
+
+---------------------------------------------------------------------
+-- DRAG
+---------------------------------------------------------------------
 
 local dragging = false
 local dragStart
 local startPos
+local activeInput -- store the input object so we only track the one that started the drag
 
-dragHandle.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
+        activeInput = input
         dragStart = input.Position
         startPos = frame.Position
+    end
+end)
 
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
+frame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if activeInput and input == activeInput then
+            dragging = false
+            activeInput = nil
+        end
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
     if not dragging then return end
+    if input ~= activeInput then return end
 
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-    or input.UserInputType == Enum.UserInputType.Touch then
-
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         local delta = input.Position - dragStart
-
         frame.Position = UDim2.new(
             startPos.X.Scale,
             startPos.X.Offset + delta.X,
@@ -160,13 +213,235 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 ---------------------------------------------------------------------
--- IMPORTANT FIX FOR BUTTON CLICKING
+-- ROWS
 ---------------------------------------------------------------------
 
--- Make sure drag handle does NOT block UI interaction
-dragHandle.InputTransparent = true
+local rows = {}
+
+local function startLoop(row)
+    if row.loop then
+        row.loop:Disconnect()
+        row.loop = nil
+    end
+
+    local keyCode = resolveKey(row.key.Text)
+    local interval = tonumber(row.interval.Text)
+    local hold = tonumber(row.hold.Text)
+
+    if not keyCode or not interval or not hold then return end
+
+    row.loop = RunService.Heartbeat:Connect(function()
+        if enabled and not destroyed then
+            task.spawn(function()
+                VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+                task.wait(hold)
+                VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+            end)
+            task.wait(interval)
+        end
+    end)
+end
+
+local function createRow(i)
+    local y = (i - 1) * 40
+
+    local keyBox = Instance.new("TextBox")
+    keyBox.Size = UDim2.new(0, 60, 0, 30)
+    keyBox.Position = UDim2.new(0, 0, 0, y)
+    keyBox.ZIndex = 999999
+    keyBox.Parent = scroll
+
+    local intervalBox = Instance.new("TextBox")
+    intervalBox.Size = UDim2.new(0, 80, 0, 30)
+    intervalBox.Position = UDim2.new(0, 70, 0, y)
+    intervalBox.ZIndex = 999999
+    intervalBox.Parent = scroll
+
+    local holdBox = Instance.new("TextBox")
+    holdBox.Size = UDim2.new(0, 80, 0, 30)
+    holdBox.Position = UDim2.new(0, 160, 0, y)
+    holdBox.ZIndex = 999999
+    holdBox.Parent = scroll
+
+    rows[i] = {
+        key = keyBox,
+        interval = intervalBox,
+        hold = holdBox,
+        loop = nil
+    }
+
+    local function update()
+        if not destroyed then
+            startLoop(rows[i])
+        end
+    end
+
+    keyBox.FocusLost:Connect(update)
+    intervalBox.FocusLost:Connect(update)
+    holdBox.FocusLost:Connect(update)
+
+    scroll.CanvasSize = UDim2.new(0, 0, 0, y + 50)
+end
+
+for i = 1, 7 do
+    createRow(i)
+end
 
 ---------------------------------------------------------------------
--- (REST OF YOUR SCRIPT UNCHANGED)
--- ALL BUTTONS, TOGGLES, ROWS, CMD SYSTEM STAYS THE SAME
+-- TOGGLE
 ---------------------------------------------------------------------
+
+local function updateToggle()
+    toggleButton.Text = enabled and "ON" or "OFF"
+end
+
+toggleButton.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    updateToggle()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.G then
+        enabled = not enabled
+        updateToggle()
+    end
+end)
+
+updateToggle()
+
+---------------------------------------------------------------------
+-- CMD / COMMANDERS LOGIC
+---------------------------------------------------------------------
+
+local function parseCommanders(text)
+    local list = {}
+    if not text then return list end
+    for part in string.gmatch(text, "[^,]+") do
+        local trimmed = part:match("^%s*(.-)%s*$")
+        if trimmed ~= "" then
+            table.insert(list, string.lower(trimmed))
+        end
+    end
+    return list
+end
+
+local function isCommanderName(playerName)
+    if not playerName then return false end
+    local lowerName = string.lower(playerName)
+    for _, sub in ipairs(commanders) do
+        if sub ~= "" and string.find(lowerName, sub, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function onPlayerChatted(p, message)
+    if destroyed then return end
+    if not cmdEnabled then return end
+    if not message or message == "" then return end
+    if #commanders == 0 then return end
+    if not isCommanderName(p.Name) then return end
+
+    local msg = tostring(message)
+    local msgLower = string.lower(msg):gsub("^%s+", "")
+
+    -- Attack commands -> toggle on
+    if msgLower:match("^%.atk") or msgLower:match("^%.attack") then
+        enabled = true
+        updateToggle()
+        return
+    end
+
+    -- Stop/follow/goto/hold -> toggle off
+    if msgLower:match("^%.stop") or msgLower:match("^%.follow") or msgLower:match("^%.goto") or msgLower:match("^%.hold") then
+        enabled = false
+        updateToggle()
+        return
+    end
+end
+
+local function connectPlayerChat(p)
+    if playerConnections[p] then return end
+    local conn = p.Chatted:Connect(function(msg)
+        onPlayerChatted(p, msg)
+    end)
+    playerConnections[p] = conn
+end
+
+local function disconnectPlayerChat(p)
+    local conn = playerConnections[p]
+    if conn then
+        conn:Disconnect()
+        playerConnections[p] = nil
+    end
+end
+
+-- Connect existing players
+for _, p in ipairs(Players:GetPlayers()) do
+    connectPlayerChat(p)
+end
+
+-- Connect future players
+Players.PlayerAdded:Connect(function(p)
+    connectPlayerChat(p)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    disconnectPlayerChat(p)
+end)
+
+-- Cmd button toggle
+local function updateCmdButton()
+    cmdButton.Text = cmdEnabled and "Cmd: ON" or "Cmd: OFF"
+end
+
+cmdButton.MouseButton1Click:Connect(function()
+    cmdEnabled = not cmdEnabled
+    updateCmdButton()
+end)
+
+-- Update commanders list when textbox loses focus
+cmdBox.FocusLost:Connect(function(enterPressed)
+    commandersText = cmdBox.Text or ""
+    commanders = parseCommanders(commandersText)
+end)
+
+-- Also parse immediately if user types and presses Enter
+cmdBox.FocusLost:Connect(function()
+    commandersText = cmdBox.Text or ""
+    commanders = parseCommanders(commandersText)
+end)
+
+updateCmdButton()
+
+---------------------------------------------------------------------
+-- DELETE
+---------------------------------------------------------------------
+
+deleteButton.MouseButton1Click:Connect(function()
+    destroyed = true
+    enabled = false
+
+    for _, row in ipairs(rows) do
+        if row.loop then
+            row.loop:Disconnect()
+            row.loop = nil
+        end
+    end
+
+    -- Disconnect chat connections
+    for p, conn in pairs(playerConnections) do
+        if conn then
+            conn:Disconnect()
+        end
+    end
+    playerConnections = {}
+
+    if screenGui then
+        screenGui:Destroy()
+    end
+
+    script:Destroy()
+end)
