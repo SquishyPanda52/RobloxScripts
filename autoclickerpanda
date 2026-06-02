@@ -171,17 +171,15 @@ scroll.ZIndex = 999999
 scroll.Parent = frame
 
 ---------------------------------------------------------------------
--- DRAG (robust for mouse and touch)
+-- DRAG
 ---------------------------------------------------------------------
 
 local dragging = false
-local dragStart = Vector2.new(0, 0)
-local startPos = frame.Position
-local activeInput = nil
+local dragStart
+local startPos
+local activeInput -- store the input object so we only track the one that started the drag
 
--- Start drag on mouse button or touch begin
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
+frame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         activeInput = input
@@ -190,10 +188,19 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- Update position while moving (mouse movement or touch)
+frame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if activeInput and input == activeInput then
+            dragging = false
+            activeInput = nil
+        end
+    end
+end)
+
 UserInputService.InputChanged:Connect(function(input)
     if not dragging then return end
     if input ~= activeInput then return end
+
     if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         local delta = input.Position - dragStart
         frame.Position = UDim2.new(
@@ -202,16 +209,6 @@ UserInputService.InputChanged:Connect(function(input)
             startPos.Y.Scale,
             startPos.Y.Offset + delta.Y
         )
-    end
-end)
-
--- End drag on mouse button or touch end
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        if input == activeInput then
-            dragging = false
-            activeInput = nil
-        end
     end
 end)
 
