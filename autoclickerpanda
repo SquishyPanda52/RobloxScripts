@@ -177,23 +177,31 @@ scroll.Parent = frame
 local dragging = false
 local dragStart
 local startPos
+local activeInput -- store the input object so we only track the one that started the drag
 
 frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
+        activeInput = input
         dragStart = input.Position
         startPos = frame.Position
     end
 end)
 
 frame.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if activeInput and input == activeInput then
+            dragging = false
+            activeInput = nil
+        end
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+    if not dragging then return end
+    if input ~= activeInput then return end
+
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         local delta = input.Position - dragStart
         frame.Position = UDim2.new(
             startPos.X.Scale,
