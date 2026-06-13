@@ -1,843 +1,542 @@
---[[
-  Panda Alts 🐼 — Follow + Attack + Auto-Press (Client-Only)
-  - Follow and Attack are mutually exclusive.
-  - Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
-  - New: Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
-  - Draggable, compact UI with minimize and hard close.
-  - Re-inject safe: re-running replaces previous instance cleanly.
-  - Added: Team Attack mode (separate attack mode that targets players by team name).
-  - Behavior: All attack modes (user-target and team-target) and follow are toggled off on death/respawn.
-]]
+--// Auto Command Key Presser
+--// LocalScript
+--// Runtime Script
 
--- Singleton cleanup (prevent duplicates)
-if _G.HiltonExec and _G.HiltonExec.Cleanup then
-    pcall(_G.HiltonExec.Cleanup)
-end
-_G.HiltonExec = {}
-
--- Services
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
--- Locals
-local localPlayer = Players.LocalPlayer
-local playerGui = localPlayer:WaitForChild("PlayerGui")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
--- Config
-local FOLLOW_FAR = 8
-local FOLLOW_NEAR = 5
-local AUTOPRESS_HZ = 10
-local AUTOPRESS_MIN_HZ = 5
-local AUTOPRESS_MAX_HZ = 15
-local AUTOPRESS_START_DELAY = 0.35
+-- Prevent duplicates
+local existing = playerGui:FindFirstChild("AutoCommandKeyPresser")
+if existing then
+	existing:Destroy()
+end
 
--- UI State
-local gui, mainFrame, titleBar, minBtn, closeBtn
-local content
-local followBtn, followBox
-local attackBtn, attackBox
-local teamAttackBtn, teamAttackBox
-local autoRow, autoLabel, autoBox
-local rateMinusBtn, rateLabel, ratePlusBtn
-
--- Logic State
-local isMinimized = false
-local followEnabled = false
-local followTargetPlayer = nil
-
-local attackEnabled = false
-local attackNames = {}
-
-local teamAttackEnabled = false
-local teamAttackNames = {}
-
--- Auto-press binding
--- binding = { kind = "mouse", button = 1 or 2 } OR { kind = "key", keyCode = Enum.KeyCode.F }
-local binding = { kind = "mouse", button = 1 }
-
--- Connections
-local followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn
 local connections = {}
+local destroyed = false
 
--- Humanoid/character death connection
-local localHumanoidDiedConn = nil
-local localCharacterRemovingConn = nil
-
--- Utils
-local function trim(s)
-    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+local function track(conn)
+	table.insert(connections, conn)
+	return conn
 end
 
-local function setBtnState(btn, on, label)
-    btn.Text = label .. ": " .. (on and "On" or "Off")
-    btn.BackgroundColor3 = on and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(231, 76, 60)
+local function cleanup()
+	if destroyed then
+		return
+	end
+
+	destroyed = true
+
+	for _, conn in ipairs(connections) do
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+
+	table.clear(connections)
+
+	if gui then
+		gui:Destroy()
+	end
+
+	script:Destroy()
 end
 
-local function findClosestPlayer(fragment)
-    fragment = trim(fragment or ""):lower()
-    if fragment == "" then return nil end
-    local best, bestScore
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl ~= localPlayer then
-            local nm = pl.Name:lower()
-            if nm:find(fragment, 1, true) then
-                return pl
-            end
-            local score = math.abs(#nm - #fragment)
-            if not bestScore or score < bestScore then
-                bestScore, best = score, pl
-            end
-        end
-    end
-    return best
+--////////////////////////////////////////////////////
+-- UI
+--////////////////////////////////////////////////////
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "AutoCommandKeyPresser"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+gui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(340, 200)
+frame.Position = UDim2.new(0.5, -170, 0.5, -100)
+frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+frame.BorderSizePixel = 0
+frame.ZIndex = 999999
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Size = UDim2.new(1, -70, 0, 28)
+title.Position = UDim2.fromOffset(8, 0)
+title.Text = "Auto Command Key Presser"
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 20
+title.ZIndex = 999999
+title.Parent = frame
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.fromOffset(28, 28)
+closeButton.Position = UDim2.new(1, -32, 0, 2)
+closeButton.Text = "X"
+closeButton.Font = Enum.Font.SourceSansBold
+closeButton.TextSize = 18
+closeButton.BackgroundColor3 = Color3.fromRGB(170, 40, 40)
+closeButton.TextColor3 = Color3.new(1,1,1)
+closeButton.ZIndex = 999999
+closeButton.Parent = frame
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.Parent = closeButton
+
+local commanderLabel = Instance.new("TextLabel")
+commanderLabel.BackgroundTransparency = 1
+commanderLabel.Position = UDim2.fromOffset(10, 35)
+commanderLabel.Size = UDim2.fromOffset(150, 20)
+commanderLabel.Text = "Commander(s)"
+commanderLabel.TextColor3 = Color3.new(1,1,1)
+commanderLabel.Font = Enum.Font.SourceSansBold
+commanderLabel.TextXAlignment = Enum.TextXAlignment.Left
+commanderLabel.TextSize = 18
+commanderLabel.ZIndex = 999999
+commanderLabel.Parent = frame
+
+local commanderBox = Instance.new("TextBox")
+commanderBox.Size = UDim2.new(1, -20, 0, 30)
+commanderBox.Position = UDim2.fromOffset(10, 58)
+commanderBox.PlaceholderText = "Player1, Player2"
+commanderBox.Text = ""
+commanderBox.ClearTextOnFocus = false
+commanderBox.TextColor3 = Color3.new(1,1,1)
+commanderBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+commanderBox.ZIndex = 999999
+commanderBox.Parent = frame
+
+local commanderCorner = Instance.new("UICorner")
+commanderCorner.Parent = commanderBox
+
+local keyLabel = Instance.new("TextLabel")
+keyLabel.BackgroundTransparency = 1
+keyLabel.Position = UDim2.fromOffset(10, 96)
+keyLabel.Size = UDim2.fromOffset(80, 20)
+keyLabel.Text = "Key"
+keyLabel.TextColor3 = Color3.new(1,1,1)
+keyLabel.Font = Enum.Font.SourceSansBold
+keyLabel.TextXAlignment = Enum.TextXAlignment.Left
+keyLabel.TextSize = 18
+keyLabel.ZIndex = 999999
+keyLabel.Parent = frame
+
+local keyBox = Instance.new("TextBox")
+keyBox.Size = UDim2.fromOffset(80, 30)
+keyBox.Position = UDim2.fromOffset(10, 118)
+keyBox.PlaceholderText = "R"
+keyBox.Text = "R"
+keyBox.ClearTextOnFocus = false
+keyBox.TextColor3 = Color3.new(1,1,1)
+keyBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+keyBox.ZIndex = 999999
+keyBox.Parent = frame
+
+local keyCorner = Instance.new("UICorner")
+keyCorner.Parent = keyBox
+
+local cooldownLabel = Instance.new("TextLabel")
+cooldownLabel.BackgroundTransparency = 1
+cooldownLabel.Position = UDim2.fromOffset(110, 96)
+cooldownLabel.Size = UDim2.fromOffset(100, 20)
+cooldownLabel.Text = "Cooldown"
+cooldownLabel.TextColor3 = Color3.new(1,1,1)
+cooldownLabel.Font = Enum.Font.SourceSansBold
+cooldownLabel.TextXAlignment = Enum.TextXAlignment.Left
+cooldownLabel.TextSize = 18
+cooldownLabel.ZIndex = 999999
+cooldownLabel.Parent = frame
+
+local cooldownBox = Instance.new("TextBox")
+cooldownBox.Size = UDim2.fromOffset(100, 30)
+cooldownBox.Position = UDim2.fromOffset(110, 118)
+cooldownBox.PlaceholderText = "12"
+cooldownBox.Text = "12"
+cooldownBox.ClearTextOnFocus = false
+cooldownBox.TextColor3 = Color3.new(1,1,1)
+cooldownBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+cooldownBox.ZIndex = 999999
+cooldownBox.Parent = frame
+
+local cooldownCorner = Instance.new("UICorner")
+cooldownCorner.Parent = cooldownBox
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.fromOffset(110, 32)
+toggleButton.Position = UDim2.fromOffset(220, 118)
+toggleButton.Text = "OFF"
+toggleButton.Font = Enum.Font.SourceSansBold
+toggleButton.TextSize = 18
+toggleButton.TextColor3 = Color3.new(1,1,1)
+toggleButton.BackgroundColor3 = Color3.fromRGB(170,50,50)
+toggleButton.ZIndex = 999999
+toggleButton.Parent = frame
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.Parent = toggleButton
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.BackgroundTransparency = 1
+statusLabel.Position = UDim2.fromOffset(10, 160)
+statusLabel.Size = UDim2.new(1, -20, 0, 25)
+statusLabel.Text = "Waiting..."
+statusLabel.TextColor3 = Color3.new(1,1,1)
+statusLabel.Font = Enum.Font.SourceSansBold
+statusLabel.TextSize = 18
+statusLabel.ZIndex = 999999
+statusLabel.Parent = frame
+
+--////////////////////////////////////////////////////
+-- Dragging (PC + Mobile)
+--////////////////////////////////////////////////////
+
+local dragging = false
+local dragStart
+local startPos
+
+local function updateDrag(input)
+	local delta = input.Position - dragStart
+	frame.Position = UDim2.new(
+		startPos.X.Scale,
+		startPos.X.Offset + delta.X,
+		startPos.Y.Scale,
+		startPos.Y.Offset + delta.Y
+	)
 end
 
-local function parseAttackNames(text)
-    attackNames = {}
-    for name in tostring(text or ""):gmatch("([^,]+)") do
-        name = trim(name)
-        if #name > 0 then
-            table.insert(attackNames, name)
-        end
-    end
-end
-
-local function parseTeamNames(text)
-    teamAttackNames = {}
-    for name in tostring(text or ""):gmatch("([^,]+)") do
-        name = trim(name)
-        if #name > 0 then
-            table.insert(teamAttackNames, name)
-        end
-    end
-end
-
-local function getHRP(p)
-    local char = p.Character
-    if not char then return nil end
-    return char:FindFirstChild("HumanoidRootPart")
-end
-
-local function getHumanoid(p)
-    local char = p.Character
-    if not char then return nil end
-    return char:FindFirstChildOfClass("Humanoid")
-end
-
--- Follow routine
-local function stopFollow()
-    followEnabled = false
-    followTargetPlayer = nil
-    if followConn then
-        followConn:Disconnect()
-        followConn = nil
-    end
-    setBtnState(followBtn, false, "Follow")
-end
-
-local function startFollow()
-    if followConn then
-        followConn:Disconnect()
-        followConn = nil
-    end
-    followConn = RunService.Heartbeat:Connect(function()
-        if not followEnabled or not followTargetPlayer then return end
-
-        local myHum = getHumanoid(localPlayer)
-        local myRoot = getHRP(localPlayer)
-        local thHum = getHumanoid(followTargetPlayer)
-        local thRoot = getHRP(followTargetPlayer)
-
-        if not (myHum and myRoot and thHum and thRoot) or myHum.Health <= 0 or thHum.Health <= 0 then
-            stopFollow()
-            return
-        end
-
-        local dist = (thRoot.Position - myRoot.Position).Magnitude
-        if dist > FOLLOW_FAR then
-            local dir = (thRoot.Position - myRoot.Position).Unit
-            myHum:MoveTo(thRoot.Position - dir * 2)
-        elseif dist < FOLLOW_NEAR then
-            myHum:Move(Vector3.new())
-        end
-    end)
-    table.insert(connections, followConn)
-end
-
--- Attack routine
-local function stopAttack()
-    attackEnabled = false
-    if attackConn then
-        attackConn:Disconnect()
-        attackConn = nil
-    end
-    setBtnState(attackBtn, false, "Attack")
-    if autoPressConn and not (attackEnabled or teamAttackEnabled) then
-        autoPressConn:Disconnect()
-        autoPressConn = nil
-    end
-end
-
-local function doAutoPress()
-    if binding.kind == "mouse" then
-        local mousePos = UserInputService:GetMouseLocation()
-        local btnIndex = (binding.button == 2) and 1 or 0
-        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, true, game, 0)
-        VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, btnIndex, false, game, 0)
-    elseif binding.kind == "key" and binding.keyCode then
-        VirtualInputManager:SendKeyEvent(true, binding.keyCode, false, game)
-        VirtualInputManager:SendKeyEvent(false, binding.keyCode, false, game)
-    end
-end
-
-local function startAutoPress()
-    if autoPressConn then
-        autoPressConn:Disconnect()
-        autoPressConn = nil
-    end
-    local last = 0
-    local blockUntil = time() + AUTOPRESS_START_DELAY
-    autoPressConn = RunService.RenderStepped:Connect(function()
-        if not (attackEnabled or teamAttackEnabled) then return end
-        local now = time()
-        if now < blockUntil then return end
-        local interval = 1 / AUTOPRESS_HZ
-        if now - last >= interval then
-            doAutoPress()
-            last = now
-        end
-    end)
-    table.insert(connections, autoPressConn)
-end
-
--- Team attack helpers
-local function stopTeamAttack()
-    teamAttackEnabled = false
-    if teamAttackConn then
-        teamAttackConn:Disconnect()
-        teamAttackConn = nil
-    end
-    setBtnState(teamAttackBtn, false, "TeamAttack")
-    if autoPressConn and not (attackEnabled or teamAttackEnabled) then
-        autoPressConn:Disconnect()
-        autoPressConn = nil
-    end
-end
-
-local function startTeamAttack()
-    if teamAttackConn then
-        teamAttackConn:Disconnect()
-        teamAttackConn = nil
-    end
-    teamAttackConn = RunService.Heartbeat:Connect(function()
-        if not teamAttackEnabled or #teamAttackNames == 0 then return end
-
-        local myHum = getHumanoid(localPlayer)
-        local myRoot = getHRP(localPlayer)
-        if not (myHum and myRoot) or myHum.Health <= 0 then
-            return
-        end
-
-        local closestDist, targetPos
-        for _, tname in ipairs(teamAttackNames) do
-            local frag = trim(tname):lower()
-            if frag ~= "" then
-                for _, pl in ipairs(Players:GetPlayers()) do
-                    if pl ~= localPlayer and pl.Team and pl.Team.Name then
-                        local teamNameLower = tostring(pl.Team.Name):lower()
-                        if teamNameLower:find(frag, 1, true) then
-                            local hrp = getHRP(pl)
-                            if hrp then
-                                local d = (hrp.Position - myRoot.Position).Magnitude
-                                if not closestDist or d < closestDist then
-                                    closestDist, targetPos = d, hrp.Position
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if targetPos then
-            myHum:MoveTo(targetPos)
-        end
-    end)
-    table.insert(connections, teamAttackConn)
-
-    if not autoPressConn then
-        startAutoPress()
-    end
-end
-
-local function startAttack()
-    if attackConn then
-        attackConn:Disconnect()
-        attackConn = nil
-    end
-    attackConn = RunService.Heartbeat:Connect(function()
-        if not attackEnabled or #attackNames == 0 then return end
-
-        local myHum = getHumanoid(localPlayer)
-        local myRoot = getHRP(localPlayer)
-        if not (myHum and myRoot) or myHum.Health <= 0 then
-            return
-        end
-
-        local closestDist, targetPos
-        for _, uname in ipairs(attackNames) do
-            local pl = findClosestPlayer(uname)
-            local hrp = pl and getHRP(pl)
-            if hrp then
-                local d = (hrp.Position - myRoot.Position).Magnitude
-                if not closestDist or d < closestDist then
-                    closestDist, targetPos = d, hrp.Position
-                end
-            end
-        end
-
-        if targetPos then
-            myHum:MoveTo(targetPos)
-        end
-    end)
-    table.insert(connections, attackConn)
-
-    if not autoPressConn then
-        startAutoPress()
-    end
-end
-
--- UI build
-local function buildUI()
-    gui = Instance.new("ScreenGui")
-    gui.Name = "HiltonExecutorUI"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.Parent = playerGui
-
-    mainFrame = Instance.new("Frame")
-    mainFrame.Name = "Main"
-    mainFrame.Size = UDim2.new(0, 300, 0, 260)
-    mainFrame.Position = UDim2.new(0, 40, 0, 120)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = gui
-    Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
-    mainFrame.ClipsDescendants = true
-
-    titleBar = Instance.new("Frame")
-    titleBar.Name = "TitleBar"
-    titleBar.Size = UDim2.new(1, 0, 0, 30)
-    titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
-    titleBar.BorderSizePixel = 0
-    titleBar.Parent = mainFrame
-    titleBar.ClipsDescendants = true
-
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(1, -80, 1, 0)
-    titleLabel.Position = UDim2.new(0, 10, 0, 0)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "Panda Alts 🐼"
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 14
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
-    titleLabel.Parent = titleBar
-
-    minBtn = Instance.new("TextButton")
-    minBtn.Size = UDim2.new(0, 26, 0, 22)
-    minBtn.Position = UDim2.new(1, -62, 0.5, -11)
-    minBtn.BackgroundColor3 = Color3.fromRGB(90, 100, 130)
-    minBtn.Text = "—"
-    minBtn.Font = Enum.Font.GothamBold
-    minBtn.TextSize = 14
-    minBtn.TextColor3 = Color3.new(1, 1, 1)
-    minBtn.Parent = titleBar
-    Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 6)
-
-    closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 26, 0, 22)
-    closeBtn.Position = UDim2.new(1, -32, 0.5, -11)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(190, 60, 60)
-    closeBtn.Text = "X"
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 14
-    closeBtn.TextColor3 = Color3.new(1, 1, 1)
-    closeBtn.Parent = titleBar
-    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
-
-    content = Instance.new("Frame")
-    content.Name = "Content"
-    content.Size = UDim2.new(1, -12, 1, -44)
-    content.Position = UDim2.new(0, 6, 0, 36)
-    content.BackgroundTransparency = 1
-    content.Parent = mainFrame
-
-    local vlist = Instance.new("UIListLayout", content)
-    vlist.SortOrder = Enum.SortOrder.LayoutOrder
-    vlist.Padding = UDim.new(0, 8)
-
-    -- Follow row
-    local followRow = Instance.new("Frame")
-    followRow.Size = UDim2.new(1, 0, 0, 30)
-    followRow.BackgroundTransparency = 1
-    followRow.Parent = content
-
-    local fh = Instance.new("UIListLayout", followRow)
-    fh.FillDirection = Enum.FillDirection.Horizontal
-    fh.Padding = UDim.new(0, 6)
-
-    followBtn = Instance.new("TextButton")
-    followBtn.Size = UDim2.new(0, 120, 1, 0)
-    followBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
-    followBtn.TextColor3 = Color3.new(1, 1, 1)
-    followBtn.Font = Enum.Font.GothamBold
-    followBtn.TextSize = 14
-    followBtn.Text = "Follow: Off"
-    followBtn.Parent = followRow
-    Instance.new("UICorner", followBtn).CornerRadius = UDim.new(0, 6)
-
-    followBox = Instance.new("TextBox")
-    followBox.Size = UDim2.new(1, -126, 1, 0)
-    followBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    followBox.PlaceholderText = "Username (partial ok)"
-    followBox.Text = ""
-    followBox.TextColor3 = Color3.new(1, 1, 1)
-    followBox.Font = Enum.Font.Gotham
-    followBox.TextSize = 14
-    followBox.ClearTextOnFocus = false
-    followBox.Parent = followRow
-    Instance.new("UICorner", followBox).CornerRadius = UDim.new(0, 6)
-
-    -- Attack row
-    local attackRow = Instance.new("Frame")
-    attackRow.Size = UDim2.new(1, 0, 0, 30)
-    attackRow.BackgroundTransparency = 1
-    attackRow.Parent = content
-
-    local ah = Instance.new("UIListLayout", attackRow)
-    ah.FillDirection = Enum.FillDirection.Horizontal
-    ah.Padding = UDim.new(0, 6)
-
-    attackBtn = Instance.new("TextButton")
-    attackBtn.Size = UDim2.new(0, 120, 1, 0)
-    attackBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
-    attackBtn.TextColor3 = Color3.new(1, 1, 1)
-    attackBtn.Font = Enum.Font.GothamBold
-    attackBtn.TextSize = 14
-    attackBtn.Text = "Attack: Off"
-    attackBtn.Parent = attackRow
-    Instance.new("UICorner", attackBtn).CornerRadius = UDim.new(0, 6)
-
-    attackBox = Instance.new("TextBox")
-    attackBox.Size = UDim2.new(1, -126, 1, 0)
-    attackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    attackBox.PlaceholderText = "User1, User2 (partial ok)"
-    attackBox.Text = ""
-    attackBox.TextColor3 = Color3.new(1, 1, 1)
-    attackBox.Font = Enum.Font.Gotham
-    attackBox.TextSize = 14
-    attackBox.ClearTextOnFocus = false
-    attackBox.Parent = attackRow
-    Instance.new("UICorner", attackBox).CornerRadius = UDim.new(0, 6)
-
-    -- Team Attack row
-    local teamAttackRow = Instance.new("Frame")
-    teamAttackRow.Size = UDim2.new(1, 0, 0, 30)
-    teamAttackRow.BackgroundTransparency = 1
-    teamAttackRow.Parent = content
-
-    local tah = Instance.new("UIListLayout", teamAttackRow)
-    tah.FillDirection = Enum.FillDirection.Horizontal
-    tah.Padding = UDim.new(0, 6)
-
-    teamAttackBtn = Instance.new("TextButton")
-    teamAttackBtn.Size = UDim2.new(0, 120, 1, 0)
-    teamAttackBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
-    teamAttackBtn.TextColor3 = Color3.new(1, 1, 1)
-    teamAttackBtn.Font = Enum.Font.GothamBold
-    teamAttackBtn.TextSize = 14
-    teamAttackBtn.Text = "TeamAttack: Off"
-    teamAttackBtn.Parent = teamAttackRow
-    Instance.new("UICorner", teamAttackBtn).CornerRadius = UDim.new(0, 6)
-
-    teamAttackBox = Instance.new("TextBox")
-    teamAttackBox.Size = UDim2.new(1, -126, 1, 0)
-    teamAttackBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    teamAttackBox.PlaceholderText = "TeamName1, TeamName2 (partial ok)"
-    teamAttackBox.Text = ""
-    teamAttackBox.TextColor3 = Color3.new(1, 1, 1)
-    teamAttackBox.Font = Enum.Font.Gotham
-    teamAttackBox.TextSize = 14
-    teamAttackBox.ClearTextOnFocus = false
-    teamAttackBox.Parent = teamAttackRow
-    Instance.new("UICorner", teamAttackBox).CornerRadius = UDim.new(0, 6)
-
-    -- Auto-press row
-    autoRow = Instance.new("Frame")
-    autoRow.Size = UDim2.new(1, 0, 0, 30)
-    autoRow.BackgroundTransparency = 1
-    autoRow.Parent = content
-
-    local autol = Instance.new("UIListLayout", autoRow)
-    autol.FillDirection = Enum.FillDirection.Horizontal
-    autol.Padding = UDim.new(0, 6)
-
-    autoLabel = Instance.new("TextLabel")
-    autoLabel.Size = UDim2.new(0, 90, 1, 0)
-    autoLabel.BackgroundTransparency = 1
-    autoLabel.Font = Enum.Font.GothamBold
-    autoLabel.TextSize = 14
-    autoLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-    autoLabel.TextXAlignment = Enum.TextXAlignment.Left
-    autoLabel.Text = "AutoPress:"
-    autoLabel.Parent = autoRow
-
-    autoBox = Instance.new("TextBox")
-    autoBox.Size = UDim2.new(0, 82, 1, 0)
-    autoBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    autoBox.PlaceholderText = "Click then press"
-    autoBox.Text = "Mouse1"
-    autoBox.TextColor3 = Color3.new(1, 1, 1)
-    autoBox.Font = Enum.Font.Gotham
-    autoBox.TextSize = 14
-    autoBox.ClearTextOnFocus = false
-    autoBox.Parent = autoRow
-    Instance.new("UICorner", autoBox).CornerRadius = UDim.new(0, 6)
-
-    rateMinusBtn = Instance.new("TextButton")
-    rateMinusBtn.Size = UDim2.new(0, 22, 1, 0)
-    rateMinusBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
-    rateMinusBtn.Text = "−"
-    rateMinusBtn.Font = Enum.Font.GothamBold
-    rateMinusBtn.TextSize = 14
-    rateMinusBtn.TextColor3 = Color3.new(1, 1, 1)
-    rateMinusBtn.Parent = autoRow
-    Instance.new("UICorner", rateMinusBtn).CornerRadius = UDim.new(0, 6)
-
-    rateLabel = Instance.new("TextLabel")
-    rateLabel.Size = UDim2.new(0, 48, 1, 0)
-    rateLabel.BackgroundTransparency = 1
-    rateLabel.Font = Enum.Font.GothamBold
-    rateLabel.TextSize = 14
-    rateLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-    rateLabel.TextXAlignment = Enum.TextXAlignment.Center
-    rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
-    rateLabel.Parent = autoRow
-
-    ratePlusBtn = Instance.new("TextButton")
-    ratePlusBtn.Size = UDim2.new(0, 22, 1, 0)
-    ratePlusBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
-    ratePlusBtn.Text = "+"
-    ratePlusBtn.Font = Enum.Font.GothamBold
-    ratePlusBtn.TextSize = 14
-    ratePlusBtn.TextColor3 = Color3.new(1, 1, 1)
-    ratePlusBtn.Parent = autoRow
-    Instance.new("UICorner", ratePlusBtn).CornerRadius = UDim.new(0, 6)
-
-    -- Dragging
-    local dragging, dragStart, startPos = false, nil, nil
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainFrame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-
-    -- Minimize
-    minBtn.MouseButton1Click:Connect(function()
-        isMinimized = not isMinimized
-        content.Visible = not isMinimized
-        mainFrame.Size = isMinimized and UDim2.new(0, 300, 0, 30) or UDim2.new(0, 300, 0, 260)
-        minBtn.Text = isMinimized and "+" or "—"
-    end)
-
-    -- Close
-    closeBtn.MouseButton1Click:Connect(function()
-        if _G.HiltonExec and _G.HiltonExec.Cleanup then
-            _G.HiltonExec.Cleanup()
-        end
-    end)
-end
-
--- Button logic
-local function onFollowToggle()
-    local newState = not followEnabled
-    if newState then
-        if attackEnabled then
-            attackEnabled = false
-            stopAttack()
-        end
-        if teamAttackEnabled then
-            teamAttackEnabled = false
-            stopTeamAttack()
-        end
-        local targetName = followBox.Text
-        local target = findClosestPlayer(targetName)
-        if not target then
-            setBtnState(followBtn, false, "Follow")
-            followEnabled = false
-            return
-        end
-        followTargetPlayer = target
-        followEnabled = true
-        setBtnState(followBtn, true, "Follow")
-        startFollow()
-    else
-        stopFollow()
-    end
-end
-
-local function onAttackToggle()
-    local newState = not attackEnabled
-    if newState then
-        if followEnabled then
-            followEnabled = false
-            stopFollow()
-        end
-        if teamAttackEnabled then
-            teamAttackEnabled = false
-            stopTeamAttack()
-        end
-        parseAttackNames(attackBox.Text)
-        if #attackNames == 0 then
-            setBtnState(attackBtn, false, "Attack")
-            attackEnabled = false
-            return
-        end
-        attackEnabled = true
-        setBtnState(attackBtn, true, "Attack")
-        startAttack()
-    else
-        stopAttack()
-    end
-end
-
-local function onTeamAttackToggle()
-    local newState = not teamAttackEnabled
-    if newState then
-        if followEnabled then
-            followEnabled = false
-            stopFollow()
-        end
-        if attackEnabled then
-            attackEnabled = false
-            stopAttack()
-        end
-        parseTeamNames(teamAttackBox.Text)
-        if #teamAttackNames == 0 then
-            setBtnState(teamAttackBtn, false, "TeamAttack")
-            teamAttackEnabled = false
-            return
-        end
-        teamAttackEnabled = true
-        setBtnState(teamAttackBtn, true, "TeamAttack")
-        startTeamAttack()
-    else
-        stopTeamAttack()
-    end
-end
-
--- AutoPress binding capture
-local function describeBinding()
-    if binding.kind == "mouse" then
-        return (binding.button == 2) and "Mouse2" or "Mouse1"
-    else
-        return "Key:" .. tostring(binding.keyCode):gsub("Enum.KeyCode.", "")
-    end
-end
-
-local function beginBindingCapture()
-    if bindingCaptureConn then
-        bindingCaptureConn:Disconnect()
-        bindingCaptureConn = nil
-    end
-    autoBox.Text = "Press a key or click..."
-    bindingCaptureConn = UserInputService.InputBegan:Connect(function(input, gpe)
-        if not autoBox:IsFocused() then return end
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            binding = { kind = "mouse", button = 1 }
-        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-            binding = { kind = "mouse", button = 2 }
-        elseif input.KeyCode and input.KeyCode ~= Enum.KeyCode.Unknown then
-            binding = { kind = "key", keyCode = input.KeyCode }
-        else
-            return
-        end
-        autoBox.Text = describeBinding()
-        autoBox:ReleaseFocus()
-        if bindingCaptureConn then
-            bindingCaptureConn:Disconnect()
-            bindingCaptureConn = nil
-        end
-    end)
-    table.insert(connections, bindingCaptureConn)
-end
-
--- Rate helpers
-local function clampRate(v)
-    if v < AUTOPRESS_MIN_HZ then return AUTOPRESS_MIN_HZ end
-    if v > AUTOPRESS_MAX_HZ then return AUTOPRESS_MAX_HZ end
-    return math.floor(v + 0.5)
-end
-
-local function setRate(v)
-    AUTOPRESS_HZ = clampRate(v)
-    if rateLabel then
-        rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
-    end
-end
-
--- Ensure all attack/follow modes are turned off
-local function disableAllModes()
-    if followEnabled then stopFollow() end
-    if attackEnabled then stopAttack() end
-    if teamAttackEnabled then stopTeamAttack() end
-end
-
--- Character events
-local function connectLocalCharacterEvents(character)
-    if localHumanoidDiedConn then
-        pcall(function() localHumanoidDiedConn:Disconnect() end)
-        localHumanoidDiedConn = nil
-    end
-    if localCharacterRemovingConn then
-        pcall(function() localCharacterRemovingConn:Disconnect() end)
-        localCharacterRemovingConn = nil
-    end
-
-    if not character then return end
-
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        localHumanoidDiedConn = humanoid.Died:Connect(function()
-            disableAllModes()
-        end)
-        table.insert(connections, localHumanoidDiedConn)
-    end
-
-    localCharacterRemovingConn = character.AncestryChanged:Connect(function(_, parent)
-        if not parent then
-            disableAllModes()
-        end
-    end)
-    table.insert(connections, localCharacterRemovingConn)
-end
-
--- Cleanup routine
-function _G.HiltonExec.Cleanup()
-    pcall(function()
-        if followConn then followConn:Disconnect() end
-        if attackConn then attackConn:Disconnect() end
-        if teamAttackConn then teamAttackConn:Disconnect() end
-        if autoPressConn then autoPressConn:Disconnect() end
-        if bindingCaptureConn then bindingCaptureConn:Disconnect() end
-        if localHumanoidDiedConn then localHumanoidDiedConn:Disconnect() end
-        if localCharacterRemovingConn then localCharacterRemovingConn:Disconnect() end
-        for _, c in ipairs(connections) do
-            if c and c.Disconnect then
-                pcall(function() c:Disconnect() end)
-            end
-        end
-    end)
-    followConn, attackConn, teamAttackConn, autoPressConn, bindingCaptureConn = nil, nil, nil, nil, nil
-    localHumanoidDiedConn, localCharacterRemovingConn = nil, nil
-    if gui then
-        pcall(function() gui:Destroy() end)
-    end
-    _G.HiltonExec = nil
-end
-
--- Build and wire UI
-buildUI()
-
-autoBox.Text = describeBinding()
-setRate(AUTOPRESS_HZ)
-
-table.insert(connections, followBtn.MouseButton1Click:Connect(onFollowToggle))
-table.insert(connections, attackBtn.MouseButton1Click:Connect(onAttackToggle))
-table.insert(connections, teamAttackBtn.MouseButton1Click:Connect(onTeamAttackToggle))
-
-table.insert(connections, followBox.FocusLost:Connect(function()
-    if followEnabled then
-        stopFollow()
-        onFollowToggle()
-    end
+track(frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+	or input.UserInputType == Enum.UserInputType.Touch then
+
+		dragging = true
+		dragStart = input.Position
+		startPos = frame.Position
+
+		track(input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end))
+	end
 end))
 
-table.insert(connections, attackBox.FocusLost:Connect(function()
-    if attackEnabled then
-        parseAttackNames(attackBox.Text)
-    end
+track(UserInputService.InputChanged:Connect(function(input)
+	if dragging and (
+		input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch
+	) then
+		updateDrag(input)
+	end
 end))
 
-table.insert(connections, teamAttackBox.FocusLost:Connect(function()
-    if teamAttackEnabled then
-        parseTeamNames(teamAttackBox.Text)
-    end
-end))
+track(closeButton.MouseButton1Click:Connect(cleanup))
 
-table.insert(connections, autoBox.Focused:Connect(beginBindingCapture))
+local enabled = false
+local autoRunning = false
+--////////////////////////////////////////////////////
+-- Commander Handling
+--////////////////////////////////////////////////////
 
-table.insert(connections, rateMinusBtn.MouseButton1Click:Connect(function()
-    setRate(AUTOPRESS_HZ - 1)
-end))
+local function splitCommanders()
+	local results = {}
 
-table.insert(connections, ratePlusBtn.MouseButton1Click:Connect(function()
-    setRate(AUTOPRESS_HZ + 1)
-end))
+	for entry in string.gmatch(commanderBox.Text, "[^,]+") do
+		entry = entry:gsub("^%s+", "")
+		entry = entry:gsub("%s+$", "")
 
-table.insert(connections, localPlayer.CharacterAdded:Connect(function(character)
-    disableAllModes()
-    connectLocalCharacterEvents(character)
-end))
+		if entry ~= "" then
+			table.insert(results, string.lower(entry))
+		end
+	end
 
-if localPlayer.Character then
-    connectLocalCharacterEvents(localPlayer.Character)
+	return results
 end
 
-table.insert(connections, Players.PlayerRemoving:Connect(function(pl)
-    if followTargetPlayer == pl then
-        stopFollow()
-    end
+local function isCommander(playerName)
+	local lowerName = string.lower(playerName)
+
+	for _, commander in ipairs(splitCommanders()) do
+		if string.find(lowerName, commander, 1, true) then
+			return true
+		end
+	end
+
+	return false
+end
+
+--////////////////////////////////////////////////////
+-- Key Pressing
+--////////////////////////////////////////////////////
+
+local function pressKey()
+	local keyText = string.upper(keyBox.Text)
+
+	if keyText == "" then
+		return
+	end
+
+	local success, keyCode = pcall(function()
+		return Enum.KeyCode[keyText]
+	end)
+
+	if not success or not keyCode then
+		return
+	end
+
+	pcall(function()
+		VirtualInputManager:SendKeyEvent(
+			true,
+			keyCode,
+			false,
+			game
+		)
+
+		task.wait(0.05)
+
+		VirtualInputManager:SendKeyEvent(
+			false,
+			keyCode,
+			false,
+			game
+		)
+	end)
+end
+
+local loopThread
+
+local function stopLoop()
+	autoRunning = false
+end
+
+local function startLoop()
+	if autoRunning then
+		return
+	end
+
+	autoRunning = true
+
+	loopThread = task.spawn(function()
+
+		while autoRunning and not destroyed do
+
+			local cooldown =
+				tonumber(cooldownBox.Text)
+				or 1
+
+			cooldown = math.max(0.05, cooldown)
+
+			statusLabel.Text =
+				"Running (" ..
+				string.upper(keyBox.Text) ..
+				" every " ..
+				tostring(cooldown) ..
+				"s)"
+
+			pressKey()
+
+			local startTime = tick()
+
+			repeat
+				task.wait(0.1)
+			until
+				not autoRunning
+				or destroyed
+				or (tick() - startTime >= cooldown)
+
+		end
+
+		statusLabel.Text = "Waiting for .start"
+	end)
+end
+
+--////////////////////////////////////////////////////
+-- Toggle
+--////////////////////////////////////////////////////
+
+local function updateToggle()
+	if enabled then
+		toggleButton.Text = "ON"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(50,170,50)
+	else
+		toggleButton.Text = "OFF"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(170,50,50)
+
+		stopLoop()
+	end
+end
+
+track(toggleButton.MouseButton1Click:Connect(function()
+
+	enabled = not enabled
+
+	updateToggle()
+
+	if enabled then
+		statusLabel.Text = "Listening..."
+	else
+		statusLabel.Text = "Disabled"
+	end
+
 end))
 
--- 🔥 KEYBINDS: E focuses attackBox, R toggles Attack ONLY if attackBox is NOT focused
-table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
+updateToggle()
 
-    -- T = focus Attack textbox
-    if input.KeyCode == Enum.KeyCode.T then
-        if attackBox then
-            attackBox:CaptureFocus()
-        end
-    end
+--////////////////////////////////////////////////////
+-- TextChatService Detection
+--////////////////////////////////////////////////////
 
-    -- R = toggle Attack ONLY if attackBox is not focused
-    if input.KeyCode == Enum.KeyCode.R then
-        if attackBox and not attackBox:IsFocused() then
-            onAttackToggle()
-        end
-    end
-end))
+local function handleChatMessage(senderName, message)
+
+	if not enabled then
+		return
+	end
+
+	if not isCommander(senderName) then
+		return
+	end
+
+	local lowerMessage =
+		string.lower(
+			tostring(message)
+		)
+
+	if lowerMessage == ".start" then
+		startLoop()
+		return
+	end
+
+	if lowerMessage == ".stop" then
+		stopLoop()
+		statusLabel.Text = "Stopped"
+		return
+	end
+end
+--////////////////////////////////////////////////////
+-- Modern TextChatService
+--////////////////////////////////////////////////////
+
+local textChannels = TextChatService:WaitForChild("TextChannels", 10)
+
+if textChannels then
+
+	local generalChannel =
+		textChannels:FindFirstChild("RBXGeneral")
+
+	if generalChannel then
+
+		track(
+			generalChannel.MessageReceived:Connect(function(message)
+
+				if destroyed then
+					return
+				end
+
+				local source = message.TextSource
+
+				if not source then
+					return
+				end
+
+				local sender =
+					Players:GetPlayerByUserId(
+						source.UserId
+					)
+
+				if not sender then
+					return
+				end
+
+				handleChatMessage(
+					sender.Name,
+					message.Text
+				)
+
+			end)
+		)
+
+	end
+
+end
+
+--////////////////////////////////////////////////////
+-- Fallback For Older Chat Systems
+--////////////////////////////////////////////////////
+
+local function hookPlayer(playerObj)
+
+	track(
+		playerObj.Chatted:Connect(function(message)
+
+			if destroyed then
+				return
+			end
+
+			handleChatMessage(
+				playerObj.Name,
+				message
+			)
+
+		end)
+	)
+
+end
+
+for _, plr in ipairs(Players:GetPlayers()) do
+	hookPlayer(plr)
+end
+
+track(
+	Players.PlayerAdded:Connect(function(plr)
+		hookPlayer(plr)
+	end)
+)
+
+--////////////////////////////////////////////////////
+-- Startup
+--////////////////////////////////////////////////////
+
+statusLabel.Text = "Disabled"
+
+updateToggle()
+
+--////////////////////////////////////////////////////
+-- Safety Cleanup
+--////////////////////////////////////////////////////
+
+track(
+	game:GetService("Players").PlayerRemoving:Connect(function()
+
+		if player == Players.LocalPlayer then
+			cleanup()
+		end
+
+	end)
+)
+
+track(
+	gui.Destroying:Connect(function()
+		destroyed = true
+	end)
+)
+
+print("[Auto Command Key Presser] Loaded")
+print("Commands:")
+print(".start = begin auto key press")
+print(".stop = stop auto key press")
+
+--////////////////////////////////////////////////////
+-- Finished
+--////////////////////////////////////////////////////
