@@ -1,430 +1,614 @@
--- LocalScript (place in StarterPlayerScripts)
+--// Auto Command Key Presser
+--// LocalScript
+--// Runtime Script
 
---// Services
 local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
---// Character / HumanoidRootPart tracking
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-
-local function bindCharacter(char)
-	character = char
-	humanoid = character:WaitForChild("Humanoid")
-	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-
-	-- Turn off fly on death
-	humanoid.Died:Connect(function()
-		if flying then
-			stopFlying()
-		end
-	end)
+-- Prevent duplicates
+local existing = playerGui:FindFirstChild("AutoCommandKeyPresser")
+if existing then
+    existing:Destroy()
 end
 
-player.CharacterAdded:Connect(function(char)
-	bindCharacter(char)
-end)
+local connections = {}
+local destroyed = false
 
---// UI Creation (all runtime, local only)
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "LocalFlyUI"
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.Parent = player:WaitForChild("PlayerGui")
+local function track(conn)
+    table.insert(connections, conn)
+    return conn
+end
 
--- Main frame
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "FlyFrame"
-mainFrame.Size = UDim2.new(0, 260, 0, 150)
-mainFrame.Position = UDim2.new(0.5, -130, 0.3, -75)
-mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
+local function cleanup()
+    if destroyed then
+        return
+    end
 
--- Top bar
-local topBar = Instance.new("Frame")
-topBar.Name = "TopBar"
-topBar.Size = UDim2.new(1, 0, 0, 24)
-topBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-topBar.BorderSizePixel = 0
-topBar.Parent = mainFrame
+    destroyed = true
 
--- Title
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "Title"
-titleLabel.Size = UDim2.new(1, -60, 1, 0)
-titleLabel.Position = UDim2.new(0, 8, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Local Fly"
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextSize = 14
-titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = topBar
+    for _, conn in ipairs(connections) do
+        pcall(function()
+            conn:Disconnect()
+        end)
+    end
 
--- Close (X) button
+    table.clear(connections)
+
+    if gui then
+        gui:Destroy()
+    end
+
+    script:Destroy()
+end
+
+--////////////////////////////////////////////////////
+-- UI
+--////////////////////////////////////////////////////
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "AutoCommandKeyPresser"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+gui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(340, 260) -- increased height to fit second row
+frame.Position = UDim2.new(0.5, -170, 0.5, -130)
+frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+frame.BorderSizePixel = 0
+frame.ZIndex = 999999
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Size = UDim2.new(1, -70, 0, 28)
+title.Position = UDim2.fromOffset(8, 0)
+title.Text = "Auto Command Key Presser"
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 20
+title.ZIndex = 999999
+title.Parent = frame
+
 local closeButton = Instance.new("TextButton")
-closeButton.Name = "CloseButton"
-closeButton.Size = UDim2.new(0, 24, 0, 24)
-closeButton.Position = UDim2.new(1, -24, 0, 0)
-closeButton.BackgroundTransparency = 1
+closeButton.Size = UDim2.fromOffset(28, 28)
+closeButton.Position = UDim2.new(1, -32, 0, 2)
 closeButton.Text = "X"
-closeButton.Font = Enum.Font.GothamBold
-closeButton.TextSize = 16
-closeButton.TextColor3 = Color3.fromRGB(255, 80, 80)
-closeButton.Parent = topBar
+closeButton.Font = Enum.Font.SourceSansBold
+closeButton.TextSize = 18
+closeButton.BackgroundColor3 = Color3.fromRGB(170, 40, 40)
+closeButton.TextColor3 = Color3.new(1,1,1)
+closeButton.ZIndex = 999999
+closeButton.Parent = frame
 
--- Minimize (-) button
-local minimizeButton = Instance.new("TextButton")
-minimizeButton.Name = "MinimizeButton"
-minimizeButton.Size = UDim2.new(0, 24, 0, 24)
-minimizeButton.Position = UDim2.new(1, -48, 0, 0)
-minimizeButton.BackgroundTransparency = 1
-minimizeButton.Text = "-"
-minimizeButton.Font = Enum.Font.GothamBold
-minimizeButton.TextSize = 18
-minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-minimizeButton.Parent = topBar
+local closeCorner = Instance.new("UICorner")
+closeCorner.Parent = closeButton
 
--- Content area
-local contentFrame = Instance.new("Frame")
-contentFrame.Name = "Content"
-contentFrame.Size = UDim2.new(1, -16, 1, -32)
-contentFrame.Position = UDim2.new(0, 8, 0, 28)
-contentFrame.BackgroundTransparency = 1
-contentFrame.Parent = mainFrame
+local commanderLabel = Instance.new("TextLabel")
+commanderLabel.BackgroundTransparency = 1
+commanderLabel.Position = UDim2.fromOffset(10, 35)
+commanderLabel.Size = UDim2.fromOffset(150, 20)
+commanderLabel.Text = "Commander(s)"
+commanderLabel.TextColor3 = Color3.new(1,1,1)
+commanderLabel.Font = Enum.Font.SourceSansBold
+commanderLabel.TextXAlignment = Enum.TextXAlignment.Left
+commanderLabel.TextSize = 18
+commanderLabel.ZIndex = 999999
+commanderLabel.Parent = frame
 
--- Toggle fly button
+local commanderBox = Instance.new("TextBox")
+commanderBox.Size = UDim2.new(1, -20, 0, 30)
+commanderBox.Position = UDim2.fromOffset(10, 58)
+commanderBox.PlaceholderText = "Player1, Player2"
+commanderBox.Text = ""
+commanderBox.ClearTextOnFocus = false
+commanderBox.TextColor3 = Color3.new(1,1,1)
+commanderBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+commanderBox.ZIndex = 999999
+commanderBox.Parent = frame
+
+local commanderCorner = Instance.new("UICorner")
+commanderCorner.Parent = commanderBox
+
+-- First key row
+local keyLabel = Instance.new("TextLabel")
+keyLabel.BackgroundTransparency = 1
+keyLabel.Position = UDim2.fromOffset(10, 96)
+keyLabel.Size = UDim2.fromOffset(80, 20)
+keyLabel.Text = "Key 1"
+keyLabel.TextColor3 = Color3.new(1,1,1)
+keyLabel.Font = Enum.Font.SourceSansBold
+keyLabel.TextXAlignment = Enum.TextXAlignment.Left
+keyLabel.TextSize = 18
+keyLabel.ZIndex = 999999
+keyLabel.Parent = frame
+
+local keyBox = Instance.new("TextBox")
+keyBox.Size = UDim2.fromOffset(80, 30)
+keyBox.Position = UDim2.fromOffset(10, 118)
+keyBox.PlaceholderText = "R"
+keyBox.Text = "R"
+keyBox.ClearTextOnFocus = false
+keyBox.TextColor3 = Color3.new(1,1,1)
+keyBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+keyBox.ZIndex = 999999
+keyBox.Parent = frame
+
+local keyCorner = Instance.new("UICorner")
+keyCorner.Parent = keyBox
+
+local cooldownLabel = Instance.new("TextLabel")
+cooldownLabel.BackgroundTransparency = 1
+cooldownLabel.Position = UDim2.fromOffset(110, 96)
+cooldownLabel.Size = UDim2.fromOffset(100, 20)
+cooldownLabel.Text = "Cooldown 1"
+cooldownLabel.TextColor3 = Color3.new(1,1,1)
+cooldownLabel.Font = Enum.Font.SourceSansBold
+cooldownLabel.TextXAlignment = Enum.TextXAlignment.Left
+cooldownLabel.TextSize = 18
+cooldownLabel.ZIndex = 999999
+cooldownLabel.Parent = frame
+
+local cooldownBox = Instance.new("TextBox")
+cooldownBox.Size = UDim2.fromOffset(100, 30)
+cooldownBox.Position = UDim2.fromOffset(110, 118)
+cooldownBox.PlaceholderText = "12"
+cooldownBox.Text = "12"
+cooldownBox.ClearTextOnFocus = false
+cooldownBox.TextColor3 = Color3.new(1,1,1)
+cooldownBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+cooldownBox.ZIndex = 999999
+cooldownBox.Parent = frame
+
+local cooldownCorner = Instance.new("UICorner")
+cooldownCorner.Parent = cooldownBox
+
+-- Second key row (new)
+local key2Label = Instance.new("TextLabel")
+key2Label.BackgroundTransparency = 1
+key2Label.Position = UDim2.fromOffset(10, 156)
+key2Label.Size = UDim2.fromOffset(80, 20)
+key2Label.Text = "Key 2"
+key2Label.TextColor3 = Color3.new(1,1,1)
+key2Label.Font = Enum.Font.SourceSansBold
+key2Label.TextXAlignment = Enum.TextXAlignment.Left
+key2Label.TextSize = 18
+key2Label.ZIndex = 999999
+key2Label.Parent = frame
+
+local key2Box = Instance.new("TextBox")
+key2Box.Size = UDim2.fromOffset(80, 30)
+key2Box.Position = UDim2.fromOffset(10, 178)
+key2Box.PlaceholderText = "F"
+key2Box.Text = "F"
+key2Box.ClearTextOnFocus = false
+key2Box.TextColor3 = Color3.new(1,1,1)
+key2Box.BackgroundColor3 = Color3.fromRGB(50,50,50)
+key2Box.ZIndex = 999999
+key2Box.Parent = frame
+
+local key2Corner = Instance.new("UICorner")
+key2Corner.Parent = key2Box
+
+local cooldown2Label = Instance.new("TextLabel")
+cooldown2Label.BackgroundTransparency = 1
+cooldown2Label.Position = UDim2.fromOffset(110, 156)
+cooldown2Label.Size = UDim2.fromOffset(100, 20)
+cooldown2Label.Text = "Cooldown 2"
+cooldown2Label.TextColor3 = Color3.new(1,1,1)
+cooldown2Label.Font = Enum.Font.SourceSansBold
+cooldown2Label.TextXAlignment = Enum.TextXAlignment.Left
+cooldown2Label.TextSize = 18
+cooldown2Label.ZIndex = 999999
+cooldown2Label.Parent = frame
+
+local cooldown2Box = Instance.new("TextBox")
+cooldown2Box.Size = UDim2.fromOffset(100, 30)
+cooldown2Box.Position = UDim2.fromOffset(110, 178)
+cooldown2Box.PlaceholderText = "8"
+cooldown2Box.Text = "8"
+cooldown2Box.ClearTextOnFocus = false
+cooldown2Box.TextColor3 = Color3.new(1,1,1)
+cooldown2Box.BackgroundColor3 = Color3.fromRGB(50,50,50)
+cooldown2Box.ZIndex = 999999
+cooldown2Box.Parent = frame
+
+local cooldown2Corner = Instance.new("UICorner")
+cooldown2Corner.Parent = cooldown2Box
+
 local toggleButton = Instance.new("TextButton")
-toggleButton.Name = "ToggleFlyButton"
-toggleButton.Size = UDim2.new(0, 120, 0, 40)
-toggleButton.Position = UDim2.new(0, 0, 0, 0)
-toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-toggleButton.TextColor3 = Color3.new(1, 1, 1)
-toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Size = UDim2.fromOffset(110, 32)
+toggleButton.Position = UDim2.fromOffset(220, 118)
+toggleButton.Text = "OFF"
+toggleButton.Font = Enum.Font.SourceSansBold
 toggleButton.TextSize = 18
-toggleButton.Text = "Start Fly"
-toggleButton.AutoButtonColor = true
-toggleButton.Parent = contentFrame
+toggleButton.TextColor3 = Color3.new(1,1,1)
+toggleButton.BackgroundColor3 = Color3.fromRGB(170,50,50)
+toggleButton.ZIndex = 999999
+toggleButton.Parent = frame
 
--- Speed label
-local speedLabel = Instance.new("TextLabel")
-speedLabel.Name = "SpeedLabel"
-speedLabel.Size = UDim2.new(0, 80, 0, 30)
-speedLabel.Position = UDim2.new(0, 0, 0, 50)
-speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "Speed:"
-speedLabel.Font = Enum.Font.Gotham
-speedLabel.TextSize = 16
-speedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-speedLabel.TextXAlignment = Enum.TextXAlignment.Left
-speedLabel.Parent = contentFrame
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.Parent = toggleButton
 
--- Speed textbox
-local speedBox = Instance.new("TextBox")
-speedBox.Name = "SpeedBox"
-speedBox.Size = UDim2.new(0, 120, 0, 30)
-speedBox.Position = UDim2.new(0, 80, 0, 50)
-speedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-speedBox.BorderSizePixel = 0
-speedBox.Text = "50"
-speedBox.PlaceholderText = "Speed"
-speedBox.Font = Enum.Font.Gotham
-speedBox.TextSize = 16
-speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-speedBox.ClearTextOnFocus = false
-speedBox.Parent = contentFrame
+local statusLabel = Instance.new("TextLabel")
+statusLabel.BackgroundTransparency = 1
+statusLabel.Position = UDim2.fromOffset(10, 220)
+statusLabel.Size = UDim2.new(1, -20, 0, 25)
+statusLabel.Text = "Waiting..."
+statusLabel.TextColor3 = Color3.new(1,1,1)
+statusLabel.Font = Enum.Font.SourceSansBold
+statusLabel.TextSize = 18
+statusLabel.ZIndex = 999999
+statusLabel.Parent = frame
 
--- Info label
-local infoLabel = Instance.new("TextLabel")
-infoLabel.Name = "InfoLabel"
-infoLabel.Size = UDim2.new(1, 0, 0, 30)
-infoLabel.Position = UDim2.new(0, 0, 0, 90)
-infoLabel.BackgroundTransparency = 1
-infoLabel.Text = "Use WASD + Space/Shift while flying."
-infoLabel.Font = Enum.Font.Gotham
-infoLabel.TextSize = 14
-infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoLabel.TextWrapped = true
-infoLabel.Parent = contentFrame
+--////////////////////////////////////////////////////
+-- Dragging (PC + Mobile)
+--////////////////////////////////////////////////////
 
--- Minimized box (+)
-local miniFrame = Instance.new("Frame")
-miniFrame.Name = "MiniFrame"
-miniFrame.Size = UDim2.new(0, 40, 0, 40)
-miniFrame.Position = mainFrame.Position
-miniFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-miniFrame.BorderSizePixel = 0
-miniFrame.Visible = false
-miniFrame.Active = true
-miniFrame.Draggable = true
-miniFrame.Parent = screenGui
+local dragging = false
+local dragStart
+local startPos
 
-local miniPlus = Instance.new("TextButton")
-miniPlus.Name = "MiniPlus"
-miniPlus.Size = UDim2.new(1, 0, 1, 0)
-miniPlus.Position = UDim2.new(0, 0, 0, 0)
-miniPlus.BackgroundTransparency = 1
-miniPlus.Text = "+"
-miniPlus.Font = Enum.Font.GothamBold
-miniPlus.TextSize = 24
-miniPlus.TextColor3 = Color3.fromRGB(0, 255, 150)
-miniPlus.Parent = miniFrame
-
---// Fly logic
-local flying = false
-local speed = 50
-local bodyGyro
-local bodyVelocity
-local flyConnection
-
-local moveDirection = Vector3.new()
-local keysDown = {
-	W = false,
-	A = false,
-	S = false,
-	D = false,
-	Space = false,
-	Shift = false,
-}
-
-local function updateMoveDirection()
-	local dir = Vector3.new()
-	if keysDown.W then dir = dir + Vector3.new(0, 0, -1) end
-	if keysDown.S then dir = dir + Vector3.new(0, 0, 1) end
-	if keysDown.A then dir = dir + Vector3.new(-1, 0, 0) end
-	if keysDown.D then dir = dir + Vector3.new(1, 0, 0) end
-	if keysDown.Space then dir = dir + Vector3.new(0, 1, 0) end
-	if keysDown.Shift then dir = dir + Vector3.new(0, -1, 0) end
-	if dir.Magnitude > 0 then
-		dir = dir.Unit
-	end
-	moveDirection = dir
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+    frame.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
 end
 
-UserInputService.InputBegan:Connect(function(input, gp)
-	if gp then return end
-	if input.KeyCode == Enum.KeyCode.W then keysDown.W = true
-	elseif input.KeyCode == Enum.KeyCode.S then keysDown.S = true
-	elseif input.KeyCode == Enum.KeyCode.A then keysDown.A = true
-	elseif input.KeyCode == Enum.KeyCode.D then keysDown.D = true
-	elseif input.KeyCode == Enum.KeyCode.Space then keysDown.Space = true
-	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then keysDown.Shift = true
-	end
-	updateMoveDirection()
-end)
+track(frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
 
-UserInputService.InputEnded:Connect(function(input, gp)
-	if gp then return end
-	if input.KeyCode == Enum.KeyCode.W then keysDown.W = false
-	elseif input.KeyCode == Enum.KeyCode.S then keysDown.S = false
-	elseif input.KeyCode == Enum.KeyCode.A then keysDown.A = false
-	elseif input.KeyCode == Enum.KeyCode.D then keysDown.D = false
-	elseif input.KeyCode == Enum.KeyCode.Space then keysDown.Space = false
-	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then keysDown.Shift = false
-	end
-	updateMoveDirection()
-end)
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
 
-local function startFlying()
-	if flying then return end
-	flying = true
+        track(input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end))
+    end
+end))
 
-	-- Validate speed from textbox
-	local num = tonumber(speedBox.Text)
-	if num and num > 0 then
-		speed = num
-	else
-		speedBox.Text = tostring(speed)
-	end
+track(UserInputService.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        updateDrag(input)
+    end
+end))
 
-	if not humanoidRootPart or not humanoid or humanoid.Health <= 0 then
-		flying = false
-		return
-	end
+track(closeButton.MouseButton1Click:Connect(cleanup))
 
-	bodyGyro = Instance.new("BodyGyro")
-	bodyGyro.P = 9e4
-	bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-	bodyGyro.CFrame = humanoidRootPart.CFrame
-	bodyGyro.Parent = humanoidRootPart
+local enabled = false
+local autoRunning = false
+--////////////////////////////////////////////////////
+-- Commander Handling
+--////////////////////////////////////////////////////
 
-	bodyVelocity = Instance.new("BodyVelocity")
-	bodyVelocity.Velocity = Vector3.zero
-	bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-	bodyVelocity.Parent = humanoidRootPart
+local function splitCommanders()
+    local results = {}
 
-	-- Disable default physics influence on movement
-	humanoid.PlatformStand = true
+    for entry in string.gmatch(commanderBox.Text, "[^,]+") do
+        entry = entry:gsub("^%s+", "")
+        entry = entry:gsub("%s+$", "")
 
-	if flyConnection then
-		flyConnection:Disconnect()
-	end
+        if entry ~= "" then
+            table.insert(results, string.lower(entry))
+        end
+    end
 
-	flyConnection = RunService.RenderStepped:Connect(function()
-		if not flying or not humanoidRootPart then return end
-
-		local cam = workspace.CurrentCamera
-		if not cam then return end
-
-		bodyGyro.CFrame = cam.CFrame
-
-		local camCF = cam.CFrame
-		local forward = camCF.LookVector
-		local right = camCF.RightVector
-		local up = Vector3.new(0, 1, 0)
-
-		local moveVec = Vector3.new()
-		moveVec = moveVec + forward * (keysDown.W and 1 or 0)
-		moveVec = moveVec - forward * (keysDown.S and 1 or 0)
-		moveVec = moveVec - right * (keysDown.A and 1 or 0)
-		moveVec = moveVec + right * (keysDown.D and 1 or 0)
-		moveVec = moveVec + up * (keysDown.Space and 1 or 0)
-		moveVec = moveVec - up * (keysDown.Shift and 1 or 0)
-
-		if moveVec.Magnitude > 0 then
-			moveVec = moveVec.Unit * speed
-		end
-
-		bodyVelocity.Velocity = moveVec
-	end)
-
-	toggleButton.Text = "Stop Fly"
-	toggleButton.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
+    return results
 end
 
-function stopFlying()
-	if not flying then return end
-	flying = false
+local function isCommander(playerName)
+    local lowerName = string.lower(playerName)
 
-	if flyConnection then
-		flyConnection:Disconnect()
-		flyConnection = nil
-	end
+    for _, commander in ipairs(splitCommanders()) do
+        if string.find(lowerName, commander, 1, true) then
+            return true
+        end
+    end
 
-	if bodyGyro then
-		bodyGyro:Destroy()
-		bodyGyro = nil
-	end
-
-	if bodyVelocity then
-		bodyVelocity:Destroy()
-		bodyVelocity = nil
-	end
-
-	if humanoid then
-		humanoid.PlatformStand = false
-	end
-
-	toggleButton.Text = "Start Fly"
-	toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    return false
 end
 
--- Ensure character binding and death handling
-bindCharacter(character)
+--////////////////////////////////////////////////////
+-- Key Pressing (generalized for two keys)
+--////////////////////////////////////////////////////
 
---// UI interactions
+local function pressKeyFor(box)
+    local keyText = tostring(box.Text or ""):upper()
 
--- Toggle fly button
-toggleButton.MouseButton1Click:Connect(function()
-	if flying then
-		stopFlying()
-	else
-		startFlying()
-	end
-end)
+    if keyText == "" then
+        return
+    end
 
--- Speed box change (optional live update)
-speedBox.FocusLost:Connect(function(enterPressed)
-	local num = tonumber(speedBox.Text)
-	if num and num > 0 then
-		speed = num
-	else
-		speedBox.Text = tostring(speed)
-	end
-end)
+    local success, keyCode = pcall(function()
+        return Enum.KeyCode[keyText]
+    end)
 
--- Minimize animation
-local minimized = false
-local originalSize = mainFrame.Size
-local originalPosition = mainFrame.Position
+    if not success or not keyCode then
+        return
+    end
 
-local function minimizeUI()
-	if minimized then return end
-	minimized = true
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(
+            true,
+            keyCode,
+            false,
+            game
+        )
 
-	originalSize = mainFrame.Size
-	originalPosition = mainFrame.Position
+        task.wait(0.05)
 
-	local tweenOut = TweenService:Create(
-		mainFrame,
-		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{Size = UDim2.new(0, 40, 0, 40)}
-	)
-	tweenOut:Play()
-	tweenOut.Completed:Wait()
-
-	contentFrame.Visible = false
-	topBar.Visible = false
-	mainFrame.Visible = false
-
-	miniFrame.Position = mainFrame.Position
-	miniFrame.Visible = true
+        VirtualInputManager:SendKeyEvent(
+            false,
+            keyCode,
+            false,
+            game
+        )
+    end)
 end
 
-local function restoreUI()
-	if not minimized then return end
-	minimized = false
-
-	miniFrame.Visible = false
-
-	mainFrame.Size = UDim2.new(0, 40, 0, 40)
-	mainFrame.Position = miniFrame.Position
-	mainFrame.Visible = true
-	topBar.Visible = true
-	contentFrame.Visible = true
-
-	local tweenIn = TweenService:Create(
-		mainFrame,
-		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{Size = originalSize}
-	)
-	tweenIn:Play()
+-- keep original pressKey for compatibility (calls the generalized function)
+local function pressKey()
+    pressKeyFor(keyBox)
 end
 
-minimizeButton.MouseButton1Click:Connect(function()
-	if minimized then
-		restoreUI()
-	else
-		minimizeUI()
-	end
-end)
+local loopThread
 
-miniPlus.MouseButton1Click:Connect(function()
-	restoreUI()
-end)
+local function stopLoop()
+    autoRunning = false
+end
 
--- Close UI completely (X)
-closeButton.MouseButton1Click:Connect(function()
-	-- Turn off fly if active
-	if flying then
-		stopFlying()
-	end
+local function startLoop()
+    if autoRunning then
+        return
+    end
 
-	-- Destroy all UI and connections
-	if flyConnection then
-		flyConnection:Disconnect()
-		flyConnection = nil
-	end
+    autoRunning = true
 
-	if screenGui then
-		screenGui:Destroy()
-	end
-end)
+    loopThread = task.spawn(function()
+
+        local last1 = 0
+        local last2 = 0
+
+        while autoRunning and not destroyed do
+
+            local cooldown1 = tonumber(cooldownBox.Text) or 1
+            local cooldown2 = tonumber(cooldown2Box.Text) or 1
+
+            cooldown1 = math.max(0.05, cooldown1)
+            cooldown2 = math.max(0.05, cooldown2)
+
+            -- Update status to show both keys and their cooldowns
+            statusLabel.Text =
+                "Running (" ..
+                string.upper(tostring(keyBox.Text)) ..
+                " every " ..
+                tostring(cooldown1) ..
+                "s; " ..
+                string.upper(tostring(key2Box.Text)) ..
+                " every " ..
+                tostring(cooldown2) ..
+                "s)"
+
+            local now = tick()
+
+            -- Press key 1 if its cooldown elapsed
+            if (now - last1) >= cooldown1 then
+                pressKeyFor(keyBox)
+                last1 = now
+            end
+
+            -- Press key 2 if its cooldown elapsed
+            if (now - last2) >= cooldown2 then
+                pressKeyFor(key2Box)
+                last2 = now
+            end
+
+            -- Sleep a short time to avoid busy loop but remain responsive
+            task.wait(0.05)
+        end
+
+        statusLabel.Text = "Waiting for .start"
+    end)
+end
+
+--////////////////////////////////////////////////////
+-- Toggle
+--////////////////////////////////////////////////////
+
+local function updateToggle()
+    if enabled then
+        toggleButton.Text = "ON"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(50,170,50)
+    else
+        toggleButton.Text = "OFF"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(170,50,50)
+
+        stopLoop()
+    end
+end
+
+track(toggleButton.MouseButton1Click:Connect(function()
+
+    enabled = not enabled
+
+    updateToggle()
+
+    if enabled then
+        statusLabel.Text = "Listening..."
+    else
+        statusLabel.Text = "Disabled"
+    end
+
+end))
+
+updateToggle()
+
+--////////////////////////////////////////////////////
+-- TextChatService Detection
+--////////////////////////////////////////////////////
+
+local function handleChatMessage(senderName, message)
+
+    if not enabled then
+        return
+    end
+
+    if not isCommander(senderName) then
+        return
+    end
+
+    local lowerMessage =
+        string.lower(
+            tostring(message)
+        )
+
+    if lowerMessage == ".start" then
+        startLoop()
+        return
+    end
+
+    if lowerMessage == ".stop" then
+        stopLoop()
+        statusLabel.Text = "Stopped"
+        return
+    end
+end
+--////////////////////////////////////////////////////
+-- Modern TextChatService
+--////////////////////////////////////////////////////
+
+local textChannels = TextChatService:WaitForChild("TextChannels", 10)
+
+if textChannels then
+
+    local generalChannel =
+        textChannels:FindFirstChild("RBXGeneral")
+
+    if generalChannel then
+
+        track(
+            generalChannel.MessageReceived:Connect(function(message)
+
+                if destroyed then
+                    return
+                end
+
+                local source = message.TextSource
+
+                if not source then
+                    return
+                end
+
+                local sender =
+                    Players:GetPlayerByUserId(
+                        source.UserId
+                    )
+
+                if not sender then
+                    return
+                end
+
+                handleChatMessage(
+                    sender.Name,
+                    message.Text
+                )
+
+            end)
+        )
+
+    end
+
+end
+
+--////////////////////////////////////////////////////
+-- Fallback For Older Chat Systems
+--////////////////////////////////////////////////////
+
+local function hookPlayer(playerObj)
+
+    track(
+        playerObj.Chatted:Connect(function(message)
+
+            if destroyed then
+                return
+            end
+
+            handleChatMessage(
+                playerObj.Name,
+                message
+            )
+
+        end)
+    )
+
+end
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    hookPlayer(plr)
+end
+
+track(
+    Players.PlayerAdded:Connect(function(plr)
+        hookPlayer(plr)
+    end)
+)
+
+--////////////////////////////////////////////////////
+-- Startup
+--////////////////////////////////////////////////////
+
+statusLabel.Text = "Disabled"
+
+updateToggle()
+
+--////////////////////////////////////////////////////
+-- Safety Cleanup
+--////////////////////////////////////////////////////
+
+track(
+    game:GetService("Players").PlayerRemoving:Connect(function()
+
+        if player == Players.LocalPlayer then
+            cleanup()
+        end
+
+    end)
+)
+
+track(
+    gui.Destroying:Connect(function()
+        destroyed = true
+    end)
+)
+
+print("[Auto Command Key Presser] Loaded")
+print("Commands:")
+print(".start = begin auto key press")
+print(".stop = stop auto key press")
+
+--////////////////////////////////////////////////////
+-- Finished
+--////////////////////////////////////////////////////
