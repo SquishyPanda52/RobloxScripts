@@ -1205,7 +1205,7 @@ table.insert(connections, UserInputService.InputBegan:Connect(function(input, gp
         if attackBox then attackBox:CaptureFocus() end
     end
 
-    if input.KeyCode == Enum.KeyCode.R then
+    if input.KeyCode == Enum.KeyCode.` then
         if attackBox and not attackBox:IsFocused() then onAttackToggle() end
     end
 
