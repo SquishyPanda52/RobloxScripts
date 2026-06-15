@@ -358,7 +358,7 @@ local function startLoop()
 
 		end
 
-		statusLabel.Text = "Waiting for .start"
+		statusLabel.Text = "Waiting for -start"
 	end)
 end
 
@@ -413,7 +413,7 @@ local function handleChatMessage(senderName, message)
 			tostring(message)
 		)
 
-	if lowerMessage == ".start" then
+	if lowerMessage == "-start" then
 		startLoop()
 		return
 	end
@@ -534,8 +534,8 @@ track(
 
 print("[Auto Command Key Presser] Loaded")
 print("Commands:")
-print(".start = begin auto key press")
-print(".stop = stop auto key press")
+print("-start = begin auto key press")
+print("-stop = stop auto key press")
 
 --////////////////////////////////////////////////////
 -- Finished
