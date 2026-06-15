@@ -1197,7 +1197,7 @@ if commanderToggle then
     end))
 end
 
--- 🔥 KEYBINDS: T focuses attackBox, R toggles Attack, Y toggles Follow
+-- 🔥 KEYBINDS: T focuses attackBox, B toggles Attack, Y toggles Follow
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
 
