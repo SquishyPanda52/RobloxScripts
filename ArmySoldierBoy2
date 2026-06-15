@@ -1,16 +1,6 @@
---[[
-  Juggernaut mode for battle royale game coming out 🐼 — Follow + Attack + Auto-Press (Client-Only)
-  - Follow and Attack are mutually exclusive.
-  - Attack includes an auto-press (exactly one input): Mouse1, Mouse2, or a single KeyCode.
-  - Rate slider (5–15 presses/sec) and a brief start delay to avoid re-toggling when using Mouse1.
-  - Draggable, compact UI with minimize and hard close.
-  - Re-inject safe: re-running replaces previous instance cleanly.
-  - Team Attack mode (targets players by team name).
-  - Behavior: All attack modes and follow are toggled off on death/respawn.
-  - Commander command listener (TextChatService) with UI textbox and toggle.
-  - Commands: .atk/.attack, .follow/.goto, .hold, .stop, .atk random, .atk others, .atk all/everyone
-  - Fixes: newest commander command HARD overrides previous commands; normalized parsing to avoid stray characters.
-]]
+-- Juggernaut mode for battle royale game coming out 🐼 — Follow + Attack + Auto-Press (Client-Only)
+-- Commander command listener (TextChatService) with UI textbox and toggle.
+-- (Modified: ignore commander chat unless it begins with '.' and is a valid command)
 
 -- Singleton cleanup (prevent duplicates)
 if _G.HiltonExec and _G.HiltonExec.Cleanup then
@@ -24,7 +14,6 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local TextChatService = game:GetService("TextChatService")
-local PathfindingService = game:GetService("PathfindingService")
 
 -- Locals
 local localPlayer = Players.LocalPlayer
@@ -38,8 +27,6 @@ local AUTOPRESS_MIN_HZ = 5
 local AUTOPRESS_MAX_HZ = 15
 local AUTOPRESS_START_DELAY = 0.35
 local HOLD_REACH_THRESHOLD = 3 -- studs to consider "reached" for .hold
-local PATH_RECOMPUTE_DISTANCE = 3 -- if target moved more than this, recompute path
-local PATH_WAYPOINT_TIMEOUT = 5 -- seconds to wait for MoveToFinished before moving on
 
 -- UI State
 local gui, mainFrame, titleBar, minBtn, closeBtn
@@ -81,10 +68,6 @@ local connections = {}
 -- Humanoid/character death connection
 local localHumanoidDiedConn = nil
 local localCharacterRemovingConn = nil
-
--- Pathfinding task control
-local currentPathTask = nil
-local currentPathCancel = false
 
 -- Utils
 local function trim(s)
@@ -148,10 +131,6 @@ local function getHumanoid(p)
 end
 
 local function stopMovementImmediate()
-    -- Cancel any ongoing path tasks
-    currentPathCancel = true
-    currentPathTask = nil
-
     local char = localPlayer.Character
     if not char then return end
     local humanoid = char:FindFirstChildOfClass("Humanoid")
@@ -210,10 +189,6 @@ local function hardOverridePreviousCommands()
         teamAttackConn = nil
     end
 
-    -- Cancel path tasks
-    currentPathCancel = true
-    currentPathTask = nil
-
     -- Clear flags and targets
     followEnabled = false
     followTargetPlayer = nil
@@ -233,104 +208,6 @@ local function hardOverridePreviousCommands()
     setBtnState(teamAttackBtn, false, "TeamAttack")
 end
 
--- Pathfinding helpers
-local function safeComputePath(startPos, endPos)
-    local success, path = pcall(function()
-        local p = PathfindingService:CreatePath({
-            AgentRadius = 2,
-            AgentHeight = 5,
-            AgentCanJump = true,
-            AgentMaxSlope = 45,
-        })
-        p:ComputeAsync(startPos, endPos)
-        return p
-    end)
-    if success then
-        return path
-    end
-    return nil
-end
-
--- Follow a path's waypoints using humanoid:MoveTo; runs in a coroutine so it doesn't block Heartbeat
-local function followPathWaypoints(humanoid, waypoints)
-    if not humanoid or not waypoints or #waypoints == 0 then return end
-    -- Cancel previous path task
-    currentPathCancel = false
-    local thisTaskId = {}
-    currentPathTask = thisTaskId
-
-    local function waitForMoveTo(targetPos, timeout)
-        local finished = false
-        local conn
-        conn = humanoid.MoveToFinished:Connect(function(reached)
-            if conn then
-                finished = reached
-                conn:Disconnect()
-            end
-        end)
-        humanoid:MoveTo(targetPos)
-        local startTime = tick()
-        while not finished and tick() - startTime < (timeout or PATH_WAYPOINT_TIMEOUT) do
-            if currentPathCancel or currentPathTask ~= thisTaskId then
-                if conn and conn.Connected then conn:Disconnect() end
-                return false
-            end
-            RunService.Heartbeat:Wait()
-        end
-        if conn and conn.Connected then conn:Disconnect() end
-        return finished
-    end
-
-    -- Iterate waypoints
-    for i, wp in ipairs(waypoints) do
-        if currentPathCancel or currentPathTask ~= thisTaskId then
-            return
-        end
-        local pos = wp.Position
-        waitForMoveTo(pos, PATH_WAYPOINT_TIMEOUT)
-        RunService.Heartbeat:Wait()
-    end
-end
-
--- Request a path to a position; will compute and follow waypoints in background
-local function requestPathTo(targetPos)
-    -- Cancel any existing path task
-    currentPathCancel = true
-    currentPathTask = nil
-    -- small wait to ensure previous task sees cancel
-    RunService.Heartbeat:Wait()
-    currentPathCancel = false
-
-    local char = localPlayer.Character
-    if not char then return end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not (humanoid and hrp) then return end
-
-    -- Run path computation and following in a coroutine
-    coroutine.wrap(function()
-        if currentPathCancel then return end
-        local startPos = hrp.Position
-        local path = safeComputePath(startPos, targetPos)
-        if not path then
-            -- fallback: direct MoveTo
-            if not currentPathCancel then
-                pcall(function() humanoid:MoveTo(targetPos) end)
-            end
-            return
-        end
-        if path.Status ~= Enum.PathStatus.Success then
-            -- fallback: direct MoveTo
-            if not currentPathCancel then
-                pcall(function() humanoid:MoveTo(targetPos) end)
-            end
-            return
-        end
-        local waypoints = path:GetWaypoints()
-        followPathWaypoints(humanoid, waypoints)
-    end)()
-end
-
 -- Follow routine
 local function stopFollow()
     followEnabled = false
@@ -341,9 +218,6 @@ local function stopFollow()
         followConn:Disconnect()
         followConn = nil
     end
-    -- cancel path tasks
-    currentPathCancel = true
-    currentPathTask = nil
     stopMovementImmediate()
     setBtnState(followBtn, false, "Follow")
 end
@@ -367,8 +241,7 @@ local function startFollow()
         if holdMode and holdPosition then
             local dist = (holdPosition - myRoot.Position).Magnitude
             if dist > HOLD_REACH_THRESHOLD then
-                -- Use pathfinding to move to holdPosition
-                requestPathTo(holdPosition)
+                myHum:MoveTo(holdPosition)
             else
                 -- reached: turn off follow and holdMode
                 holdMode = false
@@ -399,10 +272,8 @@ local function startFollow()
 
         local dist = (thRoot.Position - myRoot.Position).Magnitude
         if dist > FOLLOW_FAR then
-            -- Use pathfinding to approach target; aim slightly behind target to avoid collision
             local dir = (thRoot.Position - myRoot.Position).Unit
-            local targetPos = thRoot.Position - dir * 2
-            requestPathTo(targetPos)
+            myHum:MoveTo(thRoot.Position - dir * 2)
         elseif dist < FOLLOW_NEAR then
             myHum:Move(Vector3.new())
         end
@@ -419,9 +290,6 @@ local function stopAttack()
         attackConn:Disconnect()
         attackConn = nil
     end
-    -- cancel path tasks
-    currentPathCancel = true
-    currentPathTask = nil
     stopMovementImmediate()
     setBtnState(attackBtn, false, "Attack")
     if autoPressConn and not (attackEnabled or teamAttackEnabled) then
@@ -474,9 +342,6 @@ local function stopTeamAttack()
         teamAttackConn:Disconnect()
         teamAttackConn = nil
     end
-    -- cancel path tasks
-    currentPathCancel = true
-    currentPathTask = nil
     stopMovementImmediate()
     setBtnState(teamAttackBtn, false, "TeamAttack")
     if autoPressConn and not (attackEnabled or teamAttackEnabled) then
@@ -529,8 +394,7 @@ local function startTeamAttack()
         end
 
         if targetPos then
-            -- Use pathfinding to move to the target position
-            requestPathTo(targetPos)
+            myHum:MoveTo(targetPos)
         end
     end)
     table.insert(connections, teamAttackConn)
@@ -576,8 +440,7 @@ local function startAttack()
         end
 
         if targetPos then
-            -- Use pathfinding to move to the target position
-            requestPathTo(targetPos)
+            myHum:MoveTo(targetPos)
         end
     end)
     table.insert(connections, attackConn)
@@ -925,19 +788,26 @@ if TextChatService then
         -- Only accept commands from players listed in commanderBox
         if not isCommander(plr.Name) then return end
 
-        -- newest commander overrides everything
-        setLastCommander(plr)
-        hardOverridePreviousCommands()
-
-        local text = tostring(msg.Text or "")
-        local lower = text:lower()
+        -- Only process messages that start with a dot prefix (explicit command)
+        local rawText = tostring(msg.Text or "")
+        if not rawText:match("^%s*%.") then
+            -- Not a prefixed command; ignore
+            return
+        end
 
         -- Extract command and argument robustly: command is first token after leading dot
-        local cmd, arg = lower:match("^%.([%w_]+)%s*(.*)$")
+        -- Use the original text but lower-case for matching
+        local lowerText = rawText:lower()
+        local cmd, arg = lowerText:match("^%s*%.([%w_]+)%s*(.*)$")
         if not cmd then
+            -- Not a valid command token after the dot; ignore
             return
         end
         arg = trim(arg or "")
+
+        -- newest commander overrides everything (only after we confirmed it's a valid command)
+        setLastCommander(plr)
+        hardOverridePreviousCommands()
 
         -- Normalize synonyms
         if cmd == "attack" then cmd = "atk" end
@@ -1021,7 +891,7 @@ if TextChatService then
                 return
             end
 
-            -- default: parse provided names
+            -- Otherwise treat arg as comma-separated names
             attackBox.Text = arg
             parseAttackNames(attackBox.Text)
             pcall(function()
@@ -1036,188 +906,156 @@ if TextChatService then
         -- .follow / .goto handling
         if cmd == "follow" then
             local lowarg = arg:lower()
-            if lowarg == "stop" or lowarg == "none" or lowarg == "" then
-                if followEnabled then stopFollow() end
+            if lowarg == "me" or lowarg == "" then
+                followBox.Text = plr.Name
+                followTargetPlayer = plr
+                followEnabled = true
+                startFollow()
                 return
             end
 
             if lowarg == "hold" then
-                -- hold at current position
+                -- hold: go to the commander's current position and stay
                 local hrp = getHRP(plr)
                 if hrp then
                     holdMode = true
                     holdPosition = hrp.Position
                     followEnabled = true
-                    followTargetPlayer = nil
                     startFollow()
                 end
                 return
             end
 
-            -- follow a named player
+            -- otherwise treat arg as username fragment
+            followBox.Text = arg
             local target = findClosestPlayer(arg)
             if target then
                 followTargetPlayer = target
                 followEnabled = true
-                holdMode = false
                 startFollow()
             end
             return
         end
 
-        -- .hold command: set hold position to commander's current position
+        -- .hold command (explicit)
         if cmd == "hold" then
-            local hrp = plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            -- go to the commander's current position and stay
+            local hrp = getHRP(plr)
             if hrp then
                 holdMode = true
                 holdPosition = hrp.Position
                 followEnabled = true
-                followTargetPlayer = nil
                 startFollow()
             end
             return
         end
 
-        -- .stop handled earlier; unknown commands ignored
+        -- .teamattack handling
+        if cmd == "teamattack" or cmd == "tattack" then
+            teamAttackBox.Text = arg
+            parseTeamNames(teamAttackBox.Text)
+            teamAttackEnabled = true
+            startTeamAttack()
+            return
+        end
+
+        -- Unknown command: ignore (do not toggle anything)
+        return
     end)
 end
 
--- UI interactions and bindings
-local function setupUIInteractions()
-    -- Commander toggle
-    commanderToggle.MouseButton1Click:Connect(function()
-        commanderMode = not commanderMode
-        commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "On" or "Off")
-        commanderToggle.BackgroundColor3 = commanderMode and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
-    end)
+-- Build UI and wire up local controls
+buildUI()
 
-    -- Follow button
-    followBtn.MouseButton1Click:Connect(function()
-        if followEnabled then
-            stopFollow()
-            return
-        end
+-- Commander toggle button behavior
+commanderToggle.MouseButton1Click:Connect(function()
+    commanderMode = not commanderMode
+    commanderToggle.Text = "Cmd Mode: " .. (commanderMode and "On" or "Off")
+    commanderToggle.BackgroundColor3 = commanderMode and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(70, 0, 0)
+end)
+
+-- Follow button local toggle (for manual control)
+followBtn.MouseButton1Click:Connect(function()
+    if followEnabled then
+        stopFollow()
+    else
         local name = trim(followBox.Text or "")
-        if name == "" then
-            -- nothing: toggle off
-            stopFollow()
-            return
-        end
-        local target = findClosestPlayer(name)
-        if target then
-            -- ensure attack modes are off
-            if attackEnabled then stopAttack() end
-            if teamAttackEnabled then stopTeamAttack() end
-            followTargetPlayer = target
-            followEnabled = true
-            holdMode = false
-            startFollow()
-        end
-    end)
-
-    -- Attack button
-    attackBtn.MouseButton1Click:Connect(function()
-        if attackEnabled then
-            stopAttack()
-            return
-        end
-        local txt = trim(attackBox.Text or "")
-        if txt == "" then
-            stopAttack()
-            return
-        end
-        -- ensure follow is off
-        if followEnabled then stopFollow() end
-        parseAttackNames(txt)
-        attackEnabled = true
-        startAttack()
-    end)
-
-    -- Team attack button
-    teamAttackBtn.MouseButton1Click:Connect(function()
-        if teamAttackEnabled then
-            stopTeamAttack()
-            return
-        end
-        local txt = trim(teamAttackBox.Text or "")
-        if txt == "" then
-            stopTeamAttack()
-            return
-        end
-        -- ensure follow and attack are off
-        if followEnabled then stopFollow() end
-        if attackEnabled then stopAttack() end
-        parseTeamNames(txt)
-        teamAttackEnabled = true
-        startTeamAttack()
-    end)
-
-    -- Auto binding capture: click the box then press a key or mouse button to bind
-    autoBox.Focused:Connect(function()
-        autoBox.Text = "Press key/mouse..."
-        if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
-        bindingCaptureConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-            if gameProcessed then return end
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                binding = { kind = "mouse", button = 1 }
-                autoBox.Text = "Mouse1"
-            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-                binding = { kind = "mouse", button = 2 }
-                autoBox.Text = "Mouse2"
-            elseif input.UserInputType == Enum.UserInputType.Keyboard then
-                binding = { kind = "key", keyCode = input.KeyCode }
-                autoBox.Text = tostring(input.KeyCode):gsub("Enum.KeyCode.", "")
+        if name ~= "" then
+            local target = findClosestPlayer(name)
+            if target then
+                followTargetPlayer = target
+                followEnabled = true
+                startFollow()
             end
-            if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
-            autoBox:ReleaseFocus()
-        end)
-    end)
-
-    -- Rate buttons
-    rateMinusBtn.MouseButton1Click:Connect(function()
-        AUTOPRESS_HZ = math.max(AUTOPRESS_MIN_HZ, AUTOPRESS_HZ - 1)
-        rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
-    end)
-    ratePlusBtn.MouseButton1Click:Connect(function()
-        AUTOPRESS_HZ = math.min(AUTOPRESS_MAX_HZ, AUTOPRESS_HZ + 1)
-        rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
-    end)
-
-    -- Keep UI textboxes in sync with parsing when changed manually
-    attackBox.FocusLost:Connect(function()
-        parseAttackNames(attackBox.Text)
-    end)
-    teamAttackBox.FocusLost:Connect(function()
-        parseTeamNames(teamAttackBox.Text)
-    end)
-end
-
--- Character / respawn handling: disable modes on death/respawn
-local function onCharacterAdded(char)
-    -- disconnect previous humanoid died if present
-    if localHumanoidDiedConn then
-        pcall(function() localHumanoidDiedConn:Disconnect() end)
-        localHumanoidDiedConn = nil
+        end
     end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        localHumanoidDiedConn = humanoid.Died:Connect(function()
-            -- turn off everything on death
-            if followEnabled then stopFollow() end
-            if attackEnabled then stopAttack() end
-            if teamAttackEnabled then stopTeamAttack() end
-            holdMode = false
-            holdPosition = nil
-        end)
-    end
-end
+end)
 
--- Cleanup
-local function cleanup()
+-- Attack button local toggle (for manual control)
+attackBtn.MouseButton1Click:Connect(function()
+    if attackEnabled then
+        stopAttack()
+    else
+        local txt = trim(attackBox.Text or "")
+        if txt ~= "" then
+            parseAttackNames(txt)
+            attackEnabled = true
+            startAttack()
+        end
+    end
+end)
+
+-- TeamAttack button local toggle
+teamAttackBtn.MouseButton1Click:Connect(function()
+    if teamAttackEnabled then
+        stopTeamAttack()
+    else
+        local txt = trim(teamAttackBox.Text or "")
+        if txt ~= "" then
+            parseTeamNames(txt)
+            teamAttackEnabled = true
+            startTeamAttack()
+        end
+    end
+end)
+
+-- AutoBox capture (click then press)
+autoBox.Focused:Connect(function()
+    -- capture next input to set binding
+    if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
+    bindingCaptureConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            binding = { kind = "mouse", button = 1 }
+            autoBox.Text = "Mouse1"
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+            binding = { kind = "mouse", button = 2 }
+            autoBox.Text = "Mouse2"
+        elseif input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode then
+            binding = { kind = "key", keyCode = input.KeyCode }
+            autoBox.Text = tostring(input.KeyCode):gsub("Enum.KeyCode.", "")
+        end
+        if bindingCaptureConn then bindingCaptureConn:Disconnect() bindingCaptureConn = nil end
+        autoBox:ReleaseFocus()
+    end)
+end)
+
+-- Rate buttons
+rateMinusBtn.MouseButton1Click:Connect(function()
+    AUTOPRESS_HZ = math.max(AUTOPRESS_MIN_HZ, AUTOPRESS_HZ - 1)
+    rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
+end)
+ratePlusBtn.MouseButton1Click:Connect(function()
+    AUTOPRESS_HZ = math.min(AUTOPRESS_MAX_HZ, AUTOPRESS_HZ + 1)
+    rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
+end)
+
+-- Cleanup function
+function _G.HiltonExec.Cleanup()
     -- Disconnect connections
-    for _, conn in ipairs(connections) do
-        if conn and conn.Disconnect then
-            pcall(function() conn:Disconnect() end)
+    for _, c in ipairs(connections) do
+        if c and c.Disconnect then
+            pcall(function() c:Disconnect() end)
         end
     end
     connections = {}
@@ -1226,57 +1064,69 @@ local function cleanup()
         pcall(function() bindingCaptureConn:Disconnect() end)
         bindingCaptureConn = nil
     end
+
     if autoPressConn then
         pcall(function() autoPressConn:Disconnect() end)
         autoPressConn = nil
     end
+
     if followConn then
         pcall(function() followConn:Disconnect() end)
         followConn = nil
     end
+
     if attackConn then
         pcall(function() attackConn:Disconnect() end)
         attackConn = nil
     end
+
     if teamAttackConn then
         pcall(function() teamAttackConn:Disconnect() end)
         teamAttackConn = nil
     end
+
     if localHumanoidDiedConn then
         pcall(function() localHumanoidDiedConn:Disconnect() end)
         localHumanoidDiedConn = nil
     end
 
-    currentPathCancel = true
-    currentPathTask = nil
+    if localCharacterRemovingConn then
+        pcall(function() localCharacterRemovingConn:Disconnect() end)
+        localCharacterRemovingConn = nil
+    end
 
-    if gui and gui.Parent then
+    -- Destroy GUI
+    if gui and gui.Destroy then
         pcall(function() gui:Destroy() end)
     end
 
-    -- clear globals
+    -- Clear globals
     _G.HiltonExec = nil
 end
 
--- Expose cleanup
-_G.HiltonExec.Cleanup = cleanup
-
--- Initialize
-buildUI()
-setupUIInteractions()
-
--- Connect character handling
-if localPlayer.Character then
-    onCharacterAdded(localPlayer.Character)
+-- Ensure cleanup on script end (safety)
+local function onCharacterRemoving()
+    if followEnabled then stopFollow() end
+    if attackEnabled then stopAttack() end
+    if teamAttackEnabled then stopTeamAttack() end
 end
-localPlayer.CharacterAdded:Connect(function(char)
+
+local function onCharacterAdded(char)
+    -- re-hook if needed
+    if followEnabled or attackEnabled or teamAttackEnabled then
+        -- modes should be off on death/respawn per original behavior
+        followEnabled = false
+        attackEnabled = false
+        teamAttackEnabled = false
+        setBtnState(followBtn, false, "Follow")
+        setBtnState(attackBtn, false, "Attack")
+        setBtnState(teamAttackBtn, false, "TeamAttack")
+    end
+end
+
+local char = localPlayer.Character
+if char then
     onCharacterAdded(char)
-end)
-
--- Final: set initial UI states
-setBtnState(followBtn, followEnabled, "Follow")
-setBtnState(attackBtn, attackEnabled, "Attack")
-setBtnState(teamAttackBtn, teamAttackEnabled, "TeamAttack")
-rateLabel.Text = tostring(AUTOPRESS_HZ) .. "/s"
-
--- End of script
+end
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
+localPlayer.CharacterRemoving:Connect(onCharacterRemoving)
