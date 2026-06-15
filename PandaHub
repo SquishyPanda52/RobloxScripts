@@ -1,14 +1,19 @@
--- Place this LocalScript in StarterPlayerScripts (it will run in the client)
--- Single-file runtime LocalScript that creates a draggable UI and telekinesis functionality.
+-- Place this LocalScript in StarterPlayerScripts (client-only)
+-- Telekinesis UI + runtime telekinesis with mass-scaled forces for heavy parts
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- Config defaults
 local DEFAULT_DAMPING = 5
-local DEFAULT_STRENGTH = 1e5 -- used to scale MaxForce
+local DEFAULT_STRENGTH = 1000 -- base strength multiplier (per kg)
+local MIN_MAXFORCE = 1e4
+local MAX_MAXFORCE = 1e9
+local MIN_P = 1000
+local MAX_P = 1e7
 
 -- State
 local enabled = false
@@ -39,25 +44,38 @@ local function clearForces()
     forces = {}
 end
 
--- Create BodyPosition and BodyGyro for a part
-local function applyForceToPart(part, targetCFrame, damping, strength)
-    -- remove existing
-    for i, child in pairs(part:GetChildren()) do
+-- Create BodyPosition and BodyGyro for a part with mass-scaled parameters
+local function applyForceToPart(part, targetCFrame, damping, strengthMultiplier)
+    -- remove existing movers
+    for _, child in pairs(part:GetChildren()) do
         if child:IsA("BodyPosition") or child:IsA("BodyGyro") then
             child:Destroy()
         end
     end
 
+    -- get mass safely
+    local mass = 1
+    local ok, m = pcall(function() return part:GetMass() end)
+    if ok and type(m) == "number" and m > 0 then
+        mass = m
+    end
+
+    -- compute scaled MaxForce and P based on mass and user strength multiplier
+    -- strengthMultiplier is treated as Newtons per kilogram (approx)
+    local rawForce = mass * strengthMultiplier
+    local clampedForce = math.clamp(rawForce, MIN_MAXFORCE, MAX_MAXFORCE)
+
     local bp = Instance.new("BodyPosition")
-    bp.MaxForce = Vector3.new(strength, strength, strength)
-    bp.P = 12500 -- default spring constant; we'll rely on damping for smoothing
+    bp.MaxForce = Vector3.new(clampedForce, clampedForce, clampedForce)
+    -- P (power) scaled by mass to help heavier parts respond; clamped to avoid extremes
+    bp.P = math.clamp(12500 * mass, MIN_P, MAX_P)
     bp.D = damping
     bp.Position = targetCFrame.Position
     bp.Parent = part
 
     local bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(strength, strength, strength)
-    bg.P = 3000
+    bg.MaxTorque = Vector3.new(clampedForce, clampedForce, clampedForce)
+    bg.P = math.clamp(3000 * mass, MIN_P, MAX_P)
     bg.D = damping
     bg.CFrame = targetCFrame
     bg.Parent = part
@@ -67,18 +85,14 @@ end
 
 -- Update loop: move all tracked parts toward target
 local function updateForces()
-    -- get target players from textbox
     local targetText = nameBox.Text
     local targets = findPlayersByPartial(targetText)
     if #targets == 0 then
-        -- nothing to do
         return
     end
 
-    -- parse damping and strength
     local damping = tonumber(dampingBox.Text) or DEFAULT_DAMPING
     local strengthInput = tonumber(strengthBox.Text) or DEFAULT_STRENGTH
-    -- clamp values to sane ranges
     if damping < 0 then damping = 0 end
     if damping > 100 then damping = 100 end
     if strengthInput < 1 then strengthInput = 1 end
@@ -98,11 +112,9 @@ local function updateForces()
 
     -- iterate workspace parts and apply forces where appropriate
     for _, part in pairs(workspace:GetDescendants()) do
-        -- skip if not a BasePart
         if part:IsA("BasePart") then
-            -- skip anchored parts
             if not part.Anchored then
-                -- skip parts that are part of any player's character (including local player)
+                -- skip parts that are part of any player's character
                 local isCharacterPart = false
                 for _, pl in pairs(Players:GetPlayers()) do
                     if pl.Character and part:IsDescendantOf(pl.Character) then
@@ -111,19 +123,24 @@ local function updateForces()
                     end
                 end
                 if not isCharacterPart then
-                    -- skip common humanoid limb names (safety)
                     local nameLower = part.Name:lower()
                     if nameLower ~= "head" and nameLower ~= "torso" and nameLower ~= "humanoidrootpart" and nameLower ~= "right arm" and nameLower ~= "left arm" and nameLower ~= "right leg" and nameLower ~= "left leg" then
-                        -- apply or update force
                         local targetCFrame = CFrame.new(targetPos)
                         local existing = forces[part]
                         if existing and existing.bp and existing.bg then
-                            -- update properties
-                            existing.bp.MaxForce = Vector3.new(strengthInput, strengthInput, strengthInput)
+                            -- update properties using mass scaling
+                            local mass = 1
+                            local ok, m = pcall(function() return part:GetMass() end)
+                            if ok and type(m) == "number" and m > 0 then mass = m end
+                            local rawForce = mass * strengthInput
+                            local clampedForce = math.clamp(rawForce, MIN_MAXFORCE, MAX_MAXFORCE)
+                            existing.bp.MaxForce = Vector3.new(clampedForce, clampedForce, clampedForce)
                             existing.bp.D = damping
                             existing.bp.Position = targetPos
-                            existing.bg.MaxTorque = Vector3.new(strengthInput, strengthInput, strengthInput)
+                            existing.bp.P = math.clamp(12500 * mass, MIN_P, MAX_P)
+                            existing.bg.MaxTorque = Vector3.new(clampedForce, clampedForce, clampedForce)
                             existing.bg.D = damping
+                            existing.bg.P = math.clamp(3000 * mass, MIN_P, MAX_P)
                             existing.bg.CFrame = targetCFrame
                         else
                             applyForceToPart(part, targetCFrame, damping, strengthInput)
@@ -131,7 +148,7 @@ local function updateForces()
                     end
                 end
             else
-                -- if anchored but we previously applied forces, remove them
+                -- anchored but previously forced: remove
                 if forces[part] then
                     if forces[part].bp and forces[part].bp.Parent then forces[part].bp:Destroy() end
                     if forces[part].bg and forces[part].bg.Parent then forces[part].bg:Destroy() end
@@ -147,10 +164,8 @@ local function setEnabled(state)
     enabled = state
     if enabled then
         toggleButton.Text = "TPUA: ON"
-        -- start heartbeat
         if heartbeatConn then heartbeatConn:Disconnect() end
         heartbeatConn = RunService.Heartbeat:Connect(function()
-            -- safe pcall to avoid runtime errors killing the loop
             local ok, err = pcall(updateForces)
             if not ok then
                 warn("Telekinesis update error:", err)
@@ -181,7 +196,6 @@ local function createUI()
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = gui
 
-    -- Top bar
     local topBar = Instance.new("Frame")
     topBar.Name = "TopBar"
     topBar.Size = UDim2.new(1, 0, 0, 28)
@@ -201,7 +215,6 @@ local function createUI()
     title.TextSize = 18
     title.Parent = topBar
 
-    -- Minimize button
     minimizeBtn = Instance.new("TextButton")
     minimizeBtn.Name = "Minimize"
     minimizeBtn.Size = UDim2.new(0, 24, 0, 24)
@@ -213,7 +226,6 @@ local function createUI()
     minimizeBtn.TextColor3 = Color3.fromRGB(255,255,255)
     minimizeBtn.Parent = topBar
 
-    -- Close button
     closeBtn = Instance.new("TextButton")
     closeBtn.Name = "Close"
     closeBtn.Size = UDim2.new(0, 24, 0, 24)
@@ -225,7 +237,6 @@ local function createUI()
     closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
     closeBtn.Parent = topBar
 
-    -- Content frame
     contentFrame = Instance.new("Frame")
     contentFrame.Name = "Content"
     contentFrame.Size = UDim2.new(1, 0, 1, -28)
@@ -233,7 +244,6 @@ local function createUI()
     contentFrame.BackgroundTransparency = 1
     contentFrame.Parent = mainFrame
 
-    -- TPUA toggle
     toggleButton = Instance.new("TextButton")
     toggleButton.Name = "TPUAToggle"
     toggleButton.Size = UDim2.new(0, 120, 0, 36)
@@ -245,7 +255,6 @@ local function createUI()
     toggleButton.TextColor3 = Color3.fromRGB(255,255,255)
     toggleButton.Parent = contentFrame
 
-    -- Name textbox
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Size = UDim2.new(0, 80, 0, 20)
     nameLabel.Position = UDim2.new(0, 12, 0, 60)
@@ -268,7 +277,6 @@ local function createUI()
     nameBox.TextColor3 = Color3.fromRGB(230,230,230)
     nameBox.Parent = contentFrame
 
-    -- Damping
     local dampingLabel = Instance.new("TextLabel")
     dampingLabel.Size = UDim2.new(0, 80, 0, 20)
     dampingLabel.Position = UDim2.new(0, 12, 0, 116)
@@ -291,7 +299,6 @@ local function createUI()
     dampingBox.TextColor3 = Color3.fromRGB(230,230,230)
     dampingBox.Parent = contentFrame
 
-    -- Strength
     local strengthLabel = Instance.new("TextLabel")
     strengthLabel.Size = UDim2.new(0, 80, 0, 20)
     strengthLabel.Position = UDim2.new(0, 132, 0, 116)
@@ -314,7 +321,6 @@ local function createUI()
     strengthBox.TextColor3 = Color3.fromRGB(230,230,230)
     strengthBox.Parent = contentFrame
 
-    -- Reopen button (hidden initially)
     reopenBtn = Instance.new("TextButton")
     reopenBtn.Name = "Reopen"
     reopenBtn.Size = UDim2.new(0, 36, 0, 24)
@@ -353,7 +359,7 @@ local function createUI()
         end
     end)
 
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
+    UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             updateDrag(input)
         end
@@ -368,7 +374,6 @@ local function createUI()
         contentFrame.Visible = false
         minimizeBtn.Visible = false
         reopenBtn.Visible = true
-        -- optionally shrink frame
         mainFrame.Size = UDim2.new(0, 200, 0, 28)
     end)
 
@@ -379,16 +384,12 @@ local function createUI()
         mainFrame.Size = UDim2.new(0, 360, 0, 180)
     end)
 
-    -- Close: destroy GUI and this script (and cleanup)
     closeBtn.MouseButton1Click:Connect(function()
-        -- disable and cleanup
         setEnabled(false)
         clearForces()
         if heartbeatConn then heartbeatConn:Disconnect() heartbeatConn = nil end
         if gui and gui.Parent then gui:Destroy() end
-        -- destroy this script instance to leave no trace client-side
         local thisScript = script
-        -- small delay to ensure UI destroyed first
         task.defer(function()
             if thisScript and thisScript.Parent then
                 thisScript:Destroy()
@@ -400,19 +401,15 @@ end
 -- Initialize
 createUI()
 
--- Ensure cleanup on character removal or player leaving
+-- Cleanup on player leaving or script destroy
 LocalPlayer.AncestryChanged:Connect(function()
-    -- if player gui removed, try to cleanup
     if not LocalPlayer:IsDescendantOf(game) then
         setEnabled(false)
         clearForces()
     end
 end)
 
--- Also ensure when the script is disabled/destroyed we cleanup
 script.Destroying:Connect(function()
     setEnabled(false)
     clearForces()
 end)
-
--- End of script
