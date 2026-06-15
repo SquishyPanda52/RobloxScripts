@@ -1,415 +1,116 @@
--- Place this LocalScript in StarterPlayerScripts (client-only)
--- Telekinesis UI + runtime telekinesis with mass-scaled forces for heavy parts
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
--- Config defaults
-local DEFAULT_DAMPING = 5
-local DEFAULT_STRENGTH = 1000 -- base strength multiplier (per kg)
-local MIN_MAXFORCE = 1e4
-local MAX_MAXFORCE = 1e9
-local MIN_P = 1000
-local MAX_P = 1e7
-
--- State
-local enabled = false
-local forces = {} -- [part] = {bp = BodyPosition, bg = BodyGyro}
-local heartbeatConn
-local gui, mainFrame, contentFrame, toggleButton, nameBox, dampingBox, strengthBox
-local minimizeBtn, closeBtn, reopenBtn
-
--- Utility: find players by partial username (case-insensitive)
-local function findPlayersByPartial(part)
-    if not part or part == "" then return {} end
-    part = part:lower()
-    local results = {}
-    for _, pl in pairs(Players:GetPlayers()) do
-        if pl.Name:lower():find(part, 1, true) then
-            table.insert(results, pl)
+local offset = 1100
+local invisible = game.Players.LocalPlayer
+local grips = {}
+local heldTool
+local gripChanged
+local handle
+local weld
+function setDisplayDistance(distance)
+    for _, player in pairs(game.Players:GetPlayers()) do
+        if player.Character and player.Character:FindFirstChildWhichIsA("Humanoid") then
+            player.Character:FindFirstChildWhichIsA("Humanoid").NameDisplayDistance = distance
+            player.Character:FindFirstChildWhichIsA("Humanoid").HealthDisplayDistance = distance
         end
     end
-    return results
 end
-
--- Cleanup forces
-local function clearForces()
-    for part, insts in pairs(forces) do
-        if insts.bp and insts.bp.Parent then insts.bp:Destroy() end
-        if insts.bg and insts.bg.Parent then insts.bg:Destroy() end
-    end
-    forces = {}
-end
-
--- Create BodyPosition and BodyGyro for a part with mass-scaled parameters
-local function applyForceToPart(part, targetCFrame, damping, strengthMultiplier)
-    -- remove existing movers
-    for _, child in pairs(part:GetChildren()) do
-        if child:IsA("BodyPosition") or child:IsA("BodyGyro") then
-            child:Destroy()
+local tool = Instance.new("Tool", game.Players.LocalPlayer.Backpack)
+tool.Name = "Invisible"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+tool.Equipped:Connect(
+    function()
+        wait()
+        if not invisible then
+            invisible = true
+            tool.Name = "Enabled Invisible"
+            if handle then
+                handle:Destroy()
+            end
+            if weld then
+                weld:Destroy()
+            end
+            handle = Instance.new("Part", workspace)
+            handle.Name = "Handle"
+            handle.Transparency = 1
+            handle.CanCollide = false
+            handle.Size = Vector3.new(2, 1, 1)
+            weld = Instance.new("Weld", handle)
+            weld.Part0 = handle
+            weld.Part1 = game.Players.LocalPlayer.Character.HumanoidRootPart
+            weld.C0 = CFrame.new(0, offset - 1.5, 0)
+            setDisplayDistance(offset + 100)
+            workspace.CurrentCamera.CameraSubject = handle
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, offset, 0)
+            game.Players.LocalPlayer.Character.Humanoid.HipHeight = offset
+            game.Players.LocalPlayer.Character.Humanoid:ChangeState(11)
+            for _, child in pairs(game.Players.LocalPlayer.Backpack:GetChildren()) do
+                if child:IsA("Tool") and child ~= tool then
+                    grips[child] = child.Grip
+                end
+            end
+        elseif invisible then
+            invisible = false
+            tool.Name = "Disabled Invisible"
+            if handle then
+                handle:Destroy()
+            end
+            if weld then
+                weld:Destroy()
+            end
+            for _, child in pairs(game.Players.LocalPlayer.Character:GetChildren()) do
+                if child:IsA("Tool") then
+                    child.Parent = game.Players.LocalPlayer.Backpack
+                end
+            end
+            for tool, grip in pairs(grips) do
+                if tool then
+                    tool.Grip = grip
+                end
+            end
+            heldTool = nil
+            setDisplayDistance(100)
+            workspace.CurrentCamera.CameraSubject = game.Players.LocalPlayer.Character.Humanoid
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, -offset, 0)
+            game.Players.LocalPlayer.Character.Humanoid.HipHeight = 0
         end
+        tool.Parent = game.Players.LocalPlayer.Backpack
     end
-
-    -- get mass safely
-    local mass = 1
-    local ok, m = pcall(function() return part:GetMass() end)
-    if ok and type(m) == "number" and m > 0 then
-        mass = m
-    end
-
-    -- compute scaled MaxForce and P based on mass and user strength multiplier
-    -- strengthMultiplier is treated as Newtons per kilogram (approx)
-    local rawForce = mass * strengthMultiplier
-    local clampedForce = math.clamp(rawForce, MIN_MAXFORCE, MAX_MAXFORCE)
-
-    local bp = Instance.new("BodyPosition")
-    bp.MaxForce = Vector3.new(clampedForce, clampedForce, clampedForce)
-    -- P (power) scaled by mass to help heavier parts respond; clamped to avoid extremes
-    bp.P = math.clamp(12500 * mass, MIN_P, MAX_P)
-    bp.D = damping
-    bp.Position = targetCFrame.Position
-    bp.Parent = part
-
-    local bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(clampedForce, clampedForce, clampedForce)
-    bg.P = math.clamp(3000 * mass, MIN_P, MAX_P)
-    bg.D = damping
-    bg.CFrame = targetCFrame
-    bg.Parent = part
-
-    forces[part] = {bp = bp, bg = bg}
-end
-
--- Update loop: move all tracked parts toward target
-local function updateForces()
-    local targetText = nameBox.Text
-    local targets = findPlayersByPartial(targetText)
-    if #targets == 0 then
-        return
-    end
-
-    local damping = tonumber(dampingBox.Text) or DEFAULT_DAMPING
-    local strengthInput = tonumber(strengthBox.Text) or DEFAULT_STRENGTH
-    if damping < 0 then damping = 0 end
-    if damping > 100 then damping = 100 end
-    if strengthInput < 1 then strengthInput = 1 end
-
-    -- choose first matched player with a valid character/head
-    local targetChar
-    for _, pl in ipairs(targets) do
-        if pl.Character and pl.Character:FindFirstChild("Head") and pl.Character:FindFirstChild("HumanoidRootPart") then
-            targetChar = pl.Character
-            break
-        end
-    end
-    if not targetChar then return end
-
-    local targetPos = targetChar:FindFirstChild("Head") and targetChar.Head.Position or targetChar:FindFirstChild("HumanoidRootPart") and targetChar.HumanoidRootPart.Position
-    if not targetPos then return end
-
-    -- iterate workspace parts and apply forces where appropriate
-    for _, part in pairs(workspace:GetDescendants()) do
-        if part:IsA("BasePart") then
-            if not part.Anchored then
-                -- skip parts that are part of any player's character
-                local isCharacterPart = false
-                for _, pl in pairs(Players:GetPlayers()) do
-                    if pl.Character and part:IsDescendantOf(pl.Character) then
-                        isCharacterPart = true
-                        break
+)
+game.Players.LocalPlayer.Character.ChildAdded:Connect(
+    function(child)
+        wait()
+        if invisible and child:IsA("Tool") and child ~= heldTool and child ~= tool then
+            heldTool = child
+            local lastGrip = heldTool.Grip
+            if not grips[heldTool] then
+                grips[heldTool] = lastGrip
+            end
+            for _, track in pairs(game.Players.LocalPlayer.Character.Humanoid:GetPlayingAnimationTracks()) do
+                track:Stop()
+            end
+            game.Players.LocalPlayer.Character.Animate.Disabled = true
+            heldTool.Grip = heldTool.Grip * (CFrame.new(0, offset - 1.5, 1.5) * CFrame.Angles(math.rad(-90), 0, 0))
+            heldTool.Parent = game.Players.LocalPlayer.Backpack
+            heldTool.Parent = game.Players.LocalPlayer.Character
+            if gripChanged then
+                gripChanged:Disconnect()
+            end
+            gripChanged =
+                heldTool:GetPropertyChangedSignal("Grip"):Connect(
+                function()
+                    wait()
+                    if not invisible then
+                        gripChanged:Disconnect()
+                    end
+                    if heldTool.Grip ~= lastGrip then
+                        lastGrip =
+                            heldTool.Grip * (CFrame.new(0, offset - 1.5, 1.5) * CFrame.Angles(math.rad(-90), 0, 0))
+                        heldTool.Grip = lastGrip
+                        heldTool.Parent = game.Players.LocalPlayer.Backpack
+                        heldTool.Parent = game.Players.LocalPlayer.Character
                     end
                 end
-                if not isCharacterPart then
-                    local nameLower = part.Name:lower()
-                    if nameLower ~= "head" and nameLower ~= "torso" and nameLower ~= "humanoidrootpart" and nameLower ~= "right arm" and nameLower ~= "left arm" and nameLower ~= "right leg" and nameLower ~= "left leg" then
-                        local targetCFrame = CFrame.new(targetPos)
-                        local existing = forces[part]
-                        if existing and existing.bp and existing.bg then
-                            -- update properties using mass scaling
-                            local mass = 1
-                            local ok, m = pcall(function() return part:GetMass() end)
-                            if ok and type(m) == "number" and m > 0 then mass = m end
-                            local rawForce = mass * strengthInput
-                            local clampedForce = math.clamp(rawForce, MIN_MAXFORCE, MAX_MAXFORCE)
-                            existing.bp.MaxForce = Vector3.new(clampedForce, clampedForce, clampedForce)
-                            existing.bp.D = damping
-                            existing.bp.Position = targetPos
-                            existing.bp.P = math.clamp(12500 * mass, MIN_P, MAX_P)
-                            existing.bg.MaxTorque = Vector3.new(clampedForce, clampedForce, clampedForce)
-                            existing.bg.D = damping
-                            existing.bg.P = math.clamp(3000 * mass, MIN_P, MAX_P)
-                            existing.bg.CFrame = targetCFrame
-                        else
-                            applyForceToPart(part, targetCFrame, damping, strengthInput)
-                        end
-                    end
-                end
-            else
-                -- anchored but previously forced: remove
-                if forces[part] then
-                    if forces[part].bp and forces[part].bp.Parent then forces[part].bp:Destroy() end
-                    if forces[part].bg and forces[part].bg.Parent then forces[part].bg:Destroy() end
-                    forces[part] = nil
-                end
-            end
+            )
         end
     end
-end
-
--- Toggle TPUA
-local function setEnabled(state)
-    enabled = state
-    if enabled then
-        toggleButton.Text = "TPUA: ON"
-        if heartbeatConn then heartbeatConn:Disconnect() end
-        heartbeatConn = RunService.Heartbeat:Connect(function()
-            local ok, err = pcall(updateForces)
-            if not ok then
-                warn("Telekinesis update error:", err)
-            end
-        end)
-    else
-        toggleButton.Text = "TPUA: OFF"
-        if heartbeatConn then
-            heartbeatConn:Disconnect()
-            heartbeatConn = nil
-        end
-        clearForces()
-    end
-end
-
--- UI creation
-local function createUI()
-    gui = Instance.new("ScreenGui")
-    gui.Name = "TelekinesisGUI"
-    gui.ResetOnSpawn = false
-    gui.Parent = PlayerGui
-
-    mainFrame = Instance.new("Frame")
-    mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 360, 0, 180)
-    mainFrame.Position = UDim2.new(0.5, -180, 0.5, -90)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = gui
-
-    local topBar = Instance.new("Frame")
-    topBar.Name = "TopBar"
-    topBar.Size = UDim2.new(1, 0, 0, 28)
-    topBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    topBar.BorderSizePixel = 0
-    topBar.Parent = mainFrame
-
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -60, 1, 0)
-    title.Position = UDim2.new(0, 8, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "Telekinesis"
-    title.TextColor3 = Color3.fromRGB(220, 220, 220)
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Font = Enum.Font.SourceSansBold
-    title.TextSize = 18
-    title.Parent = topBar
-
-    minimizeBtn = Instance.new("TextButton")
-    minimizeBtn.Name = "Minimize"
-    minimizeBtn.Size = UDim2.new(0, 24, 0, 24)
-    minimizeBtn.Position = UDim2.new(1, -56, 0, 2)
-    minimizeBtn.Text = "-"
-    minimizeBtn.Font = Enum.Font.SourceSansBold
-    minimizeBtn.TextSize = 18
-    minimizeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    minimizeBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    minimizeBtn.Parent = topBar
-
-    closeBtn = Instance.new("TextButton")
-    closeBtn.Name = "Close"
-    closeBtn.Size = UDim2.new(0, 24, 0, 24)
-    closeBtn.Position = UDim2.new(1, -28, 0, 2)
-    closeBtn.Text = "X"
-    closeBtn.Font = Enum.Font.SourceSansBold
-    closeBtn.TextSize = 16
-    closeBtn.BackgroundColor3 = Color3.fromRGB(160, 40, 40)
-    closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    closeBtn.Parent = topBar
-
-    contentFrame = Instance.new("Frame")
-    contentFrame.Name = "Content"
-    contentFrame.Size = UDim2.new(1, 0, 1, -28)
-    contentFrame.Position = UDim2.new(0, 0, 0, 28)
-    contentFrame.BackgroundTransparency = 1
-    contentFrame.Parent = mainFrame
-
-    toggleButton = Instance.new("TextButton")
-    toggleButton.Name = "TPUAToggle"
-    toggleButton.Size = UDim2.new(0, 120, 0, 36)
-    toggleButton.Position = UDim2.new(0, 12, 0, 12)
-    toggleButton.Text = "TPUA: OFF"
-    toggleButton.Font = Enum.Font.SourceSansBold
-    toggleButton.TextSize = 16
-    toggleButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-    toggleButton.TextColor3 = Color3.fromRGB(255,255,255)
-    toggleButton.Parent = contentFrame
-
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size = UDim2.new(0, 80, 0, 20)
-    nameLabel.Position = UDim2.new(0, 12, 0, 60)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = "Target:"
-    nameLabel.TextColor3 = Color3.fromRGB(200,200,200)
-    nameLabel.Font = Enum.Font.SourceSans
-    nameLabel.TextSize = 14
-    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-    nameLabel.Parent = contentFrame
-
-    nameBox = Instance.new("TextBox")
-    nameBox.Size = UDim2.new(0, 240, 0, 26)
-    nameBox.Position = UDim2.new(0, 12, 0, 82)
-    nameBox.PlaceholderText = "Type username (partial, case-insensitive)"
-    nameBox.Text = ""
-    nameBox.Font = Enum.Font.SourceSans
-    nameBox.TextSize = 14
-    nameBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-    nameBox.TextColor3 = Color3.fromRGB(230,230,230)
-    nameBox.Parent = contentFrame
-
-    local dampingLabel = Instance.new("TextLabel")
-    dampingLabel.Size = UDim2.new(0, 80, 0, 20)
-    dampingLabel.Position = UDim2.new(0, 12, 0, 116)
-    dampingLabel.BackgroundTransparency = 1
-    dampingLabel.Text = "Damping:"
-    dampingLabel.TextColor3 = Color3.fromRGB(200,200,200)
-    dampingLabel.Font = Enum.Font.SourceSans
-    dampingLabel.TextSize = 14
-    dampingLabel.TextXAlignment = Enum.TextXAlignment.Left
-    dampingLabel.Parent = contentFrame
-
-    dampingBox = Instance.new("TextBox")
-    dampingBox.Size = UDim2.new(0, 100, 0, 26)
-    dampingBox.Position = UDim2.new(0, 12, 0, 138)
-    dampingBox.PlaceholderText = tostring(DEFAULT_DAMPING)
-    dampingBox.Text = tostring(DEFAULT_DAMPING)
-    dampingBox.Font = Enum.Font.SourceSans
-    dampingBox.TextSize = 14
-    dampingBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-    dampingBox.TextColor3 = Color3.fromRGB(230,230,230)
-    dampingBox.Parent = contentFrame
-
-    local strengthLabel = Instance.new("TextLabel")
-    strengthLabel.Size = UDim2.new(0, 80, 0, 20)
-    strengthLabel.Position = UDim2.new(0, 132, 0, 116)
-    strengthLabel.BackgroundTransparency = 1
-    strengthLabel.Text = "Strength:"
-    strengthLabel.TextColor3 = Color3.fromRGB(200,200,200)
-    strengthLabel.Font = Enum.Font.SourceSans
-    strengthLabel.TextSize = 14
-    strengthLabel.TextXAlignment = Enum.TextXAlignment.Left
-    strengthLabel.Parent = contentFrame
-
-    strengthBox = Instance.new("TextBox")
-    strengthBox.Size = UDim2.new(0, 120, 0, 26)
-    strengthBox.Position = UDim2.new(0, 132, 0, 138)
-    strengthBox.PlaceholderText = tostring(DEFAULT_STRENGTH)
-    strengthBox.Text = tostring(DEFAULT_STRENGTH)
-    strengthBox.Font = Enum.Font.SourceSans
-    strengthBox.TextSize = 14
-    strengthBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-    strengthBox.TextColor3 = Color3.fromRGB(230,230,230)
-    strengthBox.Parent = contentFrame
-
-    reopenBtn = Instance.new("TextButton")
-    reopenBtn.Name = "Reopen"
-    reopenBtn.Size = UDim2.new(0, 36, 0, 24)
-    reopenBtn.Position = UDim2.new(1, -36, 0, 2)
-    reopenBtn.Text = "+"
-    reopenBtn.Font = Enum.Font.SourceSansBold
-    reopenBtn.TextSize = 18
-    reopenBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    reopenBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    reopenBtn.Visible = false
-    reopenBtn.Parent = topBar
-
-    -- Draggable behavior
-    local dragging, dragInput, dragStart, startPos
-    local function updateDrag(input)
-        local delta = input.Position - dragStart
-        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-
-    topBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainFrame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    topBar.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            updateDrag(input)
-        end
-    end)
-
-    -- Button behaviors
-    toggleButton.MouseButton1Click:Connect(function()
-        setEnabled(not enabled)
-    end)
-
-    minimizeBtn.MouseButton1Click:Connect(function()
-        contentFrame.Visible = false
-        minimizeBtn.Visible = false
-        reopenBtn.Visible = true
-        mainFrame.Size = UDim2.new(0, 200, 0, 28)
-    end)
-
-    reopenBtn.MouseButton1Click:Connect(function()
-        contentFrame.Visible = true
-        minimizeBtn.Visible = true
-        reopenBtn.Visible = false
-        mainFrame.Size = UDim2.new(0, 360, 0, 180)
-    end)
-
-    closeBtn.MouseButton1Click:Connect(function()
-        setEnabled(false)
-        clearForces()
-        if heartbeatConn then heartbeatConn:Disconnect() heartbeatConn = nil end
-        if gui and gui.Parent then gui:Destroy() end
-        local thisScript = script
-        task.defer(function()
-            if thisScript and thisScript.Parent then
-                thisScript:Destroy()
-            end
-        end)
-    end)
-end
-
--- Initialize
-createUI()
-
--- Cleanup on player leaving or script destroy
-LocalPlayer.AncestryChanged:Connect(function()
-    if not LocalPlayer:IsDescendantOf(game) then
-        setEnabled(false)
-        clearForces()
-    end
-end)
-
-script.Destroying:Connect(function()
-    setEnabled(false)
-    clearForces()
-end)
+)
