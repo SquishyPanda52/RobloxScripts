@@ -7,6 +7,7 @@
 --   .atk random
 --   .stop
 -- New behavior: the most recent commander command HARD overrides previous commands.
+-- Updated: Auto Select can now find NPC targets (models/rigs with Humanoids/HumanoidRootPart/PrimaryPart)
 
 --// Services
 local Players         = game:GetService("Players")
@@ -30,8 +31,9 @@ local lastTargetHRP = nil
 local transitionActive = false
 
 local autoSelectEnabled = false
-local selectedTargetPlayer = nil
-local hoveredTargetPlayer = nil
+-- selectedTarget and hoveredTarget can be either a Player instance or a Model (NPC)
+local selectedTarget = nil
+local hoveredTarget = nil
 
 local commanderMode = false
 local lastCommanderUserId = nil -- track most recent commander who issued a command
@@ -48,26 +50,26 @@ local function trim(s)
     return tostring(s):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
--- Robust helper to get a model's root/base part for targeting (works for many NPC setups)
-local function getModelRootPart(model)
-    if not model or not model:IsA("Model") then return nil end
-    -- Prefer HumanoidRootPart
-    local hrp = model:FindFirstChild("HumanoidRootPart")
-    if hrp and hrp:IsA("BasePart") then return hrp end
-    -- Then PrimaryPart
-    if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then return model.PrimaryPart end
-    -- Then any BasePart child (use center-most by name priority)
-    for _, name in ipairs({"Torso","UpperTorso","LowerTorso","Head","RootPart","HumanoidRoot"}) do
-        local part = model:FindFirstChild(name)
-        if part and part:IsA("BasePart") then return part end
-    end
-    -- Fallback: first BasePart found
-    for _, child in ipairs(model:GetChildren()) do
-        if child:IsA("BasePart") then
-            return child
+-- Find NPC models in workspace by partial name (case-insensitive)
+local function findNPCsByPartial(partial)
+    local results = {}
+    if not partial or partial == "" then return results end
+    partial = partial:lower():gsub("%s+", "")
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj.Name and obj.Name:lower():find(partial, 1, true) then
+            -- Skip player characters (we'll handle players separately)
+            local owner = Players:GetPlayerFromCharacter(obj)
+            if not owner then
+                -- Ensure it has a Humanoid or a HumanoidRootPart/PrimaryPart
+                local humanoid = obj:FindFirstChildOfClass("Humanoid")
+                local hrp = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
+                if humanoid or hrp then
+                    table.insert(results, obj)
+                end
+            end
         end
     end
-    return nil
+    return results
 end
 
 --// GUI
@@ -347,49 +349,29 @@ end)
 
 --// Target resolution
 local function getTargetPlayers(text)
+    -- If auto-select is active, prefer the selectedTarget (player or NPC model)
     if autoSelectEnabled then
-        if selectedTargetPlayer then
-            return { selectedTargetPlayer }
+        if selectedTarget then
+            return { selectedTarget }
         end
         return {}
     end
 
     local results = {}
-    local seen = {}
     local parts = string.split(text or ",", ",")
     for _, raw in ipairs(parts) do
         local partial = raw:lower():gsub("%s+", "")
         if partial ~= "" then
-            -- Search players by name
+            -- Match players by partial name
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr ~= localPlayer and plr.Name:lower():find(partial, 1, true) then
-                    if not seen[plr.Name] then
-                        table.insert(results, plr)
-                        seen[plr.Name] = true
-                    end
+                    table.insert(results, plr)
                 end
             end
-            -- Search NPCs / character models anywhere in workspace by model name (include models with Humanoid + a root/base part)
-            for _, obj in ipairs(workspace:GetDescendants()) do
-                if obj:IsA("Model") then
-                    local humanoid = obj:FindFirstChildOfClass("Humanoid")
-                    if humanoid and humanoid.Health > 0 then
-                        local rootPart = getModelRootPart(obj)
-                        if rootPart then
-                            -- Skip if this model belongs to a player (already handled)
-                            local owner = Players:GetPlayerFromCharacter(obj)
-                            if not owner then
-                                if obj.Name:lower():find(partial, 1, true) then
-                                    if not seen[obj:GetFullName()] then
-                                        -- Represent NPC as a table with Name and Character to be compatible with player objects
-                                        table.insert(results, { Name = obj.Name, Character = obj })
-                                        seen[obj:GetFullName()] = true
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
+            -- Match NPC models by partial name
+            local npcs = findNPCsByPartial(partial)
+            for _, npc in ipairs(npcs) do
+                table.insert(results, npc)
             end
         end
     end
@@ -399,42 +381,51 @@ end
 -- Auto-select detection (hover)
 RunService.RenderStepped:Connect(function()
     if not autoSelectEnabled then
-        hoveredTargetPlayer = nil
+        hoveredTarget = nil
         targetFoundLabel.Text = ""
         return
     end
 
     local mousePos = UserInput:GetMouseLocation()
-    local closestPlayer = nil
+    local closestTarget = nil
     local closestDistance = targetRadius
 
-    -- Build a list of candidate entities (players + NPC character models)
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") then
-            local humanoid = obj:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                local hrp = getModelRootPart(obj)
-                if hrp then
-                    -- Determine if this model is a player character
-                    local plr = Players:GetPlayerFromCharacter(obj)
-                    if plr and plr ~= localPlayer then
-                        -- Player entity
-                        local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
-                        if onScreen then
+    -- Check player characters first
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= localPlayer and plr.Character then
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character.PrimaryPart
+            local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and humanoid and humanoid.Health > 0 then
+                local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
+                    if dist < closestDistance then
+                        closestDistance = dist
+                        closestTarget = plr
+                    end
+                end
+            end
+        end
+    end
+
+    -- Then check NPC models in workspace (models with Humanoid or HRP/PrimaryPart)
+    for _, model in ipairs(workspace:GetDescendants()) do
+        if model:IsA("Model") then
+            -- Skip player characters
+            if not Players:GetPlayerFromCharacter(model) then
+                local humanoid = model:FindFirstChildOfClass("Humanoid")
+                local hrp = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                if hrp and (humanoid == nil or humanoid.Health > 0) then
+                    -- Exclude models that are the local player's character (safety)
+                    if model ~= localPlayer.Character then
+                        local ok, screenPos, onScreen = pcall(function()
+                            return camera:WorldToViewportPoint(hrp.Position)
+                        end)
+                        if ok and onScreen then
                             local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
                             if dist < closestDistance then
                                 closestDistance = dist
-                                closestPlayer = plr
-                            end
-                        end
-                    elseif not plr then
-                        -- NPC entity represented as a table with Name and Character
-                        local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
-                        if onScreen then
-                            local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
-                            if dist < closestDistance then
-                                closestDistance = dist
-                                closestPlayer = { Name = obj.Name, Character = obj }
+                                closestTarget = model
                             end
                         end
                     end
@@ -443,14 +434,14 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    if closestPlayer then
-        hoveredTargetPlayer = closestPlayer
-        if not selectedTargetPlayer then
+    if closestTarget then
+        hoveredTarget = closestTarget
+        if not selectedTarget then
             targetFoundLabel.Text = "Target Found"
         end
     else
-        hoveredTargetPlayer = nil
-        if not selectedTargetPlayer then
+        hoveredTarget = nil
+        if not selectedTarget then
             targetFoundLabel.Text = ""
         end
     end
@@ -465,27 +456,25 @@ local function startLockon()
         if #candidates == 0 then return end
 
         local myChar = localPlayer.Character
-        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart") or (myChar and myChar.PrimaryPart)
+        local myHRP = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar.PrimaryPart)
         if not myHRP then return end
 
         local closestHRP = nil
         local closestDist = math.huge
 
-        for _, entry in ipairs(candidates) do
-            -- entry can be a Player object or an NPC table {Name=..., Character=model}
-            local char = nil
-            if type(entry) == "table" and entry.Character then
-                char = entry.Character
-            elseif typeof(entry) == "Instance" and entry.Character then
-                char = entry.Character
-            elseif typeof(entry) == "Instance" and entry:IsA("Model") then
-                char = entry
+        for _, candidate in ipairs(candidates) do
+            local charModel = nil
+            -- candidate may be a Player or a Model (NPC)
+            if typeof(candidate) == "Instance" and candidate:IsA("Player") then
+                charModel = candidate.Character
+            elseif typeof(candidate) == "Instance" and candidate:IsA("Model") then
+                charModel = candidate
             end
 
-            if char and char:IsA("Model") then
-                local humanoid = char:FindFirstChildOfClass("Humanoid")
-                local hrp = getModelRootPart(char)
-                if humanoid and humanoid.Health > 0 and hrp then
+            if charModel then
+                local humanoid = charModel:FindFirstChildOfClass("Humanoid")
+                local hrp = charModel:FindFirstChild("HumanoidRootPart") or charModel.PrimaryPart
+                if hrp and (humanoid == nil or humanoid.Health > 0) then
                     local dist = (hrp.Position - myHRP.Position).Magnitude
                     if dist < closestDist then
                         closestDist = dist
@@ -499,7 +488,7 @@ local function startLockon()
             local targetPosition
             if lockonPredictEnabled then
                 local targetPos = closestHRP.Position
-                local targetVel = closestHRP.AssemblyLinearVelocity
+                local targetVel = closestHRP.AssemblyLinearVelocity or Vector3.new(0,0,0)
                 local rel = targetPos - myHRP.Position
                 local dist = rel.Magnitude
                 local speed = targetVel.Magnitude
@@ -593,8 +582,8 @@ local function toggleAutoSelect()
         end
     end
     if not autoSelectEnabled then
-        selectedTargetPlayer = nil
-        hoveredTargetPlayer = nil
+        selectedTarget = nil
+        hoveredTarget = nil
     end
     updateButtons()
 end
@@ -629,19 +618,20 @@ UserInput.InputBegan:Connect(function(input, gp)
 
     if input.KeyCode == Enum.KeyCode.E then
         if autoSelectEnabled then
-            if selectedTargetPlayer then
-                selectedTargetPlayer = nil
+            if selectedTarget then
+                selectedTarget = nil
                 lastTargetHRP = nil
                 targetFoundLabel.Text = "Unlocked"
                 task.delay(0.5, function()
-                    if targetFoundLabel and not selectedTargetPlayer then
+                    if targetFoundLabel and not selectedTarget then
                         targetFoundLabel.Text = ""
                     end
                 end)
-            elseif hoveredTargetPlayer then
-                selectedTargetPlayer = hoveredTargetPlayer
+            elseif hoveredTarget then
+                selectedTarget = hoveredTarget
                 lastTargetHRP = nil
-                targetFoundLabel.Text = "Locked: "..hoveredTargetPlayer.Name
+                -- hoveredTarget may be a Player or a Model; both have Name
+                targetFoundLabel.Text = "Locked: "..(hoveredTarget.Name or "Target")
             end
         end
     end
@@ -687,7 +677,7 @@ end
 
 local function hardOverridePreviousCommands()
     -- Clear selected target so camera re-evaluates new txtUser
-    selectedTargetPlayer = nil
+    selectedTarget = nil
     lastTargetHRP = nil
     -- Disable autoSelect if active
     if autoSelectEnabled then autoSelectEnabled = false end
@@ -734,7 +724,7 @@ if TextChatService then
         if cmd == "stop" then
             txtUser.Text = ""
             lockonEnabled = false
-            selectedTargetPlayer = nil
+            selectedTarget = nil
             lastTargetHRP = nil
             updateButtons()
             return
@@ -783,7 +773,7 @@ if TextChatService then
                 return
             end
 
-            -- default: treat arg as list of users (preserve original casing)
+            -- default: treat arg as list of users or NPC names (preserve original casing)
             if arg ~= "" then
                 txtUser.Text = arg
                 hardOverridePreviousCommands()
