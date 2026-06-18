@@ -48,6 +48,28 @@ local function trim(s)
     return tostring(s):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+-- Robust helper to get a model's root/base part for targeting (works for many NPC setups)
+local function getModelRootPart(model)
+    if not model or not model:IsA("Model") then return nil end
+    -- Prefer HumanoidRootPart
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp:IsA("BasePart") then return hrp end
+    -- Then PrimaryPart
+    if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then return model.PrimaryPart end
+    -- Then any BasePart child (use center-most by name priority)
+    for _, name in ipairs({"Torso","UpperTorso","LowerTorso","Head","RootPart","HumanoidRoot"}) do
+        local part = model:FindFirstChild(name)
+        if part and part:IsA("BasePart") then return part end
+    end
+    -- Fallback: first BasePart found
+    for _, child in ipairs(model:GetChildren()) do
+        if child:IsA("BasePart") then
+            return child
+        end
+    end
+    return nil
+end
+
 --// GUI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "JuggernautLockonGUI"
@@ -347,20 +369,22 @@ local function getTargetPlayers(text)
                     end
                 end
             end
-            -- Search NPCs / character models in workspace by model name (include models with Humanoid + HumanoidRootPart)
-            for _, obj in ipairs(workspace:GetChildren()) do
+            -- Search NPCs / character models anywhere in workspace by model name (include models with Humanoid + a root/base part)
+            for _, obj in ipairs(workspace:GetDescendants()) do
                 if obj:IsA("Model") then
                     local humanoid = obj:FindFirstChildOfClass("Humanoid")
-                    local hrp = obj:FindFirstChild("HumanoidRootPart")
-                    if humanoid and hrp and humanoid.Health > 0 then
-                        -- Skip if this model belongs to a player (already handled)
-                        local owner = Players:GetPlayerFromCharacter(obj)
-                        if not owner then
-                            if obj.Name:lower():find(partial, 1, true) then
-                                if not seen[obj.Name] then
-                                    -- Represent NPC as a table with Name and Character to be compatible with player objects
-                                    table.insert(results, { Name = obj.Name, Character = obj })
-                                    seen[obj.Name] = true
+                    if humanoid and humanoid.Health > 0 then
+                        local rootPart = getModelRootPart(obj)
+                        if rootPart then
+                            -- Skip if this model belongs to a player (already handled)
+                            local owner = Players:GetPlayerFromCharacter(obj)
+                            if not owner then
+                                if obj.Name:lower():find(partial, 1, true) then
+                                    if not seen[obj:GetFullName()] then
+                                        -- Represent NPC as a table with Name and Character to be compatible with player objects
+                                        table.insert(results, { Name = obj.Name, Character = obj })
+                                        seen[obj:GetFullName()] = true
+                                    end
                                 end
                             end
                         end
@@ -385,31 +409,33 @@ RunService.RenderStepped:Connect(function()
     local closestDistance = targetRadius
 
     -- Build a list of candidate entities (players + NPC character models)
-    for _, obj in ipairs(workspace:GetChildren()) do
+    for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Model") then
-            local hrp = obj:FindFirstChild("HumanoidRootPart")
             local humanoid = obj:FindFirstChildOfClass("Humanoid")
-            if hrp and humanoid and humanoid.Health > 0 then
-                -- Determine if this model is a player character
-                local plr = Players:GetPlayerFromCharacter(obj)
-                if plr and plr ~= localPlayer then
-                    -- Player entity
-                    local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
-                        if dist < closestDistance then
-                            closestDistance = dist
-                            closestPlayer = plr
+            if humanoid and humanoid.Health > 0 then
+                local hrp = getModelRootPart(obj)
+                if hrp then
+                    -- Determine if this model is a player character
+                    local plr = Players:GetPlayerFromCharacter(obj)
+                    if plr and plr ~= localPlayer then
+                        -- Player entity
+                        local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                        if onScreen then
+                            local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
+                            if dist < closestDistance then
+                                closestDistance = dist
+                                closestPlayer = plr
+                            end
                         end
-                    end
-                elseif not plr then
-                    -- NPC entity represented as a table with Name and Character
-                    local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
-                        if dist < closestDistance then
-                            closestDistance = dist
-                            closestPlayer = { Name = obj.Name, Character = obj }
+                    elseif not plr then
+                        -- NPC entity represented as a table with Name and Character
+                        local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                        if onScreen then
+                            local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
+                            if dist < closestDistance then
+                                closestDistance = dist
+                                closestPlayer = { Name = obj.Name, Character = obj }
+                            end
                         end
                     end
                 end
@@ -439,16 +465,26 @@ local function startLockon()
         if #candidates == 0 then return end
 
         local myChar = localPlayer.Character
-        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart") or (myChar and myChar.PrimaryPart)
         if not myHRP then return end
 
         local closestHRP = nil
         local closestDist = math.huge
 
-        for _, plr in ipairs(candidates) do
-            if plr.Character then
-                local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
-                local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+        for _, entry in ipairs(candidates) do
+            -- entry can be a Player object or an NPC table {Name=..., Character=model}
+            local char = nil
+            if type(entry) == "table" and entry.Character then
+                char = entry.Character
+            elseif typeof(entry) == "Instance" and entry.Character then
+                char = entry.Character
+            elseif typeof(entry) == "Instance" and entry:IsA("Model") then
+                char = entry
+            end
+
+            if char and char:IsA("Model") then
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                local hrp = getModelRootPart(char)
                 if humanoid and humanoid.Health > 0 and hrp then
                     local dist = (hrp.Position - myHRP.Position).Magnitude
                     if dist < closestDist then
