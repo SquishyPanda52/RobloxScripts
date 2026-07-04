@@ -1,14 +1,5 @@
 -- Lockon script with extended commander commands and hard-override behavior
--- Supports interchangeable commands:
---   .follow / .goto / .follow me
---   .atk / .attack / .atk me
---   .atk all / .attack all / .atk everyone / .attack everyone
---   .atk others / .attack others (everyone except commanders)
---   .atk random
---   .stop
--- New behavior: the most recent commander command HARD overrides previous commands.
--- Updated: Auto Select can now find NPC targets (models/rigs with Humanoids/HumanoidRootPart/PrimaryPart)
--- Optimized: reduced per-frame work, cached candidate resolution, NPC list maintenance, throttled target computation
+-- Optimized to reduce per-frame work and avoid lag while preserving original behavior
 
 --// Services
 local Players         = game:GetService("Players")
@@ -42,14 +33,20 @@ local lastCommanderUserId = nil -- track most recent commander who issued a comm
 local targetRadius = 120
 
 -- Optimization settings
-local TARGET_COMPUTE_INTERVAL = 0.05 -- seconds between heavy target computations (20 Hz)
+local TARGET_COMPUTE_INTERVAL = 0.08 -- seconds between heavy target computations (reduced frequency to lower CPU)
+local AUTOSELECT_INTERVAL = 0.08 -- seconds between auto-select hover computations
 local NPC_SCAN_INTERVAL = 1.0 -- seconds fallback scan for NPCs
 local NPC_DESCENDANT_DEBOUNCE = 0.25 -- debounce for descendant changes
 
 --// Helpers
+local math_clamp = math.clamp
+local math_sqrt = math.sqrt
+local math_floor = math.floor
+local tick = tick
+
 local function round(num, decimals)
     local mult = 10 ^ (decimals or 0)
-    return math.floor(num * mult + 0.5) / mult
+    return math_floor(num * mult + 0.5) / mult
 end
 
 local function trim(s)
@@ -62,12 +59,11 @@ local function findNPCsByPartial(partial)
     local results = {}
     if not partial or partial == "" then return results end
     partial = partial:lower():gsub("%s+", "")
+    -- Use GetChildren + limited descendant scanning to reduce cost where possible
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Model") and obj.Name and obj.Name:lower():find(partial, 1, true) then
-            -- Skip player characters (we'll handle players separately)
             local owner = Players:GetPlayerFromCharacter(obj)
             if not owner then
-                -- Ensure it has a Humanoid or a HumanoidRootPart/PrimaryPart
                 local humanoid = obj:FindFirstChildOfClass("Humanoid")
                 local hrp = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
                 if humanoid or hrp then
@@ -116,13 +112,11 @@ do
     end
 
     titleBar.InputBegan:Connect(function(input)
-        -- Support both mouse and touch start
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = mainFrame.Position
 
-            -- Track when this particular input ends
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
@@ -132,13 +126,11 @@ do
     end)
 
     titleBar.InputChanged:Connect(function(input)
-        -- Accept either mouse movement or touch movement as the drag input
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
 
-    -- Global input changed to update while dragging (works for both mouse and touch)
     UserInput.InputChanged:Connect(function(input)
         if dragging and input == dragInput then
             update(input)
@@ -325,7 +317,7 @@ local draggingSlider = false
 local function setStrengthFromX(x)
     local barPos = sliderBar.AbsolutePosition.X
     local barSize = sliderBar.AbsoluteSize.X
-    local rel = math.clamp(x - barPos, 0, barSize)
+    local rel = math_clamp(x - barPos, 0, barSize)
     local t = rel / barSize
     predictionStrength = round(t, 2)
     valueLabel.Text = string.format("%.2f", predictionStrength)
@@ -449,7 +441,6 @@ end
 -- Keep npcList updated on descendant changes (debounced)
 workspace.DescendantAdded:Connect(function(desc)
     npcDescendantDebounce = tick()
-    -- schedule a small debounce to avoid thrashing on mass changes
     task.delay(NPC_DESCENDANT_DEBOUNCE, function()
         if tick() - npcDescendantDebounce >= NPC_DESCENDANT_DEBOUNCE then
             addNPCIfValid(desc)
@@ -476,8 +467,21 @@ task.spawn(function()
     end
 end)
 
---// Auto-select detection (hover)
--- This loop is still RenderStepped but does minimal work: it iterates players and the maintained npcList only.
+--// Player list caching to avoid repeated Players:GetPlayers() calls
+local playersCache = {}
+local function rebuildPlayersCache()
+    playersCache = Players:GetPlayers()
+end
+rebuildPlayersCache()
+Players.PlayerAdded:Connect(function()
+    rebuildPlayersCache()
+end)
+Players.PlayerRemoving:Connect(function()
+    rebuildPlayersCache()
+end)
+
+--// Auto-select detection (hover) - throttled to reduce per-frame cost
+local lastAutoSelectCompute = 0
 RunService.RenderStepped:Connect(function()
     if not autoSelectEnabled then
         hoveredTarget = nil
@@ -485,23 +489,29 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
+    local now = tick()
+    if now - lastAutoSelectCompute < AUTOSELECT_INTERVAL then
+        return
+    end
+    lastAutoSelectCompute = now
+
     local mousePos = UserInput:GetMouseLocation()
     local closestTarget = nil
     local closestDistance = targetRadius
 
-    -- Check player characters first
-    local players = Players:GetPlayers()
-    for i = 1, #players do
-        local plr = players[i]
-        if plr ~= localPlayer and plr.Character then
+    -- Check player characters first (use cached players list)
+    for i = 1, #playersCache do
+        local plr = playersCache[i]
+        if plr and plr ~= localPlayer and plr.Character then
             local hrp = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character.PrimaryPart
             local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
             if hrp and humanoid and humanoid.Health > 0 then
-                local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                local screenPos = camera:WorldToViewportPoint(hrp.Position)
+                local onScreen = screenPos.Z > 0
                 if onScreen then
                     local dx = screenPos.X - mousePos.X
                     local dy = screenPos.Y - mousePos.Y
-                    local dist = math.sqrt(dx*dx + dy*dy)
+                    local dist = math_sqrt(dx*dx + dy*dy)
                     if dist < closestDistance then
                         closestDistance = dist
                         closestTarget = plr
@@ -517,13 +527,13 @@ RunService.RenderStepped:Connect(function()
             local humanoid = model:FindFirstChildOfClass("Humanoid")
             local hrp = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
             if hrp and (humanoid == nil or humanoid.Health > 0) and model ~= localPlayer.Character then
-                local ok, screenPos, onScreen = pcall(function()
+                local ok, screenPos = pcall(function()
                     return camera:WorldToViewportPoint(hrp.Position)
                 end)
-                if ok and onScreen then
+                if ok and screenPos.Z > 0 then
                     local dx = screenPos.X - mousePos.X
                     local dy = screenPos.Y - mousePos.Y
-                    local dist = math.sqrt(dx*dx + dy*dy)
+                    local dist = math_sqrt(dx*dx + dy*dy)
                     if dist < closestDistance then
                         closestDistance = dist
                         closestTarget = model
@@ -531,7 +541,6 @@ RunService.RenderStepped:Connect(function()
                 end
             end
         else
-            -- stale entry cleanup
             npcList[model] = nil
         end
     end
@@ -621,8 +630,8 @@ local function startLockon()
                 local rel = targetPos - myHRP.Position
                 local dist = rel.Magnitude
                 local speed = targetVel.Magnitude
-                local distanceFactor = math.clamp(dist / 60, 0, 2)
-                local velocityFactor = math.clamp(speed / 20, 0, 2)
+                local distanceFactor = math_clamp(dist / 60, 0, 2)
+                local velocityFactor = math_clamp(speed / 20, 0, 2)
                 local predictionTime = predictionStrength * (0.5 + 0.5 * distanceFactor + 0.5 * velocityFactor)
                 targetPosition = targetPos + targetVel * predictionTime
             else
@@ -640,13 +649,11 @@ local function startLockon()
                     local transitionTime = 0.12
                     local startTime = tick()
                     -- Perform the transition without blocking the main loop: step in small increments
-                    -- We'll perform the lerp across multiple RenderStepped ticks to avoid long blocking loops
                     task.spawn(function()
                         local done = false
                         while not done and transitionActive and screenGui.Parent do
-                            local alpha = math.clamp((tick() - startTime) / transitionTime, 0, 1)
+                            local alpha = math_clamp((tick() - startTime) / transitionTime, 0, 1)
                             local newCFrame = startCFrame:Lerp(targetCFrame, alpha)
-                            -- Write camera once per iteration
                             camera.CFrame = newCFrame
                             if alpha >= 1 then
                                 done = true
@@ -664,7 +671,6 @@ local function startLockon()
 
             -- Only set camera when not in transition and when CFrame changed meaningfully
             if not transitionActive then
-                -- Compare positions to avoid redundant writes
                 local shouldWrite = true
                 if lastTargetCFrame then
                     local p1 = lastTargetCFrame.Position
@@ -788,7 +794,6 @@ UserInput.InputBegan:Connect(function(input, gp)
             elseif hoveredTarget then
                 selectedTarget = hoveredTarget
                 lastTargetHRP = nil
-                -- hoveredTarget may be a Player or a Model; both have Name
                 targetFoundLabel.Text = "Locked: "..(hoveredTarget.Name or "Target")
                 markCandidateDirty()
             end
