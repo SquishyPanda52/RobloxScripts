@@ -1,87 +1,568 @@
--- Hilton | ArmLock C (Intercept Animations + Late Priority Pose)
--- Client-only. Run once to lock, run again to unlock.
+-- FlightControlGui
+-- LocalScript: StarterPlayerScripts
+-- Everything here runs locally for the current player.
 
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
-local G = getgenv and getgenv() or _G
-G.__ArmLockC = G.__ArmLockC or { active=false, conns={}, joints=nil, stepName="ArmLockC_Step" }
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
-local CONFIG = {
-    SHOULDER_DEG = 70,
-    LOG = true,
-}
-local function log(...) if CONFIG.LOG then print("[ArmLockC]", ...) end end
-
-local function getCharHum()
-    local plr = Players.LocalPlayer
-    local char = plr.Character or plr.CharacterAdded:Wait()
-    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid")
-    return char, hum
+local function create(className, properties)
+	local instance = Instance.new(className)
+	for property, value in pairs(properties or {}) do
+		instance[property] = value
+	end
+	return instance
 end
 
-local function resolveShoulder(char)
-    local rua = char:FindFirstChild("RightUpperArm")
-    if rua then
-        local sh = rua:FindFirstChild("RightShoulder")
-            or (char:FindFirstChild("UpperTorso") and char.UpperTorso:FindFirstChild("RightShoulder"))
-        if sh and sh:IsA("Motor6D") then return sh end
-    end
-    local torso = char:FindFirstChild("Torso")
-    local shR6 = torso and torso:FindFirstChild("Right Shoulder")
-    if shR6 and shR6:IsA("Motor6D") then return shR6 end
-    return nil
+local gui = create("ScreenGui", {
+	Name = "FlightControlGui",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 100,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	Parent = playerGui,
+})
+
+-- Keep one visual design across devices while scaling down only when a small screen needs it.
+local layoutScale = create("UIScale", {
+	Name = "ResponsiveScale",
+	Scale = 1,
+	Parent = gui,
+})
+
+local viewportConnection
+local function updateLayoutScale()
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	local viewport = camera.ViewportSize
+	layoutScale.Scale = math.clamp(math.min(viewport.X / 500, viewport.Y / 400), 0.72, 1)
 end
 
-local function cleanup()
-    pcall(function() RunService:UnbindFromRenderStep(G.__ArmLockC.stepName) end)
-    for i=#G.__ArmLockC.conns,1,-1 do pcall(function() G.__ArmLockC.conns[i]:Disconnect() end) ; G.__ArmLockC.conns[i]=nil end
-    if G.__ArmLockC.joints and G.__ArmLockC.joints.s then pcall(function() G.__ArmLockC.joints.s.Transform = CFrame.new() end) end
-    G.__ArmLockC.joints=nil
-    G.__ArmLockC.active=false
-    log("Cleaned up.")
+local function watchViewport()
+	if viewportConnection then
+		viewportConnection:Disconnect()
+	end
+	local camera = workspace.CurrentCamera
+	if camera then
+		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateLayoutScale)
+	end
+	updateLayoutScale()
 end
 
-if G.__ArmLockC.active then cleanup() return end
-G.__ArmLockC.active=true
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
+watchViewport()
 
-local char, hum = getCharHum()
-local joints = { s = resolveShoulder(char) }
-if not joints.s then
-    log("No shoulder joint found.")
-    return cleanup()
+local shadow = create("Frame", {
+	Name = "Shadow",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5) + UDim2.fromOffset(0, 10),
+	Size = UDim2.fromOffset(390, 284),
+	BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+	BackgroundTransparency = 0.42,
+	BorderSizePixel = 0,
+	ZIndex = 1,
+	Parent = gui,
+})
+create("UICorner", {CornerRadius = UDim.new(0, 16), Parent = shadow})
+
+local main = create("Frame", {
+	Name = "FlightPanel",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(390, 284),
+	BackgroundColor3 = Color3.fromRGB(9, 9, 11),
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+	ZIndex = 2,
+	Parent = gui,
+})
+create("UICorner", {CornerRadius = UDim.new(0, 16), Parent = main})
+create("UIStroke", {
+	Color = Color3.fromRGB(205, 22, 22),
+	Thickness = 1.5,
+	Transparency = 0.16,
+	Parent = main,
+})
+create("UIGradient", {
+	Rotation = 20,
+	Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(7, 7, 9)),
+		ColorSequenceKeypoint.new(0.42, Color3.fromRGB(76, 0, 0)),
+		ColorSequenceKeypoint.new(0.72, Color3.fromRGB(8, 8, 10)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(40, 0, 0)),
+	}),
+	Parent = main,
+})
+
+local header = create("Frame", {
+	Name = "Header",
+	Size = UDim2.new(1, 0, 0, 56),
+	BackgroundColor3 = Color3.fromRGB(30, 0, 0),
+	BorderSizePixel = 0,
+	Active = true,
+	ZIndex = 3,
+	Parent = main,
+})
+create("UIGradient", {
+	Rotation = 0,
+	Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(13, 13, 15)),
+		ColorSequenceKeypoint.new(0.48, Color3.fromRGB(155, 12, 12)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 0, 0)),
+	}),
+	Parent = header,
+})
+create("Frame", {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 0, 1, 0),
+	Size = UDim2.new(1, 0, 0, 1),
+	BackgroundColor3 = Color3.fromRGB(237, 46, 46),
+	BorderSizePixel = 0,
+	ZIndex = 4,
+	Parent = header,
+})
+
+create("TextLabel", {
+	Name = "Title",
+	Position = UDim2.fromOffset(18, 8),
+	Size = UDim2.new(1, -130, 0, 24),
+	BackgroundTransparency = 1,
+	Text = "FLIGHT  CONTROL",
+	Font = Enum.Font.GothamBold,
+	TextColor3 = Color3.fromRGB(255, 238, 238),
+	TextSize = 17,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 5,
+	Parent = header,
+})
+create("TextLabel", {
+	Position = UDim2.fromOffset(19, 30),
+	Size = UDim2.new(1, -130, 0, 16),
+	BackgroundTransparency = 1,
+	Text = "LOCAL PLAYER MODULE",
+	Font = Enum.Font.Gotham,
+	TextColor3 = Color3.fromRGB(255, 182, 182),
+	TextSize = 9,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 5,
+	Parent = header,
+})
+
+local function makeHeaderButton(name, text, position, hoverColor)
+	local button = create("TextButton", {
+		Name = name,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = position,
+		Size = UDim2.fromOffset(30, 30),
+		BackgroundColor3 = Color3.fromRGB(31, 12, 14),
+		BackgroundTransparency = 0.1,
+		BorderSizePixel = 0,
+		Text = text,
+		Font = Enum.Font.GothamBold,
+		TextColor3 = Color3.fromRGB(255, 225, 225),
+		TextSize = 19,
+		AutoButtonColor = false,
+		ZIndex = 7,
+		Parent = header,
+	})
+	create("UICorner", {CornerRadius = UDim.new(0, 8), Parent = button})
+	button.MouseEnter:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.12), {BackgroundColor3 = hoverColor}):Play()
+	end)
+	button.MouseLeave:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.12), {BackgroundColor3 = Color3.fromRGB(31, 12, 14)}):Play()
+	end)
+	return button
 end
-G.__ArmLockC.joints = joints
 
--- Stop current tracks (all), then intercept future ones immediately
-for _,track in ipairs(hum:GetPlayingAnimationTracks()) do pcall(function() track:Stop(0) end) end
-table.insert(G.__ArmLockC.conns, hum.AnimationPlayed:Connect(function(track)
-    -- Kill any new animation as soon as it starts (prevents reclaiming the limb)
-    pcall(function() track:Stop(0) end)
-end))
+local closeButton = makeHeaderButton("Close", "×", UDim2.new(1, -14, 0.5, 0), Color3.fromRGB(175, 18, 18))
+local minimizeButton = makeHeaderButton("Minimize", "−", UDim2.new(1, -50, 0.5, 0), Color3.fromRGB(80, 10, 10))
 
-local SHOULDER_ANG = CFrame.Angles(math.rad(-CONFIG.SHOULDER_DEG), 0, 0)
-local PRIORITY = (Enum.RenderPriority.Last.Value + 1)
+local content = create("Frame", {
+	Name = "Content",
+	Position = UDim2.fromOffset(16, 72),
+	Size = UDim2.new(1, -32, 1, -88),
+	BackgroundTransparency = 1,
+	ZIndex = 3,
+	Parent = main,
+})
 
-RunService:BindToRenderStep(G.__ArmLockC.stepName, PRIORITY, function()
-    if not joints.s or not joints.s.Parent then
-        local c = Players.LocalPlayer.Character
-        if c then joints.s = resolveShoulder(c) end
-        if not joints.s then return end
-    end
-    joints.s.Transform = SHOULDER_ANG
+create("TextLabel", {
+	Position = UDim2.fromOffset(4, 0),
+	Size = UDim2.new(1, -8, 0, 20),
+	BackgroundTransparency = 1,
+	Text = "AERIAL MOBILITY",
+	Font = Enum.Font.GothamBold,
+	TextColor3 = Color3.fromRGB(255, 190, 190),
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 4,
+	Parent = content,
+})
+
+local flightButton = create("TextButton", {
+	Name = "FlightToggle",
+	Position = UDim2.fromOffset(0, 27),
+	Size = UDim2.new(1, 0, 0, 57),
+	BackgroundColor3 = Color3.fromRGB(23, 23, 26),
+	BorderSizePixel = 0,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 4,
+	Parent = content,
+})
+create("UICorner", {CornerRadius = UDim.new(0, 12), Parent = flightButton})
+local flightStroke = create("UIStroke", {
+	Color = Color3.fromRGB(119, 22, 22),
+	Thickness = 1,
+	Transparency = 0.1,
+	Parent = flightButton,
+})
+local flightGradient = create("UIGradient", {
+	Rotation = 10,
+	Color = ColorSequence.new(Color3.fromRGB(25, 25, 28), Color3.fromRGB(45, 7, 8)),
+	Parent = flightButton,
+})
+create("TextLabel", {
+	Position = UDim2.fromOffset(17, 7),
+	Size = UDim2.new(1, -110, 0, 22),
+	BackgroundTransparency = 1,
+	Text = "FLIGHT",
+	Font = Enum.Font.GothamBold,
+	TextColor3 = Color3.fromRGB(255, 240, 240),
+	TextSize = 18,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 5,
+	Parent = flightButton,
+})
+local stateLabel = create("TextLabel", {
+	Position = UDim2.fromOffset(18, 31),
+	Size = UDim2.new(1, -110, 0, 17),
+	BackgroundTransparency = 1,
+	Text = "OFFLINE",
+	Font = Enum.Font.GothamMedium,
+	TextColor3 = Color3.fromRGB(189, 126, 126),
+	TextSize = 10,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 5,
+	Parent = flightButton,
+})
+local togglePill = create("Frame", {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -15, 0.5, 0),
+	Size = UDim2.fromOffset(58, 28),
+	BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+	BorderSizePixel = 0,
+	ZIndex = 5,
+	Parent = flightButton,
+})
+create("UICorner", {CornerRadius = UDim.new(1, 0), Parent = togglePill})
+local pillStroke = create("UIStroke", {Color = Color3.fromRGB(115, 26, 26), Thickness = 1, Parent = togglePill})
+local toggleKnob = create("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.fromOffset(4, 14),
+	Size = UDim2.fromOffset(20, 20),
+	BackgroundColor3 = Color3.fromRGB(135, 40, 40),
+	BorderSizePixel = 0,
+	ZIndex = 6,
+	Parent = togglePill,
+})
+create("UICorner", {CornerRadius = UDim.new(1, 0), Parent = toggleKnob})
+
+create("TextLabel", {
+	Position = UDim2.fromOffset(4, 96),
+	Size = UDim2.new(1, -8, 0, 18),
+	BackgroundTransparency = 1,
+	Text = "VERTICAL THRUST",
+	Font = Enum.Font.GothamBold,
+	TextColor3 = Color3.fromRGB(255, 190, 190),
+	TextSize = 10,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 4,
+	Parent = content,
+})
+
+local function makeThrustButton(name, text, hint, position)
+	local button = create("TextButton", {
+		Name = name,
+		Position = position,
+		Size = UDim2.new(0.5, -5, 0, 44),
+		BackgroundColor3 = Color3.fromRGB(25, 19, 21),
+		BorderSizePixel = 0,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 4,
+		Parent = content,
+	})
+	create("UICorner", {CornerRadius = UDim.new(0, 10), Parent = button})
+	create("UIStroke", {Color = Color3.fromRGB(91, 27, 27), Thickness = 1, Parent = button})
+	create("TextLabel", {
+		Position = UDim2.fromOffset(12, 4),
+		Size = UDim2.fromOffset(25, 35),
+		BackgroundTransparency = 1,
+		Text = text,
+		Font = Enum.Font.GothamBold,
+		TextColor3 = Color3.fromRGB(255, 224, 224),
+		TextSize = 25,
+		ZIndex = 5,
+		Parent = button,
+	})
+	create("TextLabel", {
+		Position = UDim2.fromOffset(43, 7),
+		Size = UDim2.new(1, -50, 0, 28),
+		BackgroundTransparency = 1,
+		Text = hint,
+		Font = Enum.Font.GothamMedium,
+		TextColor3 = Color3.fromRGB(230, 175, 175),
+		TextSize = 10,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 5,
+		Parent = button,
+	})
+	return button
+end
+
+local upButton = makeThrustButton("Ascend", "↑", "ASCEND\nSPACE", UDim2.fromOffset(0, 117))
+local downButton = makeThrustButton("Descend", "↓", "DESCEND\nCTRL", UDim2.new(0.5, 5, 0, 117))
+
+local minimized = false
+local dragging = false
+local dragStart
+local panelStart
+local dragInput
+
+local function setMinimized(value)
+	minimized = value
+	content.Visible = not value
+	minimizeButton.Text = value and "□" or "−"
+	local size = value and UDim2.fromOffset(390, 56) or UDim2.fromOffset(390, 284)
+	TweenService:Create(main, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = size}):Play()
+	TweenService:Create(shadow, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = value and UDim2.fromOffset(390, 56) or UDim2.fromOffset(390, 284),
+	}):Play()
+end
+
+minimizeButton.Activated:Connect(function()
+	setMinimized(not minimized)
 end)
 
--- Respawn handling: re-hook and re-resolve
-table.insert(G.__ArmLockC.conns, Players.LocalPlayer.CharacterAdded:Connect(function(newChar)
-    task.wait(0.1)
-    char = newChar
-    hum = newChar:FindFirstChildOfClass("Humanoid") or newChar:WaitForChild("Humanoid")
-    joints.s = resolveShoulder(newChar)
-    -- Rehook AnimationPlayed for the new humanoid
-    table.insert(G.__ArmLockC.conns, hum.AnimationPlayed:Connect(function(track)
-        pcall(function() track:Stop(0) end)
-    end))
-end))
+header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		panelStart = main.Position
+		dragInput = input
+	end
+end)
 
-log("Locked right arm with animation interception and late-priority transform.")
+header.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and input == dragInput and dragStart and panelStart then
+		local delta = input.Position - dragStart
+		local newPosition = UDim2.new(panelStart.X.Scale, panelStart.X.Offset + delta.X, panelStart.Y.Scale, panelStart.Y.Offset + delta.Y)
+		main.Position = newPosition
+		shadow.Position = newPosition + UDim2.fromOffset(0, 10)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input == dragInput then
+		dragging = false
+		dragInput = nil
+	end
+end)
+
+local character
+local humanoid
+local rootPart
+local diedConnection
+local flightEnabled = false
+local rising = false
+local descending = false
+local bodyVelocity
+local bodyGyro
+local controls
+
+task.spawn(function()
+	local playerModule = player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")
+	controls = require(playerModule):GetControls()
+end)
+
+local function getCharacterParts()
+	character = player.Character or player.CharacterAdded:Wait()
+	humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid")
+	rootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
+	if diedConnection then
+		diedConnection:Disconnect()
+	end
+	diedConnection = humanoid.Died:Connect(function()
+		if flightEnabled then
+			flightEnabled = false
+			rising = false
+			descending = false
+			if bodyVelocity then bodyVelocity:Destroy() end
+			if bodyGyro then bodyGyro:Destroy() end
+			bodyVelocity = nil
+			bodyGyro = nil
+			stateLabel.Text = "OFFLINE • RESPAWN DETECTED"
+			stateLabel.TextColor3 = Color3.fromRGB(189, 126, 126)
+			TweenService:Create(toggleKnob, TweenInfo.new(0.15), {Position = UDim2.fromOffset(4, 14), BackgroundColor3 = Color3.fromRGB(135, 40, 40)}):Play()
+			TweenService:Create(flightButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(23, 23, 26)}):Play()
+			pillStroke.Color = Color3.fromRGB(115, 26, 26)
+			flightStroke.Color = Color3.fromRGB(119, 22, 22)
+		end
+	end)
+end
+
+getCharacterParts()
+
+player.CharacterAdded:Connect(function()
+	task.wait(0.15)
+	getCharacterParts()
+end)
+
+local function stopFlight()
+	flightEnabled = false
+	rising = false
+	descending = false
+	if bodyVelocity then bodyVelocity:Destroy() end
+	if bodyGyro then bodyGyro:Destroy() end
+	bodyVelocity = nil
+	bodyGyro = nil
+	if humanoid and humanoid.Parent and humanoid.Health > 0 then
+		humanoid.PlatformStand = false
+		humanoid.AutoRotate = true
+	end
+	stateLabel.Text = "OFFLINE"
+	stateLabel.TextColor3 = Color3.fromRGB(189, 126, 126)
+	TweenService:Create(toggleKnob, TweenInfo.new(0.15), {Position = UDim2.fromOffset(4, 14), BackgroundColor3 = Color3.fromRGB(135, 40, 40)}):Play()
+	TweenService:Create(flightButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(23, 23, 26)}):Play()
+	pillStroke.Color = Color3.fromRGB(115, 26, 26)
+	flightStroke.Color = Color3.fromRGB(119, 22, 22)
+end
+
+local function startFlight()
+	getCharacterParts()
+	if not humanoid or humanoid.Health <= 0 or not rootPart then
+		return
+	end
+	flightEnabled = true
+	humanoid.PlatformStand = true
+	humanoid.AutoRotate = false
+	bodyVelocity = create("BodyVelocity", {
+		Name = "LocalFlightVelocity",
+		MaxForce = Vector3.new(100000, 100000, 100000),
+		P = 1400,
+		Velocity = Vector3.zero,
+		Parent = rootPart,
+	})
+	bodyGyro = create("BodyGyro", {
+		Name = "LocalFlightGyro",
+		MaxTorque = Vector3.new(100000, 100000, 100000),
+		P = 9000,
+		D = 300,
+		CFrame = workspace.CurrentCamera.CFrame,
+		Parent = rootPart,
+	})
+	stateLabel.Text = "ONLINE • LOCAL ONLY"
+	stateLabel.TextColor3 = Color3.fromRGB(255, 204, 204)
+	TweenService:Create(toggleKnob, TweenInfo.new(0.15), {Position = UDim2.new(1, -24, 0, 14), BackgroundColor3 = Color3.fromRGB(255, 63, 63)}):Play()
+	TweenService:Create(flightButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(93, 9, 10)}):Play()
+	pillStroke.Color = Color3.fromRGB(255, 73, 73)
+	flightStroke.Color = Color3.fromRGB(255, 73, 73)
+end
+
+flightButton.Activated:Connect(function()
+	if flightEnabled then
+		stopFlight()
+	else
+		startFlight()
+	end
+end)
+
+local function bindThrust(button, direction)
+	button.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			if direction == 1 then rising = true else descending = true end
+			button.BackgroundColor3 = Color3.fromRGB(94, 14, 16)
+		end
+	end)
+	button.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			if direction == 1 then rising = false else descending = false end
+			button.BackgroundColor3 = Color3.fromRGB(25, 19, 21)
+		end
+	end)
+end
+
+bindThrust(upButton, 1)
+bindThrust(downButton, -1)
+
+UserInputService.InputBegan:Connect(function(input)
+	if UserInputService:GetFocusedTextBox() then return end
+	if input.KeyCode == Enum.KeyCode.Space then
+		rising = true
+	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
+		descending = true
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.Space then
+		rising = false
+	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
+		descending = false
+	end
+end)
+
+local flightLoop = RunService.RenderStepped:Connect(function()
+	if not flightEnabled then return end
+	if not humanoid or not rootPart or humanoid.Health <= 0 or not rootPart.Parent then
+		stopFlight()
+		return
+	end
+	if not bodyVelocity or not bodyGyro or bodyVelocity.Parent ~= rootPart or bodyGyro.Parent ~= rootPart then
+		stopFlight()
+		return
+	end
+
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	local moveVector = Vector3.zero
+	if controls then
+		local ok, result = pcall(function()
+			return controls:GetMoveVector()
+		end)
+		if ok and typeof(result) == "Vector3" then
+			moveVector = result
+		end
+	end
+
+	-- Preserve the camera's full direction: looking up/down changes forward flight altitude.
+	local cameraMovement = camera.CFrame.RightVector * moveVector.X - camera.CFrame.LookVector * moveVector.Z
+	if cameraMovement.Magnitude > 1 then
+		cameraMovement = cameraMovement.Unit
+	end
+
+	local vertical = (rising and 1 or 0) - (descending and 1 or 0)
+	bodyVelocity.Velocity = cameraMovement * 58 + Vector3.new(0, vertical * 46, 0)
+	bodyGyro.CFrame = camera.CFrame
+end)
+
+closeButton.Activated:Connect(function()
+	stopFlight()
+	flightLoop:Disconnect()
+	if diedConnection then diedConnection:Disconnect() end
+	gui:Destroy()
+	script:Destroy()
+end)
