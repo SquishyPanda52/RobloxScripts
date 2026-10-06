@@ -890,12 +890,12 @@ aimUI.commandListTextConstraint.Parent = aimUI.commandListButton
 aimUI.commandListBody = Instance.new("TextLabel")
 aimUI.commandListBody.Name = "CommandList"
 aimUI.commandListBody.LayoutOrder = 13
-aimUI.commandListBody.Size = UDim2.new(1, 0, 0, 310)
+aimUI.commandListBody.Size = UDim2.new(1, 0, 0, 410)
 aimUI.commandListBody.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
 aimUI.commandListBody.BackgroundTransparency = 0.12
 aimUI.commandListBody.BorderSizePixel = 0
 aimUI.commandListBody.Font = Enum.Font.Gotham
-aimUI.commandListBody.Text = "FOLLOW [player] — Follow a named player; with no player, follow the commander.\n\nCOME [player] — Same as Follow.\n\nGOTO [player] — Same as Follow.\n\nHOLD — Walk to the commander's current position and remain there.\n\nATTACK / ATK [players] — Attack comma-separated targets; with no target, use the saved Attack Textbox.\n\nSTOP — Stop movement and attack, and disable all Follow, Attack, Death Follow, and Death Attack modes.\n\nCLEAR — Clear the saved Attack Textbox and stop its active attack.\n\nDEATH FOLLOW / NO DEATH FOLLOW — Enable or disable following again after a respawn.\n\nDEATH ATTACK / NO DEATH ATTACK — Enable or disable attacking again after a respawn.\n\nTEAM ASSIST / NO TEAM ASSIST — Enable or disable retaliation when a listed teammate is damaged.\n\nCommands are case-insensitive. Names support usernames, display names, partial names, and commas."
+aimUI.commandListBody.Text = "FOLLOW [player] — Follow a named player; with no player, follow the commander.\n\nC / F — Exact shortcuts that immediately follow the commander.\n\nCOME [player] — Same as Follow.\n\nGOTO [player] — Same as Follow.\n\nHOLD — Walk to the commander's current position and remain there.\n\nATTACK / ATK [players] — Attack comma-separated targets; with no target, use the saved Attack Textbox.\n\nHELP / H — Ignore all commander and teammate attack-safety pauses or retreats for 30 seconds.\n\nSTOP — Stop movement and attack, and disable all Follow, Attack, Death Follow, and Death Attack modes.\n\nCLEAR — Clear the saved Attack Textbox and stop its active attack.\n\nDEATH FOLLOW / NO DEATH FOLLOW — Enable or disable following again after a respawn.\n\nDEATH ATTACK / NO DEATH ATTACK — Enable or disable attacking again after a respawn.\n\nTEAM ASSIST / NO TEAM ASSIST — Enable or disable retaliation when a listed teammate is damaged.\n\nCommands are case-insensitive. Names support usernames, display names, partial names, and commas."
 aimUI.commandListBody.TextColor3 = Color3.fromRGB(205, 207, 216)
 aimUI.commandListBody.TextSize = 12
 aimUI.commandListBody.TextWrapped = true
@@ -1003,7 +1003,9 @@ aimUI.attackFriendlyResumeCorridor = 5
 aimUI.attackCheckmateTargetDistance = 4.5
 aimUI.attackCheckmateFriendlyDistance = 6
 aimUI.attackRetreatDistance = 6
+aimUI.attackSafetyOverrideUntil = 0
 screenGui:SetAttribute("AttackSafetyState", "Idle")
+screenGui:SetAttribute("AttackSafetyOverrideRemaining", 0)
 
 local OFF_BACKGROUND = Color3.fromRGB(82, 33, 40)
 local OFF_STROKE = Color3.fromRGB(170, 68, 82)
@@ -1303,6 +1305,18 @@ aimUI.resetAttackSafety = function()
 end
 
 aimUI.attackSafetyAction = function(targetPlayer, targetRoot, localRoot)
+	local overrideRemaining = math.max(0, aimUI.attackSafetyOverrideUntil - os.clock())
+	screenGui:SetAttribute("AttackSafetyOverrideRemaining", overrideRemaining)
+	if overrideRemaining > 0 then
+		aimUI.attackSafetyPaused = false
+		aimUI.attackSafetyTargetUserId = targetPlayer.UserId
+		aimUI.attackSafetyFriendlyUserId = nil
+		aimUI.attackRetreatIssued = false
+		aimUI.attackRetreatPosition = nil
+		screenGui:SetAttribute("AttackSafetyState", "HelpOverride")
+		return "Chase", targetRoot.Position
+	end
+
 	if aimUI.attackSafetyTargetUserId ~= targetPlayer.UserId then
 		aimUI.resetAttackSafety()
 		aimUI.attackSafetyTargetUserId = targetPlayer.UserId
@@ -1790,6 +1804,8 @@ local function handleCommanderMessage(player, message)
 		return
 	end
 
+	local quickFollowCommand = normalized == "c" or normalized == "f"
+	local helpCommand = normalized == "help" or normalized == "h"
 	local teamAssistOnCommand = normalized == "team assist"
 		or normalized == "help teammates"
 	local teamAssistOffCommand = normalized == "no team assist"
@@ -1800,8 +1816,10 @@ local function handleCommanderMessage(player, message)
 		or normalized == "no death attack"
 		or teamAssistOnCommand
 		or teamAssistOffCommand
+		or helpCommand
 	local command, targetText = string.match(normalized, "^(%a+)%s*(.-)%s*$")
 	local recognized = settingCommand
+		or quickFollowCommand
 		or command == "follow"
 		or command == "come"
 		or command == "goto"
@@ -1819,7 +1837,14 @@ local function handleCommanderMessage(player, message)
 		time = now,
 	}
 
-	if teamAssistOnCommand then
+	if helpCommand then
+		aimUI.attackSafetyOverrideUntil = os.clock() + 30
+		aimUI.resetAttackSafety()
+		screenGui:SetAttribute("AttackSafetyState", "HelpOverride")
+		screenGui:SetAttribute("AttackSafetyOverrideRemaining", 30)
+	elseif quickFollowCommand then
+		beginFollowCommand(player, player, nil)
+	elseif teamAssistOnCommand then
 		aimUI.teamAssistEnabled = true
 		updateToggleVisual(
 			aimUI.teamAssistButton,
@@ -2974,7 +2999,7 @@ local function applyResponsiveLayout()
 	aimUI.slider.Size = UDim2.new(1, 0, 0, math.max(50, math.floor(54 * compactScale)))
 	aimUI.sliderLabel.TextSize = math.max(11, math.floor(12 * compactScale))
 	aimUI.commandListButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
-	aimUI.commandListBody.Size = UDim2.new(1, 0, 0, if targetWidth < 360 then 480 else 360)
+	aimUI.commandListBody.Size = UDim2.new(1, 0, 0, if targetWidth < 360 then 560 else 430)
 	aimUI.commandListBody.TextSize = math.max(10, math.floor(12 * compactScale))
 
 	hint.Size = UDim2.new(1, 0, 0, math.max(18, math.floor(20 * compactScale)))
