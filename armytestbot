@@ -1,542 +1,3343 @@
---// Auto Command Key Presser
---// LocalScript
---// Runtime Script
-
 local Players = game:GetService("Players")
-local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local TextChatService = game:GetService("TextChatService")
+local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
 
--- Prevent duplicates
-local existing = playerGui:FindFirstChild("AutoCommandKeyPresser")
-if existing then
-	existing:Destroy()
+local runtimeConnections = {}
+local isClosed = false
+
+local function connect(signal, callback)
+	local connection = signal:Connect(callback)
+	table.insert(runtimeConnections, connection)
+	return connection
 end
 
-local connections = {}
-local destroyed = false
-
-local function track(conn)
-	table.insert(connections, conn)
-	return conn
+local oldGui = playerGui:FindFirstChild("CommandBoxGui")
+if oldGui then
+	oldGui:Destroy()
 end
 
-local function cleanup()
-	if destroyed then
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CommandBoxGui"
+screenGui.DisplayOrder = 20
+screenGui.IgnoreGuiInset = false
+screenGui.ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets
+screenGui.ClipToDeviceSafeArea = true
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+local window = Instance.new("Frame")
+window.Name = "CommandWindow"
+window.AnchorPoint = Vector2.new(0.5, 0.5)
+window.Position = UDim2.fromScale(0.5, 0.5)
+window.Size = UDim2.fromScale(0.9, 0.68)
+window.BackgroundColor3 = Color3.fromRGB(15, 15, 17)
+window.BorderSizePixel = 0
+window.ClipsDescendants = true
+window.Parent = screenGui
+
+local sizeConstraint = Instance.new("UISizeConstraint")
+sizeConstraint.MinSize = Vector2.new(220, 170)
+sizeConstraint.MaxSize = Vector2.new(520, 360)
+sizeConstraint.Parent = window
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 14)
+corner.Parent = window
+
+local gradient = Instance.new("UIGradient")
+gradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(8, 8, 10)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(34, 35, 40)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(13, 13, 16)),
+})
+gradient.Rotation = 135
+gradient.Parent = window
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(85, 87, 96)
+stroke.Transparency = 0.25
+stroke.Thickness = 1
+stroke.Parent = window
+
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Active = true
+topBar.Size = UDim2.new(1, 0, 0, 44)
+topBar.BackgroundColor3 = Color3.fromRGB(20, 21, 25)
+topBar.BackgroundTransparency = 0.08
+topBar.BorderSizePixel = 0
+topBar.ZIndex = 5
+topBar.Parent = window
+
+local brand = Instance.new("TextLabel")
+brand.Name = "Brand"
+brand.AnchorPoint = Vector2.new(0, 0.5)
+brand.Position = UDim2.new(0, 14, 0.5, 0)
+brand.Size = UDim2.new(1, -98, 1, 0)
+brand.BackgroundTransparency = 1
+brand.Font = Enum.Font.GothamBold
+brand.Text = "Bots+"
+brand.TextColor3 = Color3.fromRGB(232, 233, 238)
+brand.TextSize = 15
+brand.TextXAlignment = Enum.TextXAlignment.Left
+brand.ZIndex = 6
+brand.Parent = topBar
+
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Name = "Minimize"
+minimizeButton.AnchorPoint = Vector2.new(1, 0.5)
+minimizeButton.Position = UDim2.new(1, -48, 0.5, 0)
+minimizeButton.Size = UDim2.fromOffset(32, 30)
+minimizeButton.AutoButtonColor = false
+minimizeButton.BackgroundColor3 = Color3.fromRGB(43, 44, 50)
+minimizeButton.BorderSizePixel = 0
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.Text = "—"
+minimizeButton.TextColor3 = Color3.fromRGB(212, 214, 222)
+minimizeButton.TextSize = 16
+minimizeButton.ZIndex = 7
+minimizeButton.Parent = topBar
+
+local minimizeCorner = Instance.new("UICorner")
+minimizeCorner.CornerRadius = UDim.new(0, 8)
+minimizeCorner.Parent = minimizeButton
+
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "Close"
+closeButton.AnchorPoint = Vector2.new(1, 0.5)
+closeButton.Position = UDim2.new(1, -10, 0.5, 0)
+closeButton.Size = UDim2.fromOffset(32, 30)
+closeButton.AutoButtonColor = false
+closeButton.BackgroundColor3 = Color3.fromRGB(76, 39, 43)
+closeButton.BorderSizePixel = 0
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Text = "×"
+closeButton.TextColor3 = Color3.fromRGB(245, 205, 209)
+closeButton.TextSize = 18
+closeButton.ZIndex = 7
+closeButton.Parent = topBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeButton
+
+local separator = Instance.new("Frame")
+separator.Name = "Separator"
+separator.AnchorPoint = Vector2.new(0, 1)
+separator.Position = UDim2.fromScale(0, 1)
+separator.Size = UDim2.new(1, 0, 0, 1)
+separator.BackgroundColor3 = Color3.fromRGB(94, 96, 106)
+separator.BackgroundTransparency = 0.6
+separator.BorderSizePixel = 0
+separator.ZIndex = 6
+separator.Parent = topBar
+
+local scrollingFrame = Instance.new("ScrollingFrame")
+scrollingFrame.Name = "CommandPanel"
+scrollingFrame.AnchorPoint = Vector2.zero
+scrollingFrame.Position = UDim2.fromOffset(0, 44)
+scrollingFrame.Size = UDim2.new(1, 0, 1, -44)
+scrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scrollingFrame.CanvasSize = UDim2.new()
+scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(130, 130, 138)
+scrollingFrame.ScrollBarThickness = 5
+scrollingFrame.BackgroundTransparency = 1
+scrollingFrame.BorderSizePixel = 0
+scrollingFrame.ClipsDescendants = true
+scrollingFrame.Parent = window
+
+local padding = Instance.new("UIPadding")
+padding.PaddingTop = UDim.new(0, 18)
+padding.PaddingBottom = UDim.new(0, 18)
+padding.PaddingLeft = UDim.new(0, 18)
+padding.PaddingRight = UDim.new(0, 18)
+padding.Parent = scrollingFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.FillDirection = Enum.FillDirection.Vertical
+listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 12)
+listLayout.Parent = scrollingFrame
+
+local minimizedTab = Instance.new("TextButton")
+minimizedTab.Name = "BotsTab"
+minimizedTab.AnchorPoint = Vector2.new(0.5, 0.5)
+minimizedTab.Position = window.Position
+minimizedTab.Size = UDim2.fromOffset(124, 44)
+minimizedTab.Active = true
+minimizedTab.AutoButtonColor = false
+minimizedTab.BackgroundColor3 = Color3.fromRGB(18, 19, 22)
+minimizedTab.BorderSizePixel = 0
+minimizedTab.Font = Enum.Font.GothamBold
+minimizedTab.Text = "Bots+"
+minimizedTab.TextColor3 = Color3.fromRGB(235, 236, 242)
+minimizedTab.TextSize = 15
+minimizedTab.Visible = false
+minimizedTab.Parent = screenGui
+
+local minimizedCorner = Instance.new("UICorner")
+minimizedCorner.CornerRadius = UDim.new(0, 11)
+minimizedCorner.Parent = minimizedTab
+
+local minimizedGradient = Instance.new("UIGradient")
+minimizedGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(210, 212, 220)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+})
+minimizedGradient.Rotation = 125
+minimizedGradient.Parent = minimizedTab
+
+local minimizedStroke = Instance.new("UIStroke")
+minimizedStroke.Color = Color3.fromRGB(105, 108, 118)
+minimizedStroke.Transparency = 0.2
+minimizedStroke.Thickness = 1
+minimizedStroke.Parent = minimizedTab
+
+local aimUI = {}
+
+aimUI.commanderArea = Instance.new("Frame")
+aimUI.commanderArea.Name = "CommanderArea"
+aimUI.commanderArea.LayoutOrder = 1
+aimUI.commanderArea.Size = UDim2.new(1, 0, 0, 108)
+aimUI.commanderArea.BackgroundTransparency = 1
+aimUI.commanderArea.BorderSizePixel = 0
+aimUI.commanderArea.Parent = scrollingFrame
+
+local commandBox = Instance.new("TextBox")
+commandBox.Name = "CommandBox"
+commandBox.LayoutOrder = 1
+commandBox.Size = UDim2.new(1, 0, 0, 54)
+commandBox.BackgroundColor3 = Color3.fromRGB(24, 25, 29)
+commandBox.BackgroundTransparency = 0.06
+commandBox.BorderSizePixel = 0
+commandBox.ClearTextOnFocus = false
+commandBox.Font = Enum.Font.GothamMedium
+commandBox.PlaceholderColor3 = Color3.fromRGB(145, 147, 156)
+commandBox.PlaceholderText = "Command Box  •  names separated by commas"
+commandBox.Text = ""
+commandBox.TextTruncate = Enum.TextTruncate.AtEnd
+commandBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+commandBox.TextSize = 15
+commandBox.TextXAlignment = Enum.TextXAlignment.Left
+commandBox.Parent = aimUI.commanderArea
+
+local boxCorner = Instance.new("UICorner")
+boxCorner.CornerRadius = UDim.new(0, 10)
+boxCorner.Parent = commandBox
+
+local boxStroke = Instance.new("UIStroke")
+boxStroke.Color = Color3.fromRGB(100, 102, 112)
+boxStroke.Transparency = 0.35
+boxStroke.Thickness = 1
+boxStroke.Parent = commandBox
+
+local boxPadding = Instance.new("UIPadding")
+boxPadding.PaddingLeft = UDim.new(0, 16)
+boxPadding.PaddingRight = UDim.new(0, 16)
+boxPadding.Parent = commandBox
+
+aimUI.noFriendlyFireButton = Instance.new("TextButton")
+aimUI.noFriendlyFireButton.Name = "NoFriendlyFireToggle"
+aimUI.noFriendlyFireButton.Position = UDim2.new(0, 0, 0, 62)
+aimUI.noFriendlyFireButton.Size = UDim2.new(0.46, -4, 0, 42)
+aimUI.noFriendlyFireButton.AutoButtonColor = false
+aimUI.noFriendlyFireButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.noFriendlyFireButton.BorderSizePixel = 0
+aimUI.noFriendlyFireButton.Font = Enum.Font.GothamBold
+aimUI.noFriendlyFireButton.Text = "No Friendly Fire: OFF"
+aimUI.noFriendlyFireButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.noFriendlyFireButton.TextScaled = true
+aimUI.noFriendlyFireButton.Parent = aimUI.commanderArea
+
+aimUI.noFriendlyFireCorner = Instance.new("UICorner")
+aimUI.noFriendlyFireCorner.CornerRadius = UDim.new(0, 10)
+aimUI.noFriendlyFireCorner.Parent = aimUI.noFriendlyFireButton
+
+aimUI.noFriendlyFireStroke = Instance.new("UIStroke")
+aimUI.noFriendlyFireStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.noFriendlyFireStroke.Transparency = 0.12
+aimUI.noFriendlyFireStroke.Thickness = 1
+aimUI.noFriendlyFireStroke.Parent = aimUI.noFriendlyFireButton
+
+aimUI.noFriendlyFireTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.noFriendlyFireTextConstraint.MinTextSize = 7
+aimUI.noFriendlyFireTextConstraint.MaxTextSize = 12
+aimUI.noFriendlyFireTextConstraint.Parent = aimUI.noFriendlyFireButton
+
+aimUI.noFriendlyFireDescription = Instance.new("TextLabel")
+aimUI.noFriendlyFireDescription.Name = "Description"
+aimUI.noFriendlyFireDescription.Position = UDim2.new(0.46, 4, 0, 62)
+aimUI.noFriendlyFireDescription.Size = UDim2.new(0.54, -4, 0, 42)
+aimUI.noFriendlyFireDescription.BackgroundTransparency = 1
+aimUI.noFriendlyFireDescription.Font = Enum.Font.Gotham
+aimUI.noFriendlyFireDescription.Text = "Protects commanders; attacks pause or retreat when they are too close."
+aimUI.noFriendlyFireDescription.TextColor3 = Color3.fromRGB(166, 168, 178)
+aimUI.noFriendlyFireDescription.TextSize = 9
+aimUI.noFriendlyFireDescription.TextWrapped = true
+aimUI.noFriendlyFireDescription.TextXAlignment = Enum.TextXAlignment.Left
+aimUI.noFriendlyFireDescription.TextYAlignment = Enum.TextYAlignment.Center
+aimUI.noFriendlyFireDescription.Parent = aimUI.commanderArea
+
+aimUI.teamArea = Instance.new("Frame")
+aimUI.teamArea.Name = "TeamArea"
+aimUI.teamArea.LayoutOrder = 2
+aimUI.teamArea.Size = UDim2.new(1, 0, 0, 54)
+aimUI.teamArea.BackgroundTransparency = 1
+aimUI.teamArea.BorderSizePixel = 0
+aimUI.teamArea.Parent = scrollingFrame
+
+aimUI.teamBox = Instance.new("TextBox")
+aimUI.teamBox.Name = "TeamListBox"
+aimUI.teamBox.LayoutOrder = 1
+aimUI.teamBox.Size = UDim2.new(1, 0, 0, 54)
+aimUI.teamBox.BackgroundColor3 = Color3.fromRGB(24, 25, 29)
+aimUI.teamBox.BackgroundTransparency = 0.06
+aimUI.teamBox.BorderSizePixel = 0
+aimUI.teamBox.ClearTextOnFocus = false
+aimUI.teamBox.Font = Enum.Font.GothamMedium
+aimUI.teamBox.PlaceholderColor3 = Color3.fromRGB(145, 147, 156)
+aimUI.teamBox.PlaceholderText = "Team List  •  protected names separated by commas"
+aimUI.teamBox.Text = ""
+aimUI.teamBox.TextTruncate = Enum.TextTruncate.AtEnd
+aimUI.teamBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+aimUI.teamBox.TextSize = 15
+aimUI.teamBox.TextXAlignment = Enum.TextXAlignment.Left
+aimUI.teamBox.Parent = aimUI.teamArea
+
+aimUI.teamBoxCorner = Instance.new("UICorner")
+aimUI.teamBoxCorner.CornerRadius = UDim.new(0, 10)
+aimUI.teamBoxCorner.Parent = aimUI.teamBox
+
+aimUI.teamBoxStroke = Instance.new("UIStroke")
+aimUI.teamBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+aimUI.teamBoxStroke.Transparency = 0.35
+aimUI.teamBoxStroke.Thickness = 1
+aimUI.teamBoxStroke.Parent = aimUI.teamBox
+
+aimUI.teamBoxPadding = Instance.new("UIPadding")
+aimUI.teamBoxPadding.PaddingLeft = UDim.new(0, 16)
+aimUI.teamBoxPadding.PaddingRight = UDim.new(0, 16)
+aimUI.teamBoxPadding.Parent = aimUI.teamBox
+
+aimUI.teamAssistButton = Instance.new("TextButton")
+aimUI.teamAssistButton.Name = "TeamAssistToggle"
+aimUI.teamAssistButton.LayoutOrder = 2
+aimUI.teamAssistButton.Position = UDim2.new(0.7, 5, 0, 0)
+aimUI.teamAssistButton.Size = UDim2.new(0.3, -5, 1, 0)
+aimUI.teamAssistButton.AutoButtonColor = false
+aimUI.teamAssistButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.teamAssistButton.BorderSizePixel = 0
+aimUI.teamAssistButton.Font = Enum.Font.GothamBold
+aimUI.teamAssistButton.Text = "Team Assist: OFF"
+aimUI.teamAssistButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.teamAssistButton.TextScaled = true
+aimUI.teamAssistButton.Parent = aimUI.teamArea
+
+aimUI.teamAssistCorner = Instance.new("UICorner")
+aimUI.teamAssistCorner.CornerRadius = UDim.new(0, 10)
+aimUI.teamAssistCorner.Parent = aimUI.teamAssistButton
+
+aimUI.teamAssistStroke = Instance.new("UIStroke")
+aimUI.teamAssistStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.teamAssistStroke.Transparency = 0.12
+aimUI.teamAssistStroke.Thickness = 1
+aimUI.teamAssistStroke.Parent = aimUI.teamAssistButton
+
+aimUI.teamAssistTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.teamAssistTextConstraint.MinTextSize = 8
+aimUI.teamAssistTextConstraint.MaxTextSize = 12
+aimUI.teamAssistTextConstraint.Parent = aimUI.teamAssistButton
+
+local followBox = Instance.new("TextBox")
+followBox.Name = "FollowBox"
+followBox.LayoutOrder = 3
+followBox.Size = UDim2.new(1, 0, 0, 54)
+followBox.BackgroundColor3 = Color3.fromRGB(24, 25, 29)
+followBox.BackgroundTransparency = 0.06
+followBox.BorderSizePixel = 0
+followBox.ClearTextOnFocus = false
+followBox.Font = Enum.Font.GothamMedium
+followBox.PlaceholderColor3 = Color3.fromRGB(145, 147, 156)
+followBox.PlaceholderText = "Follow Textbox  •  username or display name"
+followBox.Text = ""
+followBox.TextTruncate = Enum.TextTruncate.AtEnd
+followBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+followBox.TextSize = 15
+followBox.TextXAlignment = Enum.TextXAlignment.Left
+followBox.Parent = scrollingFrame
+
+local followBoxCorner = Instance.new("UICorner")
+followBoxCorner.CornerRadius = UDim.new(0, 10)
+followBoxCorner.Parent = followBox
+
+local followBoxStroke = Instance.new("UIStroke")
+followBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+followBoxStroke.Transparency = 0.35
+followBoxStroke.Thickness = 1
+followBoxStroke.Parent = followBox
+
+local followBoxPadding = Instance.new("UIPadding")
+followBoxPadding.PaddingLeft = UDim.new(0, 16)
+followBoxPadding.PaddingRight = UDim.new(0, 16)
+followBoxPadding.Parent = followBox
+
+local toggleRow = Instance.new("Frame")
+toggleRow.Name = "FollowToggles"
+toggleRow.LayoutOrder = 4
+toggleRow.Size = UDim2.new(1, 0, 0, 48)
+toggleRow.BackgroundTransparency = 1
+toggleRow.BorderSizePixel = 0
+toggleRow.Parent = scrollingFrame
+
+local toggleLayout = Instance.new("UIListLayout")
+toggleLayout.FillDirection = Enum.FillDirection.Horizontal
+toggleLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+toggleLayout.SortOrder = Enum.SortOrder.LayoutOrder
+toggleLayout.Padding = UDim.new(0, 10)
+toggleLayout.Parent = toggleRow
+
+local followButton = Instance.new("TextButton")
+followButton.Name = "FollowToggle"
+followButton.LayoutOrder = 1
+followButton.Size = UDim2.new(0.5, -5, 1, 0)
+followButton.AutoButtonColor = false
+followButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+followButton.BorderSizePixel = 0
+followButton.Font = Enum.Font.GothamBold
+followButton.Text = "Follow: OFF"
+followButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+followButton.TextScaled = true
+followButton.Parent = toggleRow
+
+local followCorner = Instance.new("UICorner")
+followCorner.CornerRadius = UDim.new(0, 10)
+followCorner.Parent = followButton
+
+local followStroke = Instance.new("UIStroke")
+followStroke.Color = Color3.fromRGB(170, 68, 82)
+followStroke.Transparency = 0.12
+followStroke.Thickness = 1
+followStroke.Parent = followButton
+
+local followTextConstraint = Instance.new("UITextSizeConstraint")
+followTextConstraint.MinTextSize = 10
+followTextConstraint.MaxTextSize = 14
+followTextConstraint.Parent = followButton
+
+local deathFollowButton = Instance.new("TextButton")
+deathFollowButton.Name = "DeathFollowToggle"
+deathFollowButton.LayoutOrder = 2
+deathFollowButton.Size = UDim2.new(0.5, -5, 1, 0)
+deathFollowButton.AutoButtonColor = false
+deathFollowButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+deathFollowButton.BorderSizePixel = 0
+deathFollowButton.Font = Enum.Font.GothamBold
+deathFollowButton.Text = "Death Follow: OFF"
+deathFollowButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+deathFollowButton.TextScaled = true
+deathFollowButton.Parent = toggleRow
+
+local deathFollowCorner = Instance.new("UICorner")
+deathFollowCorner.CornerRadius = UDim.new(0, 10)
+deathFollowCorner.Parent = deathFollowButton
+
+local deathFollowStroke = Instance.new("UIStroke")
+deathFollowStroke.Color = Color3.fromRGB(170, 68, 82)
+deathFollowStroke.Transparency = 0.12
+deathFollowStroke.Thickness = 1
+deathFollowStroke.Parent = deathFollowButton
+
+local deathFollowTextConstraint = Instance.new("UITextSizeConstraint")
+deathFollowTextConstraint.MinTextSize = 10
+deathFollowTextConstraint.MaxTextSize = 14
+deathFollowTextConstraint.Parent = deathFollowButton
+
+local attackBox = Instance.new("TextBox")
+attackBox.Name = "AttackBox"
+attackBox.LayoutOrder = 5
+attackBox.Size = UDim2.new(1, 0, 0, 54)
+attackBox.BackgroundColor3 = Color3.fromRGB(24, 25, 29)
+attackBox.BackgroundTransparency = 0.06
+attackBox.BorderSizePixel = 0
+attackBox.ClearTextOnFocus = false
+attackBox.Font = Enum.Font.GothamMedium
+attackBox.PlaceholderColor3 = Color3.fromRGB(145, 147, 156)
+attackBox.PlaceholderText = "Attack Textbox  •  targets separated by commas"
+attackBox.Text = ""
+attackBox.TextTruncate = Enum.TextTruncate.AtEnd
+attackBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+attackBox.TextSize = 15
+attackBox.TextXAlignment = Enum.TextXAlignment.Left
+attackBox.Parent = scrollingFrame
+
+local attackBoxCorner = Instance.new("UICorner")
+attackBoxCorner.CornerRadius = UDim.new(0, 10)
+attackBoxCorner.Parent = attackBox
+
+local attackBoxStroke = Instance.new("UIStroke")
+attackBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+attackBoxStroke.Transparency = 0.35
+attackBoxStroke.Thickness = 1
+attackBoxStroke.Parent = attackBox
+
+local attackBoxPadding = Instance.new("UIPadding")
+attackBoxPadding.PaddingLeft = UDim.new(0, 16)
+attackBoxPadding.PaddingRight = UDim.new(0, 16)
+attackBoxPadding.Parent = attackBox
+
+local attackToggleRow = Instance.new("Frame")
+attackToggleRow.Name = "AttackToggles"
+attackToggleRow.LayoutOrder = 6
+attackToggleRow.Size = UDim2.new(1, 0, 0, 48)
+attackToggleRow.BackgroundTransparency = 1
+attackToggleRow.BorderSizePixel = 0
+attackToggleRow.Parent = scrollingFrame
+
+local attackToggleLayout = Instance.new("UIListLayout")
+attackToggleLayout.FillDirection = Enum.FillDirection.Horizontal
+attackToggleLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+attackToggleLayout.SortOrder = Enum.SortOrder.LayoutOrder
+attackToggleLayout.Padding = UDim.new(0, 10)
+attackToggleLayout.Parent = attackToggleRow
+
+local attackButton = Instance.new("TextButton")
+attackButton.Name = "AttackToggle"
+attackButton.LayoutOrder = 1
+attackButton.Size = UDim2.new(0.5, -5, 1, 0)
+attackButton.AutoButtonColor = false
+attackButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+attackButton.BorderSizePixel = 0
+attackButton.Font = Enum.Font.GothamBold
+attackButton.Text = "Attack: OFF"
+attackButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+attackButton.TextScaled = true
+attackButton.Parent = attackToggleRow
+
+local attackCorner = Instance.new("UICorner")
+attackCorner.CornerRadius = UDim.new(0, 10)
+attackCorner.Parent = attackButton
+
+local attackStroke = Instance.new("UIStroke")
+attackStroke.Color = Color3.fromRGB(170, 68, 82)
+attackStroke.Transparency = 0.12
+attackStroke.Thickness = 1
+attackStroke.Parent = attackButton
+
+local attackTextConstraint = Instance.new("UITextSizeConstraint")
+attackTextConstraint.MinTextSize = 10
+attackTextConstraint.MaxTextSize = 14
+attackTextConstraint.Parent = attackButton
+
+local deathAttackButton = Instance.new("TextButton")
+deathAttackButton.Name = "DeathAttackToggle"
+deathAttackButton.LayoutOrder = 2
+deathAttackButton.Size = UDim2.new(0.5, -5, 1, 0)
+deathAttackButton.AutoButtonColor = false
+deathAttackButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+deathAttackButton.BorderSizePixel = 0
+deathAttackButton.Font = Enum.Font.GothamBold
+deathAttackButton.Text = "Death Attack: OFF"
+deathAttackButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+deathAttackButton.TextScaled = true
+deathAttackButton.Parent = attackToggleRow
+
+local deathAttackCorner = Instance.new("UICorner")
+deathAttackCorner.CornerRadius = UDim.new(0, 10)
+deathAttackCorner.Parent = deathAttackButton
+
+local deathAttackStroke = Instance.new("UIStroke")
+deathAttackStroke.Color = Color3.fromRGB(170, 68, 82)
+deathAttackStroke.Transparency = 0.12
+deathAttackStroke.Thickness = 1
+deathAttackStroke.Parent = deathAttackButton
+
+local deathAttackTextConstraint = Instance.new("UITextSizeConstraint")
+deathAttackTextConstraint.MinTextSize = 10
+deathAttackTextConstraint.MaxTextSize = 14
+deathAttackTextConstraint.Parent = deathAttackButton
+
+local toolPickerRow = Instance.new("Frame")
+toolPickerRow.Name = "ToolPickerRow"
+toolPickerRow.LayoutOrder = 7
+toolPickerRow.Size = UDim2.new(1, 0, 0, 44)
+toolPickerRow.BackgroundTransparency = 1
+toolPickerRow.BorderSizePixel = 0
+toolPickerRow.Parent = scrollingFrame
+
+local toolPickerLayout = Instance.new("UIListLayout")
+toolPickerLayout.FillDirection = Enum.FillDirection.Horizontal
+toolPickerLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+toolPickerLayout.SortOrder = Enum.SortOrder.LayoutOrder
+toolPickerLayout.Padding = UDim.new(0, 10)
+toolPickerLayout.Parent = toolPickerRow
+
+local toolPickerBox = Instance.new("TextBox")
+toolPickerBox.Name = "ToolPickerBox"
+toolPickerBox.LayoutOrder = 1
+toolPickerBox.Size = UDim2.new(0.45, -5, 1, 0)
+toolPickerBox.BackgroundColor3 = Color3.fromRGB(24, 25, 29)
+toolPickerBox.BackgroundTransparency = 0.06
+toolPickerBox.BorderSizePixel = 0
+toolPickerBox.ClearTextOnFocus = false
+toolPickerBox.Font = Enum.Font.GothamMedium
+toolPickerBox.PlaceholderColor3 = Color3.fromRGB(145, 147, 156)
+toolPickerBox.PlaceholderText = "Tool picker (1)"
+toolPickerBox.Text = "1"
+toolPickerBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+toolPickerBox.TextSize = 14
+toolPickerBox.TextXAlignment = Enum.TextXAlignment.Left
+toolPickerBox.Parent = toolPickerRow
+
+local toolPickerBoxCorner = Instance.new("UICorner")
+toolPickerBoxCorner.CornerRadius = UDim.new(0, 10)
+toolPickerBoxCorner.Parent = toolPickerBox
+
+local toolPickerBoxStroke = Instance.new("UIStroke")
+toolPickerBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+toolPickerBoxStroke.Transparency = 0.35
+toolPickerBoxStroke.Thickness = 1
+toolPickerBoxStroke.Parent = toolPickerBox
+
+local toolPickerPadding = Instance.new("UIPadding")
+toolPickerPadding.PaddingLeft = UDim.new(0, 14)
+toolPickerPadding.PaddingRight = UDim.new(0, 12)
+toolPickerPadding.Parent = toolPickerBox
+
+local toolPickerButton = Instance.new("TextButton")
+toolPickerButton.Name = "ToolPickerToggle"
+toolPickerButton.LayoutOrder = 2
+toolPickerButton.Size = UDim2.new(0.55, -5, 1, 0)
+toolPickerButton.AutoButtonColor = false
+toolPickerButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+toolPickerButton.BorderSizePixel = 0
+toolPickerButton.Font = Enum.Font.GothamBold
+toolPickerButton.Text = "Tool Picker: OFF"
+toolPickerButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+toolPickerButton.TextScaled = true
+toolPickerButton.Parent = toolPickerRow
+
+local toolPickerCorner = Instance.new("UICorner")
+toolPickerCorner.CornerRadius = UDim.new(0, 10)
+toolPickerCorner.Parent = toolPickerButton
+
+local toolPickerStroke = Instance.new("UIStroke")
+toolPickerStroke.Color = Color3.fromRGB(170, 68, 82)
+toolPickerStroke.Transparency = 0.12
+toolPickerStroke.Thickness = 1
+toolPickerStroke.Parent = toolPickerButton
+
+local toolPickerTextConstraint = Instance.new("UITextSizeConstraint")
+toolPickerTextConstraint.MinTextSize = 9
+toolPickerTextConstraint.MaxTextSize = 13
+toolPickerTextConstraint.Parent = toolPickerButton
+
+aimUI.masterButton = Instance.new("TextButton")
+aimUI.masterButton.Name = "AimMasterToggle"
+aimUI.masterButton.LayoutOrder = 8
+aimUI.masterButton.Size = UDim2.new(1, 0, 0, 44)
+aimUI.masterButton.AutoButtonColor = false
+aimUI.masterButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.masterButton.BorderSizePixel = 0
+aimUI.masterButton.Font = Enum.Font.GothamBold
+aimUI.masterButton.Text = "Aim Section: OFF"
+aimUI.masterButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.masterButton.TextScaled = true
+aimUI.masterButton.Parent = scrollingFrame
+
+aimUI.masterCorner = Instance.new("UICorner")
+aimUI.masterCorner.CornerRadius = UDim.new(0, 10)
+aimUI.masterCorner.Parent = aimUI.masterButton
+
+aimUI.masterStroke = Instance.new("UIStroke")
+aimUI.masterStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.masterStroke.Transparency = 0.12
+aimUI.masterStroke.Thickness = 1
+aimUI.masterStroke.Parent = aimUI.masterButton
+
+aimUI.masterTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.masterTextConstraint.MinTextSize = 10
+aimUI.masterTextConstraint.MaxTextSize = 14
+aimUI.masterTextConstraint.Parent = aimUI.masterButton
+
+aimUI.toggleRow = Instance.new("Frame")
+aimUI.toggleRow.Name = "AimToggles"
+aimUI.toggleRow.LayoutOrder = 9
+aimUI.toggleRow.Size = UDim2.new(1, 0, 0, 44)
+aimUI.toggleRow.BackgroundTransparency = 1
+aimUI.toggleRow.BorderSizePixel = 0
+aimUI.toggleRow.Parent = scrollingFrame
+aimUI.toggleRow.Visible = false
+
+aimUI.toggleLayout = Instance.new("UIListLayout")
+aimUI.toggleLayout.FillDirection = Enum.FillDirection.Horizontal
+aimUI.toggleLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+aimUI.toggleLayout.SortOrder = Enum.SortOrder.LayoutOrder
+aimUI.toggleLayout.Padding = UDim.new(0, 8)
+aimUI.toggleLayout.Parent = aimUI.toggleRow
+
+aimUI.lockonButton = Instance.new("TextButton")
+aimUI.lockonButton.Name = "LockonToggle"
+aimUI.lockonButton.LayoutOrder = 1
+aimUI.lockonButton.Size = UDim2.new(1 / 3, -6, 1, 0)
+aimUI.lockonButton.AutoButtonColor = false
+aimUI.lockonButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.lockonButton.BorderSizePixel = 0
+aimUI.lockonButton.Font = Enum.Font.GothamBold
+aimUI.lockonButton.Text = "Lock On: OFF"
+aimUI.lockonButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.lockonButton.TextScaled = true
+aimUI.lockonButton.Parent = aimUI.toggleRow
+
+aimUI.lockonCorner = Instance.new("UICorner")
+aimUI.lockonCorner.CornerRadius = UDim.new(0, 10)
+aimUI.lockonCorner.Parent = aimUI.lockonButton
+
+aimUI.lockonStroke = Instance.new("UIStroke")
+aimUI.lockonStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.lockonStroke.Transparency = 0.12
+aimUI.lockonStroke.Thickness = 1
+aimUI.lockonStroke.Parent = aimUI.lockonButton
+
+aimUI.lockonTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.lockonTextConstraint.MinTextSize = 8
+aimUI.lockonTextConstraint.MaxTextSize = 12
+aimUI.lockonTextConstraint.Parent = aimUI.lockonButton
+
+aimUI.predictionButton = Instance.new("TextButton")
+aimUI.predictionButton.Name = "PredictionToggle"
+aimUI.predictionButton.LayoutOrder = 2
+aimUI.predictionButton.Size = UDim2.new(1 / 3, -6, 1, 0)
+aimUI.predictionButton.AutoButtonColor = false
+aimUI.predictionButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.predictionButton.BorderSizePixel = 0
+aimUI.predictionButton.Font = Enum.Font.GothamBold
+aimUI.predictionButton.Text = "Prediction: OFF"
+aimUI.predictionButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.predictionButton.TextScaled = true
+aimUI.predictionButton.Parent = aimUI.toggleRow
+
+aimUI.predictionCorner = Instance.new("UICorner")
+aimUI.predictionCorner.CornerRadius = UDim.new(0, 10)
+aimUI.predictionCorner.Parent = aimUI.predictionButton
+
+aimUI.predictionStroke = Instance.new("UIStroke")
+aimUI.predictionStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.predictionStroke.Transparency = 0.12
+aimUI.predictionStroke.Thickness = 1
+aimUI.predictionStroke.Parent = aimUI.predictionButton
+
+aimUI.predictionTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.predictionTextConstraint.MinTextSize = 8
+aimUI.predictionTextConstraint.MaxTextSize = 12
+aimUI.predictionTextConstraint.Parent = aimUI.predictionButton
+
+aimUI.snapButton = Instance.new("TextButton")
+aimUI.snapButton.Name = "SnapToggle"
+aimUI.snapButton.LayoutOrder = 3
+aimUI.snapButton.Size = UDim2.new(1 / 3, -6, 1, 0)
+aimUI.snapButton.AutoButtonColor = false
+aimUI.snapButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.snapButton.BorderSizePixel = 0
+aimUI.snapButton.Font = Enum.Font.GothamBold
+aimUI.snapButton.Text = "Snap: OFF"
+aimUI.snapButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.snapButton.TextScaled = true
+aimUI.snapButton.Parent = aimUI.toggleRow
+
+aimUI.snapCorner = Instance.new("UICorner")
+aimUI.snapCorner.CornerRadius = UDim.new(0, 10)
+aimUI.snapCorner.Parent = aimUI.snapButton
+
+aimUI.snapStroke = Instance.new("UIStroke")
+aimUI.snapStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.snapStroke.Transparency = 0.12
+aimUI.snapStroke.Thickness = 1
+aimUI.snapStroke.Parent = aimUI.snapButton
+
+aimUI.snapTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.snapTextConstraint.MinTextSize = 8
+aimUI.snapTextConstraint.MaxTextSize = 12
+aimUI.snapTextConstraint.Parent = aimUI.snapButton
+
+aimUI.shiftlockButton = Instance.new("TextButton")
+aimUI.shiftlockButton.Name = "ShiftlockToggle"
+aimUI.shiftlockButton.LayoutOrder = 10
+aimUI.shiftlockButton.Size = UDim2.new(1, 0, 0, 42)
+aimUI.shiftlockButton.AutoButtonColor = false
+aimUI.shiftlockButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.shiftlockButton.BorderSizePixel = 0
+aimUI.shiftlockButton.Font = Enum.Font.GothamBold
+aimUI.shiftlockButton.Text = "Shiftlock: OFF"
+aimUI.shiftlockButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.shiftlockButton.TextScaled = true
+aimUI.shiftlockButton.Parent = scrollingFrame
+aimUI.shiftlockButton.Visible = false
+
+aimUI.shiftlockCorner = Instance.new("UICorner")
+aimUI.shiftlockCorner.CornerRadius = UDim.new(0, 10)
+aimUI.shiftlockCorner.Parent = aimUI.shiftlockButton
+
+aimUI.shiftlockStroke = Instance.new("UIStroke")
+aimUI.shiftlockStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.shiftlockStroke.Transparency = 0.12
+aimUI.shiftlockStroke.Thickness = 1
+aimUI.shiftlockStroke.Parent = aimUI.shiftlockButton
+
+aimUI.shiftlockTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.shiftlockTextConstraint.MinTextSize = 9
+aimUI.shiftlockTextConstraint.MaxTextSize = 13
+aimUI.shiftlockTextConstraint.Parent = aimUI.shiftlockButton
+
+aimUI.slider = Instance.new("Frame")
+aimUI.slider.Name = "PredictionSlider"
+aimUI.slider.LayoutOrder = 11
+aimUI.slider.Size = UDim2.new(1, 0, 0, 54)
+aimUI.slider.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
+aimUI.slider.BackgroundTransparency = 0.12
+aimUI.slider.BorderSizePixel = 0
+aimUI.slider.Parent = scrollingFrame
+aimUI.slider.Visible = false
+
+aimUI.sliderCorner = Instance.new("UICorner")
+aimUI.sliderCorner.CornerRadius = UDim.new(0, 10)
+aimUI.sliderCorner.Parent = aimUI.slider
+
+aimUI.sliderLabel = Instance.new("TextLabel")
+aimUI.sliderLabel.Name = "Label"
+aimUI.sliderLabel.Position = UDim2.fromOffset(12, 5)
+aimUI.sliderLabel.Size = UDim2.new(1, -24, 0, 18)
+aimUI.sliderLabel.BackgroundTransparency = 1
+aimUI.sliderLabel.Font = Enum.Font.GothamMedium
+aimUI.sliderLabel.Text = "Prediction Strength: 0.10"
+aimUI.sliderLabel.TextColor3 = Color3.fromRGB(200, 202, 212)
+aimUI.sliderLabel.TextSize = 12
+aimUI.sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+aimUI.sliderLabel.Parent = aimUI.slider
+
+aimUI.bar = Instance.new("Frame")
+aimUI.bar.Name = "Bar"
+aimUI.bar.Active = true
+aimUI.bar.Position = UDim2.new(0, 12, 1, -20)
+aimUI.bar.Size = UDim2.new(1, -24, 0, 8)
+aimUI.bar.BackgroundColor3 = Color3.fromRGB(54, 55, 62)
+aimUI.bar.BorderSizePixel = 0
+aimUI.bar.Parent = aimUI.slider
+
+aimUI.barCorner = Instance.new("UICorner")
+aimUI.barCorner.CornerRadius = UDim.new(1, 0)
+aimUI.barCorner.Parent = aimUI.bar
+
+aimUI.fill = Instance.new("Frame")
+aimUI.fill.Name = "Fill"
+aimUI.fill.Size = UDim2.fromScale(0.1, 1)
+aimUI.fill.BackgroundColor3 = Color3.fromRGB(70, 190, 116)
+aimUI.fill.BorderSizePixel = 0
+aimUI.fill.Parent = aimUI.bar
+
+aimUI.fillCorner = Instance.new("UICorner")
+aimUI.fillCorner.CornerRadius = UDim.new(1, 0)
+aimUI.fillCorner.Parent = aimUI.fill
+
+aimUI.knob = Instance.new("Frame")
+aimUI.knob.Name = "Knob"
+aimUI.knob.Active = true
+aimUI.knob.AnchorPoint = Vector2.new(0.5, 0.5)
+aimUI.knob.Position = UDim2.fromScale(0.1, 0.5)
+aimUI.knob.Size = UDim2.fromOffset(14, 14)
+aimUI.knob.BackgroundColor3 = Color3.fromRGB(225, 227, 235)
+aimUI.knob.BorderSizePixel = 0
+aimUI.knob.ZIndex = 2
+aimUI.knob.Parent = aimUI.bar
+
+aimUI.knobCorner = Instance.new("UICorner")
+aimUI.knobCorner.CornerRadius = UDim.new(1, 0)
+aimUI.knobCorner.Parent = aimUI.knob
+
+aimUI.baddiesButton = Instance.new("TextButton")
+aimUI.baddiesButton.Name = "BaddiesToggle"
+aimUI.baddiesButton.LayoutOrder = 12
+aimUI.baddiesButton.Size = UDim2.new(1, 0, 0, 44)
+aimUI.baddiesButton.AutoButtonColor = false
+aimUI.baddiesButton.BackgroundColor3 = Color3.fromRGB(255, 190, 214)
+aimUI.baddiesButton.BorderSizePixel = 0
+aimUI.baddiesButton.Font = Enum.Font.GothamBold
+aimUI.baddiesButton.Text = "Baddies: OFF"
+aimUI.baddiesButton.TextColor3 = Color3.fromRGB(92, 20, 58)
+aimUI.baddiesButton.TextScaled = true
+aimUI.baddiesButton.Parent = scrollingFrame
+
+aimUI.baddiesCorner = Instance.new("UICorner")
+aimUI.baddiesCorner.CornerRadius = UDim.new(0, 10)
+aimUI.baddiesCorner.Parent = aimUI.baddiesButton
+
+aimUI.baddiesStroke = Instance.new("UIStroke")
+aimUI.baddiesStroke.Color = Color3.fromRGB(255, 130, 180)
+aimUI.baddiesStroke.Transparency = 0.08
+aimUI.baddiesStroke.Thickness = 1
+aimUI.baddiesStroke.Parent = aimUI.baddiesButton
+
+aimUI.baddiesTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.baddiesTextConstraint.MinTextSize = 10
+aimUI.baddiesTextConstraint.MaxTextSize = 14
+aimUI.baddiesTextConstraint.Parent = aimUI.baddiesButton
+
+aimUI.commandListButton = Instance.new("TextButton")
+aimUI.commandListButton.Name = "CommandListToggle"
+aimUI.commandListButton.LayoutOrder = 13
+aimUI.commandListButton.Size = UDim2.new(1, 0, 0, 44)
+aimUI.commandListButton.AutoButtonColor = false
+aimUI.commandListButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.commandListButton.BorderSizePixel = 0
+aimUI.commandListButton.Font = Enum.Font.GothamBold
+aimUI.commandListButton.Text = "Command List: CLOSED"
+aimUI.commandListButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.commandListButton.TextScaled = true
+aimUI.commandListButton.Parent = scrollingFrame
+
+aimUI.commandListCorner = Instance.new("UICorner")
+aimUI.commandListCorner.CornerRadius = UDim.new(0, 10)
+aimUI.commandListCorner.Parent = aimUI.commandListButton
+
+aimUI.commandListStroke = Instance.new("UIStroke")
+aimUI.commandListStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.commandListStroke.Transparency = 0.12
+aimUI.commandListStroke.Thickness = 1
+aimUI.commandListStroke.Parent = aimUI.commandListButton
+
+aimUI.commandListTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.commandListTextConstraint.MinTextSize = 10
+aimUI.commandListTextConstraint.MaxTextSize = 14
+aimUI.commandListTextConstraint.Parent = aimUI.commandListButton
+
+aimUI.commandListBody = Instance.new("TextLabel")
+aimUI.commandListBody.Name = "CommandList"
+aimUI.commandListBody.LayoutOrder = 14
+aimUI.commandListBody.Size = UDim2.new(1, 0, 0, 410)
+aimUI.commandListBody.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
+aimUI.commandListBody.BackgroundTransparency = 0.12
+aimUI.commandListBody.BorderSizePixel = 0
+aimUI.commandListBody.Font = Enum.Font.Gotham
+aimUI.commandListBody.Text = "FOLLOW [player] — Follow a named player; with no player, follow the commander.\n\nC / F — Exact shortcuts that immediately follow the commander.\n\nCOME [player] — Same as Follow.\n\nGOTO [player] — Same as Follow.\n\nHOLD — Walk to the commander's current position and remain there.\n\nATTACK / ATK [players] — Attack comma-separated targets; with no target, use the saved Attack Textbox.\n\nHELP / H — Ignore all commander and teammate attack-safety pauses or retreats for 30 seconds.\n\nSTOP — Stop movement and attack, and disable all Follow, Attack, Death Follow, and Death Attack modes.\n\nCLEAR — Clear the saved Attack Textbox and stop its active attack.\n\nDEATH FOLLOW / NO DEATH FOLLOW — Enable or disable following again after a respawn.\n\nDEATH ATTACK / NO DEATH ATTACK — Enable or disable attacking again after a respawn.\n\nTEAM ASSIST / NO TEAM ASSIST — Enable or disable retaliation when a listed teammate is damaged.\n\nCommands are case-insensitive. Names support usernames, display names, partial names, and commas."
+aimUI.commandListBody.TextColor3 = Color3.fromRGB(205, 207, 216)
+aimUI.commandListBody.TextSize = 12
+aimUI.commandListBody.TextWrapped = true
+aimUI.commandListBody.TextXAlignment = Enum.TextXAlignment.Left
+aimUI.commandListBody.TextYAlignment = Enum.TextYAlignment.Top
+aimUI.commandListBody.Visible = false
+aimUI.commandListBody.Parent = scrollingFrame
+
+aimUI.commandListBodyCorner = Instance.new("UICorner")
+aimUI.commandListBodyCorner.CornerRadius = UDim.new(0, 10)
+aimUI.commandListBodyCorner.Parent = aimUI.commandListBody
+
+aimUI.commandListBodyPadding = Instance.new("UIPadding")
+aimUI.commandListBodyPadding.PaddingTop = UDim.new(0, 12)
+aimUI.commandListBodyPadding.PaddingBottom = UDim.new(0, 12)
+aimUI.commandListBodyPadding.PaddingLeft = UDim.new(0, 14)
+aimUI.commandListBodyPadding.PaddingRight = UDim.new(0, 14)
+aimUI.commandListBodyPadding.Parent = aimUI.commandListBody
+
+local hint = Instance.new("TextLabel")
+hint.Name = "Hint"
+hint.LayoutOrder = 15
+hint.Size = UDim2.new(1, 0, 0, 20)
+hint.AutomaticSize = Enum.AutomaticSize.Y
+hint.BackgroundTransparency = 1
+hint.TextWrapped = true
+hint.Font = Enum.Font.Gotham
+hint.Text = "Separate multiple players with commas"
+hint.TextColor3 = Color3.fromRGB(160, 162, 172)
+hint.TextSize = 13
+hint.TextXAlignment = Enum.TextXAlignment.Left
+hint.Parent = scrollingFrame
+
+local results = Instance.new("TextLabel")
+results.Name = "ResolvedPlayers"
+results.LayoutOrder = 16
+results.Size = UDim2.new(1, 0, 0, 42)
+results.AutomaticSize = Enum.AutomaticSize.Y
+results.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
+results.BackgroundTransparency = 0.22
+results.BorderSizePixel = 0
+results.Font = Enum.Font.Gotham
+results.Text = "Waiting for player names..."
+results.TextColor3 = Color3.fromRGB(190, 192, 202)
+results.TextSize = 14
+results.TextWrapped = true
+results.TextXAlignment = Enum.TextXAlignment.Left
+results.TextYAlignment = Enum.TextYAlignment.Top
+results.Parent = scrollingFrame
+
+local resultsCorner = Instance.new("UICorner")
+resultsCorner.CornerRadius = UDim.new(0, 10)
+resultsCorner.Parent = results
+
+local resultsPadding = Instance.new("UIPadding")
+resultsPadding.PaddingTop = UDim.new(0, 12)
+resultsPadding.PaddingBottom = UDim.new(0, 12)
+resultsPadding.PaddingLeft = UDim.new(0, 14)
+resultsPadding.PaddingRight = UDim.new(0, 14)
+resultsPadding.Parent = results
+
+local followEnabled = false
+local deathFollowEnabled = false
+local attackEnabled = false
+local deathAttackEnabled = false
+local toolPickerEnabled = false
+local aimSectionEnabled = false
+local lockonEnabled = false
+local predictionEnabled = false
+local snapEnabled = false
+local shiftlockEnabled = false
+local predictionStrength = 0.1
+local aimLastTargetRoot
+local aimTransitionActive = false
+local aimTransitionFrom
+local aimTransitionStartedAt = 0
+local selectedCommanders = {}
+local selectedCommanderIds = {}
+local activeCommander
+local followTarget
+local attackTarget
+local attackTargets = {}
+local commandMode = "None"
+local holdPosition
+local activeMoveTarget
+local followMovementActive = false
+local lastIssuedMoveTarget
+local lastMoveIssuedAt = 0
+local lastAttackAt = 0
+local pickedTool
+local localWasUnavailable = false
+local commanderWasUnavailable = false
+local targetWasUnavailable = false
+local suppressFollowBoxUpdate = false
+local suppressAttackBoxUpdate = false
+aimUI.noFriendlyFireEnabled = false
+aimUI.teamAssistEnabled = false
+aimUI.teamPlayerIds = {}
+aimUI.commandListOpen = false
+aimUI.attackValidationShowingError = false
+aimUI.attackFriendlyPauseDistance = 8
+aimUI.attackFriendlyResumeDistance = 11
+aimUI.attackFriendlyCorridorDistance = 3.5
+aimUI.attackFriendlyResumeCorridor = 5
+aimUI.attackCheckmateTargetDistance = 4.5
+aimUI.attackCheckmateFriendlyDistance = 6
+aimUI.attackRetreatDistance = 6
+aimUI.attackSafetyOverrideUntil = 0
+aimUI.baddiesEnabled = false
+aimUI.virtualInputManager = game:GetService("VirtualInputManager")
+aimUI.lastPvpToggleAt = -math.huge
+aimUI.cachedPvpButton = nil
+aimUI.lastPvpScanAt = -math.huge
+aimUI.lastFPressAt = -math.huge
+aimUI.stompTargetUserId = nil
+aimUI.stompArmed = true
+aimUI.stompRunning = false
+aimUI.PVP_TOGGLE_COOLDOWN = 7
+aimUI.BADDIES_MELEE_DISTANCE = 5.5
+aimUI.STOMP_BURST_PRESSES = 12
+aimUI.STOMP_PRESS_INTERVAL = 0.1
+aimUI.F_PRESS_INTERVAL = 0.12
+screenGui:SetAttribute("AttackSafetyState", "Idle")
+screenGui:SetAttribute("AttackSafetyOverrideRemaining", 0)
+screenGui:SetAttribute("BaddiesEnabled", false)
+screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
+screenGui:SetAttribute("BaddiesDragReady", false)
+screenGui:SetAttribute("BaddiesStompState", "Idle")
+screenGui:SetAttribute("BaddiesLastInput", "")
+
+local OFF_BACKGROUND = Color3.fromRGB(82, 33, 40)
+local OFF_STROKE = Color3.fromRGB(170, 68, 82)
+local OFF_TEXT = Color3.fromRGB(255, 218, 221)
+local ON_BACKGROUND = Color3.fromRGB(29, 84, 54)
+local ON_STROKE = Color3.fromRGB(70, 190, 116)
+local ON_TEXT = Color3.fromRGB(214, 255, 228)
+
+local function updateToggleVisual(button, buttonStroke, label, enabled)
+	button.Text = string.format("%s: %s", label, if enabled then "ON" else "OFF")
+	button.BackgroundColor3 = if enabled then ON_BACKGROUND else OFF_BACKGROUND
+	button.TextColor3 = if enabled then ON_TEXT else OFF_TEXT
+	buttonStroke.Color = if enabled then ON_STROKE else OFF_STROKE
+end
+
+aimUI.updateBaddiesVisual = function()
+	aimUI.baddiesButton.Text = "Baddies: " .. (if aimUI.baddiesEnabled then "ON" else "OFF")
+	aimUI.baddiesButton.BackgroundColor3 = if aimUI.baddiesEnabled
+		then Color3.fromRGB(255, 45, 145)
+		else Color3.fromRGB(255, 190, 214)
+	aimUI.baddiesButton.TextColor3 = if aimUI.baddiesEnabled
+		then Color3.fromRGB(255, 245, 251)
+		else Color3.fromRGB(92, 20, 58)
+	aimUI.baddiesStroke.Color = if aimUI.baddiesEnabled
+		then Color3.fromRGB(255, 120, 190)
+		else Color3.fromRGB(255, 130, 180)
+end
+
+local function clearNavigation()
+	activeMoveTarget = nil
+	followMovementActive = false
+	lastIssuedMoveTarget = nil
+	lastMoveIssuedAt = 0
+	localWasUnavailable = false
+	commanderWasUnavailable = false
+end
+
+local function getLivingCharacter(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root or humanoid.Health <= 0 then
+		return nil, nil, nil
+	end
+	return character, humanoid, root
+end
+
+local function stopLocalMovement()
+	local _, humanoid, root = getLivingCharacter(localPlayer)
+	if humanoid and root then
+		humanoid:Move(Vector3.zero)
+		humanoid:MoveTo(root.Position)
+	end
+end
+
+updateToggleVisual(followButton, followStroke, "Follow", followEnabled)
+updateToggleVisual(deathFollowButton, deathFollowStroke, "Death Follow", deathFollowEnabled)
+updateToggleVisual(attackButton, attackStroke, "Attack", attackEnabled)
+updateToggleVisual(deathAttackButton, deathAttackStroke, "Death Attack", deathAttackEnabled)
+updateToggleVisual(toolPickerButton, toolPickerStroke, "Tool Picker", toolPickerEnabled)
+updateToggleVisual(aimUI.noFriendlyFireButton, aimUI.noFriendlyFireStroke, "No Friendly Fire", aimUI.noFriendlyFireEnabled)
+updateToggleVisual(aimUI.teamAssistButton, aimUI.teamAssistStroke, "Team Assist", aimUI.teamAssistEnabled)
+updateToggleVisual(aimUI.masterButton, aimUI.masterStroke, "Aim Section", aimSectionEnabled)
+updateToggleVisual(aimUI.lockonButton, aimUI.lockonStroke, "Lock On", lockonEnabled)
+updateToggleVisual(aimUI.predictionButton, aimUI.predictionStroke, "Prediction", predictionEnabled)
+updateToggleVisual(aimUI.snapButton, aimUI.snapStroke, "Snap", snapEnabled)
+updateToggleVisual(aimUI.shiftlockButton, aimUI.shiftlockStroke, "Shiftlock", shiftlockEnabled)
+aimUI.updateBaddiesVisual()
+
+local function trim(value)
+	return string.match(value, "^%s*(.-)%s*$") or ""
+end
+
+local function resolvePlayers(text)
+	local resolved = {}
+	local seenUserIds = {}
+	local messages = {}
+
+	for entry in string.gmatch(text, "[^,]+") do
+		local query = string.lower(trim(entry))
+		if query ~= "" then
+			local matches = {}
+
+			for _, player in Players:GetPlayers() do
+				local username = string.lower(player.Name)
+				local displayName = string.lower(player.DisplayName)
+
+				if string.find(username, query, 1, true)
+					or string.find(displayName, query, 1, true) then
+					table.insert(matches, player)
+				end
+			end
+
+			table.sort(matches, function(a, b)
+				local aExact = string.lower(a.Name) == query or string.lower(a.DisplayName) == query
+				local bExact = string.lower(b.Name) == query or string.lower(b.DisplayName) == query
+				if aExact ~= bExact then
+					return aExact
+				end
+				return a.Name:lower() < b.Name:lower()
+			end)
+
+			if #matches == 0 then
+				table.insert(messages, string.format("“%s” → no match", trim(entry)))
+			else
+				local names = {}
+				for _, player in matches do
+					table.insert(names, string.format("%s (@%s)", player.DisplayName, player.Name))
+					if not seenUserIds[player.UserId] then
+						seenUserIds[player.UserId] = true
+						table.insert(resolved, player)
+					end
+				end
+				table.insert(messages, string.format("“%s” → %s", trim(entry), table.concat(names, ", ")))
+			end
+		end
+	end
+
+	return resolved, messages
+end
+
+aimUI.isProtectedPlayer = function(player)
+	if not player or player == localPlayer then
+		return false
+	end
+	if aimUI.teamPlayerIds[player.UserId] then
+		return true
+	end
+	return aimUI.noFriendlyFireEnabled and selectedCommanderIds[player.UserId] == true
+end
+
+aimUI.updateTeamList = function()
+	local resolved = select(1, resolvePlayers(aimUI.teamBox.Text))
+	table.clear(aimUI.teamPlayerIds)
+	for _, player in resolved do
+		if player ~= localPlayer then
+			aimUI.teamPlayerIds[player.UserId] = true
+		end
+	end
+
+	local hasText = trim(aimUI.teamBox.Text) ~= ""
+	aimUI.teamBox.TextColor3 = if not hasText or #resolved > 0
+		then Color3.fromRGB(240, 241, 245)
+		else Color3.fromRGB(255, 118, 128)
+
+	if aimUI.validateAttackBox then
+		aimUI.validateAttackBox(true)
+	end
+end
+
+local cancelActiveCommand
+local updateSerial = 0
+
+local function updateResults()
+	updateSerial += 1
+	local thisUpdate = updateSerial
+
+	task.delay(0.12, function()
+		if isClosed or thisUpdate ~= updateSerial then
+			return
+		end
+
+		if trim(commandBox.Text) == "" then
+			table.clear(selectedCommanders)
+			table.clear(selectedCommanderIds)
+			if activeCommander and cancelActiveCommand then
+				cancelActiveCommand(false)
+			end
+			results.Text = "Waiting for player names..."
+			results.TextColor3 = Color3.fromRGB(190, 192, 202)
+			if aimUI.validateAttackBox then
+				aimUI.validateAttackBox(true)
+			end
+			return
+		end
+
+		local resolved, messages = resolvePlayers(commandBox.Text)
+		selectedCommanders = resolved
+		table.clear(selectedCommanderIds)
+		for _, player in resolved do
+			selectedCommanderIds[player.UserId] = true
+		end
+
+		if activeCommander and not selectedCommanderIds[activeCommander.UserId] then
+			cancelActiveCommand(false)
+		end
+
+		results.Text = table.concat(messages, "\n")
+		results.TextColor3 = if #resolved > 0
+			then Color3.fromRGB(185, 225, 197)
+			else Color3.fromRGB(235, 160, 160)
+		if aimUI.validateAttackBox then
+			aimUI.validateAttackBox(true)
+		end
+	end)
+end
+
+local FOLLOW_STOP_DISTANCE = 5.5
+local FOLLOW_RESUME_DISTANCE = 7
+local FOLLOW_OFFSET_DISTANCE = 5
+local HOLD_STOP_DISTANCE = 2.5
+local MOVE_KEEPALIVE = 0.2
+local MOVE_TARGET_EPSILON = 0.75
+local ATTACK_CLICK_INTERVAL = 0.12
+
+local function desiredStandPosition(commanderRoot)
+	local lookVector = commanderRoot.CFrame.LookVector
+	local flatLook = Vector3.new(lookVector.X, 0, lookVector.Z)
+	if flatLook.Magnitude < 0.1 then
+		flatLook = Vector3.new(0, 0, -1)
+	end
+
+	return commanderRoot.Position - flatLook.Unit * FOLLOW_OFFSET_DISTANCE
+end
+
+local function resolveAttackTargets(text, commander, allowProtected)
+	local resolved = {}
+	local blocked = {}
+	local seenUserIds = {}
+	local seenBlockedIds = {}
+
+	local function considerPlayer(player)
+		if aimUI.isProtectedPlayer(player) and not allowProtected then
+			if not seenBlockedIds[player.UserId] then
+				seenBlockedIds[player.UserId] = true
+				table.insert(blocked, player)
+			end
+		elseif not seenUserIds[player.UserId] then
+			seenUserIds[player.UserId] = true
+			table.insert(resolved, player)
+		end
+	end
+
+	for entry in string.gmatch(text, "[^,]+") do
+		local query = string.lower(trim(entry))
+		query = string.gsub(query, "^@", "")
+		if query ~= "" then
+			if query == "me" and commander and commander ~= localPlayer then
+				considerPlayer(commander)
+			else
+				local matches = {}
+				for _, player in Players:GetPlayers() do
+					if player ~= localPlayer then
+						local username = string.lower(player.Name)
+						local displayName = string.lower(player.DisplayName)
+						if string.find(username, query, 1, true)
+							or string.find(displayName, query, 1, true) then
+							table.insert(matches, player)
+						end
+					end
+				end
+
+				table.sort(matches, function(a, b)
+					local aExact = string.lower(a.Name) == query or string.lower(a.DisplayName) == query
+					local bExact = string.lower(b.Name) == query or string.lower(b.DisplayName) == query
+					if aExact ~= bExact then
+						return aExact
+					end
+					return a.Name:lower() < b.Name:lower()
+				end)
+
+				for _, player in matches do
+					considerPlayer(player)
+				end
+			end
+		end
+	end
+
+	return resolved, blocked
+end
+
+aimUI.validateAttackBox = function(showError)
+	local targets, blocked = resolveAttackTargets(attackBox.Text, nil, false)
+	if #blocked > 0 then
+		local blockedCommander = false
+		local blockedTeammate = false
+		for _, player in blocked do
+			blockedCommander = blockedCommander
+				or (aimUI.noFriendlyFireEnabled and selectedCommanderIds[player.UserId] == true)
+			blockedTeammate = blockedTeammate or aimUI.teamPlayerIds[player.UserId] == true
+		end
+
+		local protectedType = if blockedCommander and blockedTeammate
+			then "a protected commander or teammate"
+			elseif blockedCommander then "a commander's user"
+			else "a teammate"
+		attackBox.TextColor3 = Color3.fromRGB(255, 105, 116)
+		aimUI.attackValidationShowingError = true
+		if showError then
+			results.Text = "ERROR: Cannot execute attack because " .. protectedType .. " is in the Attack Textbox."
+			results.TextColor3 = Color3.fromRGB(255, 105, 116)
+		end
+		return targets, false, blocked
+	end
+
+	attackBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+	if aimUI.attackValidationShowingError then
+		aimUI.attackValidationShowingError = false
+		task.defer(updateResults)
+	end
+	return targets, true, blocked
+end
+
+aimUI.resetAttackSafety = function()
+	aimUI.attackSafetyPaused = false
+	aimUI.attackSafetyTargetUserId = nil
+	aimUI.attackSafetyFriendlyUserId = nil
+	aimUI.attackRetreatIssued = false
+	aimUI.attackRetreatPosition = nil
+	screenGui:SetAttribute("AttackSafetyState", "Idle")
+end
+
+aimUI.attackSafetyAction = function(targetPlayer, targetRoot, localRoot)
+	local overrideRemaining = math.max(0, aimUI.attackSafetyOverrideUntil - os.clock())
+	screenGui:SetAttribute("AttackSafetyOverrideRemaining", overrideRemaining)
+	if overrideRemaining > 0 then
+		aimUI.attackSafetyPaused = false
+		aimUI.attackSafetyTargetUserId = targetPlayer.UserId
+		aimUI.attackSafetyFriendlyUserId = nil
+		aimUI.attackRetreatIssued = false
+		aimUI.attackRetreatPosition = nil
+		screenGui:SetAttribute("AttackSafetyState", "HelpOverride")
+		return "Chase", targetRoot.Position
+	end
+
+	if aimUI.attackSafetyTargetUserId ~= targetPlayer.UserId then
+		aimUI.resetAttackSafety()
+		aimUI.attackSafetyTargetUserId = targetPlayer.UserId
+	end
+
+	local targetPosition = targetRoot.Position
+	local localPosition = localRoot.Position
+	local chaseVector = targetPosition - localPosition
+	local flatChase = Vector3.new(chaseVector.X, 0, chaseVector.Z)
+	local hazardPlayer
+	local hazardRoot
+	local hazardTargetDistance = math.huge
+
+	for _, player in Players:GetPlayers() do
+		if aimUI.isProtectedPlayer(player) then
+			local _, _, protectedRoot = getLivingCharacter(player)
+			if protectedRoot then
+				local targetDistance = (protectedRoot.Position - targetPosition).Magnitude
+				local inChaseCorridor = false
+				local corridorDistance = math.huge
+
+				if flatChase.Magnitude > 0.05 then
+					local toFriendly = protectedRoot.Position - localPosition
+					local flatToFriendly = Vector3.new(toFriendly.X, 0, toFriendly.Z)
+					local along = flatToFriendly:Dot(flatChase) / flatChase:Dot(flatChase)
+					if along > 0 and along < 1 then
+						local closestPoint = localPosition + flatChase * along
+						local corridorOffset = protectedRoot.Position - closestPoint
+						corridorDistance = Vector3.new(
+							corridorOffset.X,
+							0,
+							corridorOffset.Z
+						).Magnitude
+						inChaseCorridor = true
+					end
+				end
+
+				local unsafe = if aimUI.attackSafetyPaused
+					then targetDistance < aimUI.attackFriendlyResumeDistance
+					or (inChaseCorridor
+						and corridorDistance < aimUI.attackFriendlyResumeCorridor)
+					else targetDistance <= aimUI.attackFriendlyPauseDistance
+					or (inChaseCorridor
+						and corridorDistance <= aimUI.attackFriendlyCorridorDistance)
+
+				if unsafe and targetDistance < hazardTargetDistance then
+					hazardPlayer = player
+					hazardRoot = protectedRoot
+					hazardTargetDistance = targetDistance
+				end
+			end
+		end
+	end
+
+	if not hazardPlayer or not hazardRoot then
+		aimUI.resetAttackSafety()
+		aimUI.attackSafetyTargetUserId = targetPlayer.UserId
+		screenGui:SetAttribute("AttackSafetyState", "Chasing")
+		return "Chase", targetPosition
+	end
+
+	aimUI.attackSafetyPaused = true
+	if aimUI.attackSafetyFriendlyUserId ~= hazardPlayer.UserId then
+		aimUI.attackSafetyFriendlyUserId = hazardPlayer.UserId
+		aimUI.attackRetreatIssued = false
+		aimUI.attackRetreatPosition = nil
+	end
+
+	local localTargetDistance = (localPosition - targetPosition).Magnitude
+	local isCheckmate = localTargetDistance <= aimUI.attackCheckmateTargetDistance
+		and hazardTargetDistance <= aimUI.attackCheckmateFriendlyDistance
+
+	if isCheckmate and not aimUI.attackRetreatIssued then
+		local awayFromTarget = localPosition - targetPosition
+		local awayFromFriendly = localPosition - hazardRoot.Position
+		local escape = Vector3.new(
+			awayFromTarget.X + awayFromFriendly.X * 0.65,
+			0,
+			awayFromTarget.Z + awayFromFriendly.Z * 0.65
+		)
+		if escape.Magnitude < 0.05 then
+			local targetLook = targetRoot.CFrame.LookVector
+			escape = Vector3.new(-targetLook.X, 0, -targetLook.Z)
+		end
+		if escape.Magnitude < 0.05 then
+			escape = Vector3.new(0, 0, 1)
+		end
+
+		aimUI.attackRetreatIssued = true
+		aimUI.attackRetreatPosition = localPosition
+			+ escape.Unit * aimUI.attackRetreatDistance
+	end
+
+	if aimUI.attackRetreatIssued and aimUI.attackRetreatPosition then
+		local retreatRemaining = (localPosition - aimUI.attackRetreatPosition).Magnitude
+		if retreatRemaining > 1.25 then
+			screenGui:SetAttribute("AttackSafetyState", "Retreating")
+			return "Retreat", aimUI.attackRetreatPosition
+		end
+	end
+
+	screenGui:SetAttribute("AttackSafetyState", "Paused")
+	return "Pause", nil
+end
+
+local function issueMoveTo(humanoid, target, force)
+	local now = os.clock()
+	local targetChanged = not lastIssuedMoveTarget
+		or (target - lastIssuedMoveTarget).Magnitude >= MOVE_TARGET_EPSILON
+	local keepaliveExpired = now - lastMoveIssuedAt >= MOVE_KEEPALIVE
+
+	if force or targetChanged or keepaliveExpired then
+		humanoid.AutoRotate = true
+		humanoid:MoveTo(target)
+		lastIssuedMoveTarget = target
+		lastMoveIssuedAt = now
+	end
+end
+
+local function unequipAttackTool()
+	local _, humanoid = getLivingCharacter(localPlayer)
+	if humanoid then
+		humanoid:UnequipTools()
+	end
+end
+
+local function setFollowEnabled(enabled)
+	followEnabled = enabled
+	updateToggleVisual(followButton, followStroke, "Follow", enabled)
+end
+
+local function setAttackEnabled(enabled)
+	attackEnabled = enabled
+	updateToggleVisual(attackButton, attackStroke, "Attack", enabled)
+	if not enabled then
+		unequipAttackTool()
+	end
+end
+
+local function stopActiveMovement()
+	if followMovementActive then
+		stopLocalMovement()
+	end
+	activeMoveTarget = nil
+	followMovementActive = false
+	lastIssuedMoveTarget = nil
+	lastMoveIssuedAt = 0
+end
+
+cancelActiveCommand = function(turnEverythingOff)
+	local previousMode = commandMode
+	stopActiveMovement()
+	commandMode = "None"
+	activeCommander = nil
+	followTarget = nil
+	attackTarget = nil
+	table.clear(attackTargets)
+	holdPosition = nil
+	localWasUnavailable = false
+	commanderWasUnavailable = false
+	targetWasUnavailable = false
+	lastAttackAt = 0
+	aimUI.resetAttackSafety()
+
+	if previousMode == "Attack" then
+		setAttackEnabled(false)
+	end
+
+	if turnEverythingOff then
+		setFollowEnabled(false)
+		setAttackEnabled(false)
+		deathFollowEnabled = false
+		deathAttackEnabled = false
+		updateToggleVisual(deathFollowButton, deathFollowStroke, "Death Follow", false)
+		updateToggleVisual(deathAttackButton, deathAttackStroke, "Death Attack", false)
+	end
+end
+
+local function beginCommanderCommand(player, mode, position)
+	stopActiveMovement()
+	aimUI.resetAttackSafety()
+	setAttackEnabled(false)
+	setFollowEnabled(true)
+	activeCommander = player
+	followTarget = nil
+	attackTarget = nil
+	table.clear(attackTargets)
+	commandMode = mode
+	holdPosition = position
+	localWasUnavailable = false
+	commanderWasUnavailable = false
+	targetWasUnavailable = false
+end
+
+local function beginFollowCommand(player, target, savedText)
+	stopActiveMovement()
+	aimUI.resetAttackSafety()
+	setAttackEnabled(false)
+	setFollowEnabled(true)
+	activeCommander = player
+	followTarget = target
+	attackTarget = nil
+	table.clear(attackTargets)
+	commandMode = "Follow"
+	holdPosition = nil
+	localWasUnavailable = false
+	commanderWasUnavailable = false
+	targetWasUnavailable = false
+
+	if savedText and trim(savedText) ~= "" then
+		suppressFollowBoxUpdate = true
+		followBox.Text = trim(savedText)
+		suppressFollowBoxUpdate = false
+	end
+end
+
+local function beginAttackCommand(player, targets, savedText)
+	stopActiveMovement()
+	aimUI.resetAttackSafety()
+	setFollowEnabled(false)
+	setAttackEnabled(true)
+	activeCommander = player
+	followTarget = nil
+	attackTargets = targets
+	attackTarget = targets[1]
+	commandMode = "Attack"
+	holdPosition = nil
+	localWasUnavailable = false
+	commanderWasUnavailable = false
+	targetWasUnavailable = false
+	lastAttackAt = 0
+	pickedTool = nil
+
+	if savedText and trim(savedText) ~= "" then
+		suppressAttackBoxUpdate = true
+		attackBox.Text = trim(savedText)
+		suppressAttackBoxUpdate = false
+		attackBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+		aimUI.attackValidationShowingError = false
+		task.defer(updateResults)
+	end
+end
+
+local function closestLivingAttackTarget(localPosition)
+	local closestPlayer
+	local closestRoot
+	local closestDistance = math.huge
+	local hasWaitingTarget = false
+
+	for index = #attackTargets, 1, -1 do
+		local player = attackTargets[index]
+		if not player
+			or player == localPlayer
+			or not player.Parent
+			or aimUI.isProtectedPlayer(player) then
+			table.remove(attackTargets, index)
+		else
+			local _, _, root = getLivingCharacter(player)
+			if root then
+				local distance = (localPosition - root.Position).Magnitude
+				if distance < closestDistance then
+					closestDistance = distance
+					closestPlayer = player
+					closestRoot = root
+				end
+			elseif deathAttackEnabled then
+				hasWaitingTarget = true
+			else
+				table.remove(attackTargets, index)
+			end
+		end
+	end
+
+	return closestPlayer, closestRoot, hasWaitingTarget
+end
+
+local function selectedTool(character)
+	if not toolPickerEnabled then
+		return character and character:FindFirstChildOfClass("Tool")
+	end
+
+	if pickedTool and pickedTool.Parent then
+		return pickedTool
+	end
+
+	local index = tonumber(trim(toolPickerBox.Text))
+	if not index then
+		return nil
+	end
+	index = math.max(1, math.floor(index))
+
+	local tools = {}
+	local equipped = character and character:FindFirstChildOfClass("Tool")
+	if equipped then
+		table.insert(tools, equipped)
+	end
+
+	local backpack = localPlayer:FindFirstChildOfClass("Backpack")
+	if backpack then
+		for _, item in backpack:GetChildren() do
+			if item:IsA("Tool") and item ~= equipped then
+				table.insert(tools, item)
+			end
+		end
+	end
+
+	pickedTool = tools[index]
+	return pickedTool
+end
+
+local function activateAttackTool(character, humanoid)
+	local tool = selectedTool(character)
+	if toolPickerEnabled and tool and tool.Parent ~= character then
+		humanoid:EquipTool(tool)
+	end
+
+	local equipped = character:FindFirstChildOfClass("Tool")
+	if not equipped then
 		return
 	end
 
-	destroyed = true
-
-	for _, conn in ipairs(connections) do
+	local now = os.clock()
+	if now - lastAttackAt >= ATTACK_CLICK_INTERVAL then
+		lastAttackAt = now
 		pcall(function()
-			conn:Disconnect()
+			equipped:Activate()
+		end)
+	end
+end
+
+local function commandShouldSurviveDeath()
+	if commandMode == "Attack" then
+		return deathAttackEnabled
+	end
+	return deathFollowEnabled
+end
+
+local function followPlanStep()
+	if commandMode == "None" then
+		return
+	end
+	if (commandMode == "Attack" and not attackEnabled)
+		or (commandMode ~= "Attack" and not followEnabled) then
+		cancelActiveCommand(false)
+		return
+	end
+
+	if activeCommander
+		and (activeCommander == localPlayer
+			or not activeCommander.Parent
+			or not selectedCommanderIds[activeCommander.UserId]) then
+		cancelActiveCommand(false)
+		return
+	end
+
+	local localCharacter, localHumanoid, localRoot = getLivingCharacter(localPlayer)
+	if not localHumanoid or not localRoot then
+		localWasUnavailable = true
+		stopActiveMovement()
+		if not commandShouldSurviveDeath() then
+			cancelActiveCommand(false)
+		end
+		return
+	end
+
+	if localWasUnavailable then
+		localWasUnavailable = false
+		lastIssuedMoveTarget = nil
+		lastMoveIssuedAt = 0
+		pickedTool = nil
+	end
+
+	local destination
+
+	if commandMode == "Follow" then
+		if not followTarget or followTarget == localPlayer or not followTarget.Parent then
+			cancelActiveCommand(false)
+			return
+		end
+
+		local _, _, followedRoot = getLivingCharacter(followTarget)
+		if not followedRoot then
+			commanderWasUnavailable = true
+			stopActiveMovement()
+			if not deathFollowEnabled then
+				cancelActiveCommand(false)
+			end
+			return
+		end
+
+		if commanderWasUnavailable then
+			commanderWasUnavailable = false
+			lastIssuedMoveTarget = nil
+			lastMoveIssuedAt = 0
+		end
+
+		local followedDistance = (localRoot.Position - followedRoot.Position).Magnitude
+		if followedDistance <= FOLLOW_STOP_DISTANCE then
+			stopActiveMovement()
+			return
+		end
+		if followedDistance < FOLLOW_RESUME_DISTANCE and not followMovementActive then
+			return
+		end
+
+		destination = desiredStandPosition(followedRoot)
+	elseif commandMode == "Hold" then
+		if not holdPosition then
+			cancelActiveCommand(false)
+			return
+		end
+
+		local holdDistance = (localRoot.Position - holdPosition).Magnitude
+		if holdDistance <= HOLD_STOP_DISTANCE then
+			stopActiveMovement()
+			return
+		end
+
+		destination = holdPosition
+	elseif commandMode == "Attack" then
+		local closestPlayer, targetRoot, hasWaitingTarget = closestLivingAttackTarget(localRoot.Position)
+		if not closestPlayer or not targetRoot then
+			attackTarget = nil
+			targetWasUnavailable = hasWaitingTarget
+			stopActiveMovement()
+			if not hasWaitingTarget then
+				cancelActiveCommand(false)
+			end
+			return
+		end
+
+		attackTarget = closestPlayer
+		if targetWasUnavailable then
+			targetWasUnavailable = false
+			lastIssuedMoveTarget = nil
+			lastMoveIssuedAt = 0
+		end
+
+		local safetyMode, safetyDestination =
+			aimUI.attackSafetyAction(closestPlayer, targetRoot, localRoot)
+		if safetyMode ~= "Chase" then
+			local equippedTool = localCharacter:FindFirstChildOfClass("Tool")
+			if equippedTool then
+				pcall(function()
+					equippedTool:Deactivate()
+				end)
+			end
+		end
+
+		if safetyMode == "Pause" then
+			stopActiveMovement()
+			return
+		elseif safetyMode == "Retreat" then
+			destination = safetyDestination
+		else
+			destination = targetRoot.Position
+			activateAttackTool(localCharacter, localHumanoid)
+		end
+	else
+		cancelActiveCommand(false)
+		return
+	end
+
+	followMovementActive = true
+	activeMoveTarget = destination
+	issueMoveTo(localHumanoid, destination, false)
+end
+
+local recentCommanderCommands = {}
+
+local function handleCommanderMessage(player, message)
+	if isClosed or player == localPlayer then
+		return
+	end
+	if not selectedCommanderIds[player.UserId] then
+		return
+	end
+
+	local normalized = string.lower(trim(message))
+	normalized = string.gsub(normalized, "^/e%s+", "")
+
+	local now = os.clock()
+	local previous = recentCommanderCommands[player.UserId]
+	if previous and previous.text == normalized and now - previous.time < 0.3 then
+		return
+	end
+
+	local quickFollowCommand = normalized == "c" or normalized == "f"
+	local helpCommand = normalized == "help" or normalized == "h"
+	local teamAssistOnCommand = normalized == "team assist"
+		or normalized == "help teammates"
+	local teamAssistOffCommand = normalized == "no team assist"
+		or normalized == "no help teammates"
+	local settingCommand = normalized == "death follow"
+		or normalized == "no death follow"
+		or normalized == "death attack"
+		or normalized == "no death attack"
+		or teamAssistOnCommand
+		or teamAssistOffCommand
+		or helpCommand
+	local command, targetText = string.match(normalized, "^(%a+)%s*(.-)%s*$")
+	local recognized = settingCommand
+		or quickFollowCommand
+		or command == "follow"
+		or command == "come"
+		or command == "goto"
+		or command == "hold"
+		or command == "stop"
+		or command == "clear"
+		or command == "atk"
+		or command == "attack"
+	if not recognized then
+		return
+	end
+
+	recentCommanderCommands[player.UserId] = {
+		text = normalized,
+		time = now,
+	}
+
+	if helpCommand then
+		aimUI.attackSafetyOverrideUntil = os.clock() + 30
+		aimUI.resetAttackSafety()
+		screenGui:SetAttribute("AttackSafetyState", "HelpOverride")
+		screenGui:SetAttribute("AttackSafetyOverrideRemaining", 30)
+	elseif quickFollowCommand then
+		beginFollowCommand(player, player, nil)
+	elseif teamAssistOnCommand then
+		aimUI.teamAssistEnabled = true
+		updateToggleVisual(
+			aimUI.teamAssistButton,
+			aimUI.teamAssistStroke,
+			"Team Assist",
+			true
+		)
+	elseif teamAssistOffCommand then
+		aimUI.teamAssistEnabled = false
+		updateToggleVisual(
+			aimUI.teamAssistButton,
+			aimUI.teamAssistStroke,
+			"Team Assist",
+			false
+		)
+	elseif normalized == "death follow" then
+		deathFollowEnabled = true
+		updateToggleVisual(deathFollowButton, deathFollowStroke, "Death Follow", true)
+	elseif normalized == "no death follow" then
+		deathFollowEnabled = false
+		updateToggleVisual(deathFollowButton, deathFollowStroke, "Death Follow", false)
+	elseif normalized == "death attack" then
+		deathAttackEnabled = true
+		updateToggleVisual(deathAttackButton, deathAttackStroke, "Death Attack", true)
+	elseif normalized == "no death attack" then
+		deathAttackEnabled = false
+		updateToggleVisual(deathAttackButton, deathAttackStroke, "Death Attack", false)
+	elseif command == "stop" then
+		cancelActiveCommand(true)
+	elseif command == "clear" then
+		suppressAttackBoxUpdate = true
+		attackBox.Text = ""
+		suppressAttackBoxUpdate = false
+		attackBox.TextColor3 = Color3.fromRGB(240, 241, 245)
+		aimUI.attackValidationShowingError = false
+		task.defer(updateResults)
+		if commandMode == "Attack" then
+			cancelActiveCommand(false)
+		end
+	elseif command == "hold" then
+		local _, _, commanderRoot = getLivingCharacter(player)
+		if commanderRoot then
+			beginCommanderCommand(player, "Hold", commanderRoot.Position)
+		end
+	elseif command == "atk" or command == "attack" then
+		local requestedText = if trim(targetText) ~= "" then targetText else attackBox.Text
+		local targets, blocked = resolveAttackTargets(requestedText, player, false)
+		local usingSavedTargets = trim(targetText) == ""
+		if #targets > 0 and not (usingSavedTargets and #blocked > 0) then
+			local savedText
+			if not usingSavedTargets then
+				local allowedNames = {}
+				for _, target in targets do
+					table.insert(allowedNames, target.Name)
+				end
+				savedText = table.concat(allowedNames, ", ")
+			end
+			beginAttackCommand(player, targets, savedText)
+		else
+			cancelActiveCommand(false)
+			setFollowEnabled(false)
+			setAttackEnabled(#blocked == 0)
+			if #blocked > 0 then
+				results.Text = "ERROR: Protected commanders or teammates cannot be attacked."
+				results.TextColor3 = Color3.fromRGB(255, 105, 116)
+			end
+		end
+	elseif command == "follow" then
+		if trim(targetText) == "" then
+			beginFollowCommand(player, player, nil)
+		else
+			local targets = resolveAttackTargets(targetText, player, true)
+			if targets[1] then
+				beginFollowCommand(player, targets[1], targetText)
+			end
+		end
+	else
+		beginFollowCommand(player, player, nil)
+	end
+end
+
+local watchedPlayerIds = {}
+
+local function watchPlayerChat(player)
+	if watchedPlayerIds[player.UserId] then
+		return
+	end
+	watchedPlayerIds[player.UserId] = true
+	connect(player.Chatted, function(message)
+		handleCommanderMessage(player, message)
+	end)
+end
+
+for _, player in Players:GetPlayers() do
+	watchPlayerChat(player)
+end
+
+connect(TextChatService.MessageReceived, function(message)
+	local textSource = message.TextSource
+	if not textSource then
+		return
+	end
+
+	local player = Players:GetPlayerByUserId(textSource.UserId)
+	if player then
+		handleCommanderMessage(player, message.Text)
+	end
+end)
+
+task.spawn(function()
+	while not isClosed do
+		followPlanStep()
+		task.wait(0.08)
+	end
+end)
+
+aimUI.pressRuntimeKey = function(keyCode)
+	if isClosed or not aimUI.baddiesEnabled then
+		return false
+	end
+
+	local success = pcall(function()
+		aimUI.virtualInputManager:SendKeyEvent(true, keyCode, false, game)
+		task.wait(0.05)
+		aimUI.virtualInputManager:SendKeyEvent(false, keyCode, false, game)
+	end)
+	if success then
+		screenGui:SetAttribute("BaddiesLastInput", keyCode.Name)
+	end
+	return success
+end
+
+aimUI.findPvpButton = function()
+	if aimUI.cachedPvpButton and aimUI.cachedPvpButton.Parent then
+		local compact = string.lower(aimUI.cachedPvpButton.Text):gsub("%s+", "")
+		if compact == "pvp:on" or compact == "pvp:off" then
+			return aimUI.cachedPvpButton
+		end
+	end
+
+	if os.clock() - aimUI.lastPvpScanAt < 0.5 then
+		return nil
+	end
+	aimUI.lastPvpScanAt = os.clock()
+
+	local camera = workspace.CurrentCamera
+	local viewport = if camera then camera.ViewportSize else Vector2.new(1920, 1080)
+	local bestButton
+	local bestScore = -math.huge
+	local fallbackButton
+	local fallbackScore = -math.huge
+
+	for _, descendant in playerGui:GetDescendants() do
+		if descendant:IsA("TextButton") and descendant.Visible then
+			local compact = string.lower(descendant.Text):gsub("%s+", "")
+			if compact == "pvp:on" or compact == "pvp:off" then
+				local center = descendant.AbsolutePosition + descendant.AbsoluteSize * 0.5
+				local score = center.X - center.Y * 0.35
+				if score > fallbackScore then
+					fallbackScore = score
+					fallbackButton = descendant
+				end
+				if center.X >= viewport.X * 0.5 and center.Y <= viewport.Y * 0.5 and score > bestScore then
+					bestScore = score
+					bestButton = descendant
+				end
+			end
+		end
+	end
+
+	aimUI.cachedPvpButton = bestButton or fallbackButton
+	return aimUI.cachedPvpButton
+end
+
+aimUI.readPvpState = function(button)
+	if not button or not button.Parent then
+		return nil
+	end
+	local compact = string.lower(button.Text):gsub("%s+", "")
+	if compact == "pvp:on" then
+		return true
+	elseif compact == "pvp:off" then
+		return false
+	end
+	return nil
+end
+
+aimUI.clickRuntimeButton = function(button)
+	if not button or not button.Parent then
+		return false
+	end
+	local center = button.AbsolutePosition + button.AbsoluteSize * 0.5
+	return pcall(function()
+		aimUI.virtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+		task.wait(0.05)
+		aimUI.virtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+	end)
+end
+
+aimUI.updateBaddiesPvp = function()
+	local button = aimUI.findPvpButton()
+	local currentState = aimUI.readPvpState(button)
+	if currentState == nil then
+		screenGui:SetAttribute("BaddiesPvPStatus", "NotFound")
+		return
+	end
+
+	local wantsPvp = commandMode == "Attack" and attackEnabled
+	if not wantsPvp then
+		local _, humanoid = getLivingCharacter(localPlayer)
+		if not humanoid or humanoid.Health < humanoid.MaxHealth - 0.01 then
+			screenGui:SetAttribute("BaddiesPvPStatus", "WaitingForFullHealth")
+			return
+		end
+	end
+
+	if currentState == wantsPvp then
+		screenGui:SetAttribute("BaddiesPvPStatus", if wantsPvp then "ON" else "OFF")
+		return
+	end
+
+	local remaining = aimUI.PVP_TOGGLE_COOLDOWN - (os.clock() - aimUI.lastPvpToggleAt)
+	if remaining > 0 then
+		screenGui:SetAttribute("BaddiesPvPStatus", string.format("Cooldown %.1f", remaining))
+		return
+	end
+
+	if aimUI.clickRuntimeButton(button) then
+		aimUI.lastPvpToggleAt = os.clock()
+		screenGui:SetAttribute("BaddiesPvPStatus", "Toggling")
+	else
+		aimUI.cachedPvpButton = nil
+		screenGui:SetAttribute("BaddiesPvPStatus", "InputFailed")
+	end
+end
+
+aimUI.getBaddiesAttackSnapshot = function()
+	if commandMode ~= "Attack" or not attackEnabled or not attackTarget then
+		return nil
+	end
+	local _, localHumanoid, localRoot = getLivingCharacter(localPlayer)
+	local _, targetHumanoid, targetRoot = getLivingCharacter(attackTarget)
+	if not localHumanoid or not localRoot or not targetHumanoid or not targetRoot then
+		return nil
+	end
+	return {
+		player = attackTarget,
+		humanoid = targetHumanoid,
+		root = targetRoot,
+		distance = (targetRoot.Position - localRoot.Position).Magnitude,
+	}
+end
+
+aimUI.isDragReady = function()
+	local generalGui = playerGui:FindFirstChild("GeneralGUI")
+	local bars = generalGui and generalGui:FindFirstChild("bars")
+	local charge = bars and bars:FindFirstChild("jaladaDePeloCharge")
+	local label = charge and charge:FindFirstChild("Label")
+	return label ~= nil
+		and label:IsA("TextLabel")
+		and label.Text:gsub("%s+", "") == "100/100"
+end
+
+aimUI.updateBaddiesCombat = function()
+	local snapshot = aimUI.getBaddiesAttackSnapshot()
+	if not snapshot then
+		aimUI.stompTargetUserId = nil
+		aimUI.stompArmed = true
+		screenGui:SetAttribute("BaddiesDragReady", false)
+		screenGui:SetAttribute("BaddiesStompState", "Idle")
+		return
+	end
+
+	if aimUI.stompTargetUserId ~= snapshot.player.UserId then
+		aimUI.stompTargetUserId = snapshot.player.UserId
+		aimUI.stompArmed = true
+	end
+
+	local dragReady = aimUI.isDragReady()
+	screenGui:SetAttribute("BaddiesDragReady", dragReady)
+	if dragReady
+		and snapshot.distance <= aimUI.BADDIES_MELEE_DISTANCE
+		and os.clock() - aimUI.lastFPressAt >= aimUI.F_PRESS_INTERVAL
+	then
+		aimUI.lastFPressAt = os.clock()
+		task.spawn(aimUI.pressRuntimeKey, Enum.KeyCode.F)
+	end
+
+	local lowHealth = snapshot.humanoid.Health <= math.max(10, snapshot.humanoid.MaxHealth * 0.2)
+	local stompOpportunity = lowHealth and snapshot.distance <= aimUI.BADDIES_MELEE_DISTANCE
+	if not stompOpportunity then
+		aimUI.stompArmed = true
+		screenGui:SetAttribute("BaddiesStompState", "Waiting")
+		return
+	end
+	if not aimUI.stompArmed or aimUI.stompRunning then
+		return
+	end
+
+	aimUI.stompArmed = false
+	aimUI.stompRunning = true
+	screenGui:SetAttribute("BaddiesStompState", "PressingE")
+	task.spawn(function()
+		for _ = 1, aimUI.STOMP_BURST_PRESSES do
+			if isClosed or not aimUI.baddiesEnabled or commandMode ~= "Attack"
+				or not attackEnabled or attackTarget ~= snapshot.player
+				or snapshot.humanoid.Health <= 0
+			then
+				break
+			end
+
+			local _, _, localRoot = getLivingCharacter(localPlayer)
+			local _, targetHumanoid, targetRoot = getLivingCharacter(snapshot.player)
+			if not localRoot or not targetHumanoid or not targetRoot
+				or targetHumanoid.Health > math.max(10, targetHumanoid.MaxHealth * 0.2)
+				or (targetRoot.Position - localRoot.Position).Magnitude > aimUI.BADDIES_MELEE_DISTANCE
+			then
+				break
+			end
+
+			aimUI.pressRuntimeKey(Enum.KeyCode.E)
+			task.wait(aimUI.STOMP_PRESS_INTERVAL)
+		end
+		aimUI.stompRunning = false
+		screenGui:SetAttribute("BaddiesStompState", "Spent")
+	end)
+end
+
+task.spawn(function()
+	while not isClosed do
+		if aimUI.baddiesEnabled then
+			aimUI.updateBaddiesPvp()
+			aimUI.updateBaddiesCombat()
+		else
+			screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
+			screenGui:SetAttribute("BaddiesDragReady", false)
+			screenGui:SetAttribute("BaddiesStompState", "Idle")
+		end
+		task.wait(0.1)
+	end
+end)
+
+local function resetAimLock()
+	aimLastTargetRoot = nil
+	aimTransitionActive = false
+	aimTransitionFrom = nil
+	aimTransitionStartedAt = 0
+end
+
+local function currentAimTargetRoot()
+	if commandMode == "Attack" and attackEnabled and attackTarget then
+		local _, _, root = getLivingCharacter(attackTarget)
+		return root
+	end
+	if commandMode == "Follow" and followEnabled and followTarget then
+		local _, _, root = getLivingCharacter(followTarget)
+		return root
+	end
+	return nil
+end
+
+local function stopSimulatedShiftlock()
+	if aimUI.shiftOrientation then
+		aimUI.shiftOrientation:Destroy()
+	end
+	if aimUI.shiftAttachment then
+		aimUI.shiftAttachment:Destroy()
+	end
+
+	local humanoid = aimUI.shiftHumanoid
+	if humanoid and humanoid.Parent then
+		pcall(function()
+			humanoid.AutoRotate = if aimUI.previousAutoRotate == nil
+				then true
+				else aimUI.previousAutoRotate
+			humanoid.CameraOffset = aimUI.previousCameraOffset or Vector3.zero
 		end)
 	end
 
-	table.clear(connections)
+	aimUI.shiftHumanoid = nil
+	aimUI.shiftRoot = nil
+	aimUI.shiftOrientation = nil
+	aimUI.shiftAttachment = nil
+	aimUI.previousAutoRotate = nil
+	aimUI.previousCameraOffset = nil
+end
 
-	if gui then
-		gui:Destroy()
+local function simulatedShiftlockStep()
+	local active = not isClosed
+		and aimSectionEnabled
+		and shiftlockEnabled
+		and (lockonEnabled or predictionEnabled)
+	if not active then
+		stopSimulatedShiftlock()
+		return
 	end
 
+	local _, humanoid, root = getLivingCharacter(localPlayer)
+	local camera = workspace.CurrentCamera
+	if not humanoid or not root or not camera then
+		stopSimulatedShiftlock()
+		return
+	end
+
+	if aimUI.shiftHumanoid ~= humanoid
+		or aimUI.shiftRoot ~= root
+		or not aimUI.shiftOrientation
+		or not aimUI.shiftOrientation.Parent then
+		stopSimulatedShiftlock()
+		aimUI.shiftHumanoid = humanoid
+		aimUI.shiftRoot = root
+		aimUI.previousAutoRotate = humanoid.AutoRotate
+		aimUI.previousCameraOffset = humanoid.CameraOffset
+
+		aimUI.shiftAttachment = Instance.new("Attachment")
+		aimUI.shiftAttachment.Name = "BotsShiftlockAttachment"
+		aimUI.shiftAttachment.Parent = root
+
+		aimUI.shiftOrientation = Instance.new("AlignOrientation")
+		aimUI.shiftOrientation.Name = "BotsShiftlockOrientation"
+		aimUI.shiftOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+		aimUI.shiftOrientation.Attachment0 = aimUI.shiftAttachment
+		aimUI.shiftOrientation.MaxTorque = 1000000
+		aimUI.shiftOrientation.MaxAngularVelocity = math.huge
+		aimUI.shiftOrientation.Responsiveness = 45
+		aimUI.shiftOrientation.RigidityEnabled = false
+		aimUI.shiftOrientation.Parent = root
+	end
+
+	humanoid.AutoRotate = false
+	humanoid.CameraOffset = Vector3.new(1.75, 0, 0)
+
+	local cameraLook = camera.CFrame.LookVector
+	local flatLook = Vector3.new(cameraLook.X, 0, cameraLook.Z)
+	if flatLook.Magnitude > 0.001 then
+		aimUI.shiftOrientation.CFrame = CFrame.lookAt(Vector3.zero, flatLook.Unit)
+	end
+end
+
+local function aimCameraStep()
+	if isClosed
+		or not aimSectionEnabled
+		or not (lockonEnabled or predictionEnabled) then
+		if aimLastTargetRoot then
+			resetAimLock()
+		end
+		simulatedShiftlockStep()
+		return
+	end
+
+	local camera = workspace.CurrentCamera
+	local targetRoot = currentAimTargetRoot()
+	if not camera or not targetRoot then
+		resetAimLock()
+		simulatedShiftlockStep()
+		return
+	end
+
+	local _, _, localRoot = getLivingCharacter(localPlayer)
+	local targetPosition = targetRoot.Position
+	if predictionEnabled and localRoot then
+		local targetVelocity = targetRoot.AssemblyLinearVelocity
+		local distance = (targetPosition - localRoot.Position).Magnitude
+		local speed = targetVelocity.Magnitude
+		local distanceFactor = math.clamp(distance / 60, 0, 2)
+		local velocityFactor = math.clamp(speed / 20, 0, 2)
+		local predictionTime = predictionStrength
+			* (0.5 + 0.5 * distanceFactor + 0.5 * velocityFactor)
+		targetPosition += targetVelocity * predictionTime
+	end
+
+	local desiredCFrame = CFrame.lookAt(camera.CFrame.Position, targetPosition)
+	if aimLastTargetRoot ~= targetRoot then
+		aimLastTargetRoot = targetRoot
+		if snapEnabled then
+			aimTransitionActive = false
+			camera.CFrame = desiredCFrame
+		else
+			aimTransitionActive = true
+			aimTransitionFrom = camera.CFrame
+			aimTransitionStartedAt = os.clock()
+		end
+	end
+
+	if aimTransitionActive and aimTransitionFrom then
+		local alpha = math.clamp((os.clock() - aimTransitionStartedAt) / 0.12, 0, 1)
+		local easedAlpha = 1 - (1 - alpha) * (1 - alpha)
+		camera.CFrame = aimTransitionFrom:Lerp(desiredCFrame, easedAlpha)
+		if alpha >= 1 then
+			aimTransitionActive = false
+			aimTransitionFrom = nil
+		end
+	else
+		camera.CFrame = desiredCFrame
+	end
+
+	simulatedShiftlockStep()
+end
+
+connect(RunService.RenderStepped, aimCameraStep)
+
+aimUI.sliderDragging = false
+aimUI.sliderInput = nil
+
+local function setPredictionStrengthFromX(pointerX)
+	local width = aimUI.bar.AbsoluteSize.X
+	if width <= 0 then
+		return
+	end
+
+	local alpha = math.clamp((pointerX - aimUI.bar.AbsolutePosition.X) / width, 0, 1)
+	predictionStrength = math.floor(alpha * 100 + 0.5) / 100
+	aimUI.fill.Size = UDim2.fromScale(alpha, 1)
+	aimUI.knob.Position = UDim2.fromScale(alpha, 0.5)
+	aimUI.sliderLabel.Text = string.format("Prediction Strength: %.2f", predictionStrength)
+end
+
+local function beginPredictionSlider(input)
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1
+		and input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+	aimUI.sliderDragging = true
+	aimUI.sliderInput = input
+	setPredictionStrengthFromX(input.Position.X)
+end
+
+connect(aimUI.bar.InputBegan, beginPredictionSlider)
+connect(aimUI.knob.InputBegan, beginPredictionSlider)
+
+connect(UserInputService.InputChanged, function(input)
+	if not aimUI.sliderDragging then
+		return
+	end
+
+	local isMouseMovement = input.UserInputType == Enum.UserInputType.MouseMovement
+	local isActiveTouch = input.UserInputType == Enum.UserInputType.Touch
+		and input == aimUI.sliderInput
+	if isMouseMovement or isActiveTouch then
+		setPredictionStrengthFromX(input.Position.X)
+	end
+end)
+
+connect(UserInputService.InputEnded, function(input)
+	local mouseEnded = input.UserInputType == Enum.UserInputType.MouseButton1
+	local touchEnded = input == aimUI.sliderInput
+	if aimUI.sliderDragging and (mouseEnded or touchEnded) then
+		aimUI.sliderDragging = false
+		aimUI.sliderInput = nil
+	end
+end)
+
+local MAX_MELEE_LOG_DISTANCE = 8
+
+local watchedLocalHumanoid
+local localHealthConnection
+local lastLocalHealth
+
+local function distanceFromCharacter(character, player)
+	local localRoot = character and character:FindFirstChild("HumanoidRootPart")
+	local _, _, otherRoot = getLivingCharacter(player)
+	if not localRoot or not otherRoot then
+		return math.huge
+	end
+	return (localRoot.Position - otherRoot.Position).Magnitude
+end
+
+local function isExtremelyClose(character, player)
+	return player ~= nil
+		and player ~= localPlayer
+		and distanceFromCharacter(character, player) <= MAX_MELEE_LOG_DISTANCE
+end
+
+local function taggedAttacker(humanoid, character, victimPlayer)
+	for _, tagName in { "creator", "Creator" } do
+		local tag = humanoid:FindFirstChild(tagName)
+		if tag and tag:IsA("ObjectValue") then
+			local value = tag.Value
+			local player
+			if value and value:IsA("Player") then
+				player = value
+			elseif value and value:IsA("Model") then
+				player = Players:GetPlayerFromCharacter(value)
+			end
+
+			if player then
+				if player == localPlayer or player == victimPlayer then
+					return nil, true
+				end
+				if aimUI.isProtectedPlayer(player) then
+					return nil, true
+				end
+				if isExtremelyClose(character, player) then
+					return player, true
+				end
+				return nil, true
+			end
+		end
+	end
+	return nil, false
+end
+
+local function closestPlayerWhenDamaged(character, victimPlayer)
+	local closestPlayer
+	local closestDistance = MAX_MELEE_LOG_DISTANCE
+	for _, player in Players:GetPlayers() do
+		if player ~= localPlayer
+			and player ~= victimPlayer
+			and not aimUI.isProtectedPlayer(player) then
+			local distance = distanceFromCharacter(character, player)
+			if distance <= closestDistance then
+				closestDistance = distance
+				closestPlayer = player
+			end
+		end
+	end
+
+	return closestPlayer
+end
+
+local function addDamageAttacker(player)
+	if not player or player == localPlayer or aimUI.isProtectedPlayer(player) then
+		return
+	end
+
+	local _, validAttackText = aimUI.validateAttackBox(true)
+	if not validAttackText then
+		return
+	end
+
+	local savedTargets = resolveAttackTargets(attackBox.Text, nil)
+	local alreadySaved = false
+	for _, savedPlayer in savedTargets do
+		if savedPlayer == player then
+			alreadySaved = true
+			break
+		end
+	end
+
+	if not alreadySaved then
+		local previousText = trim(attackBox.Text)
+		suppressAttackBoxUpdate = true
+		attackBox.Text = if previousText == ""
+			then player.Name
+			else previousText .. ", " .. player.Name
+		suppressAttackBoxUpdate = false
+	end
+
+	local activePoolContainsPlayer = false
+	for _, activeTarget in attackTargets do
+		if activeTarget == player then
+			activePoolContainsPlayer = true
+			break
+		end
+	end
+
+	local targets = resolveAttackTargets(attackBox.Text, nil)
+	if #targets == 0 then
+		return
+	end
+
+	if commandMode ~= "Attack" or not attackEnabled or not activePoolContainsPlayer then
+		beginAttackCommand(nil, targets, nil)
+	end
+end
+
+local function watchLocalDamage(character)
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	if not humanoid or humanoid == watchedLocalHumanoid then
+		return
+	end
+
+	if localHealthConnection then
+		localHealthConnection:Disconnect()
+		localHealthConnection = nil
+	end
+
+	watchedLocalHumanoid = humanoid
+	lastLocalHealth = humanoid.Health
+	localHealthConnection = connect(humanoid.HealthChanged, function(newHealth)
+		local previousHealth = lastLocalHealth
+		lastLocalHealth = newHealth
+		if previousHealth == nil then
+			return
+		end
+
+		local damageAmount = previousHealth - newHealth
+		if damageAmount <= 0 then
+			return
+		end
+
+		screenGui:SetAttribute("LastDamageAmount", damageAmount)
+		screenGui:SetAttribute("HealthAfterDamage", newHealth)
+
+		local attacker, hadAttackerTag =
+			taggedAttacker(humanoid, character, localPlayer)
+		if not hadAttackerTag then
+			attacker = closestPlayerWhenDamaged(character, localPlayer)
+		end
+		if attacker then
+			screenGui:SetAttribute("LastMeleeAttacker", attacker.Name)
+			addDamageAttacker(attacker)
+		end
+	end)
+end
+
+connect(localPlayer.CharacterAdded, function(character)
+	task.spawn(watchLocalDamage, character)
+end)
+
+if localPlayer.Character then
+	task.spawn(watchLocalDamage, localPlayer.Character)
+end
+
+aimUI.assistedDamageStates = {}
+aimUI.assistedWatcherPlayerIds = {}
+
+aimUI.shouldAssistVictim = function(player)
+	if not player or player == localPlayer then
+		return false
+	end
+	if selectedCommanderIds[player.UserId] then
+		return true
+	end
+	return aimUI.teamAssistEnabled and aimUI.teamPlayerIds[player.UserId] == true
+end
+
+aimUI.watchAssistedDamage = function(player, character)
+	if player == localPlayer then
+		return
+	end
+
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	if not humanoid then
+		return
+	end
+
+	local existing = aimUI.assistedDamageStates[player.UserId]
+	if existing and existing.humanoid == humanoid then
+		return
+	end
+	if existing and existing.connection then
+		existing.connection:Disconnect()
+	end
+
+	local state = {
+		humanoid = humanoid,
+		health = humanoid.Health,
+	}
+	aimUI.assistedDamageStates[player.UserId] = state
+
+	state.connection = connect(humanoid.HealthChanged, function(newHealth)
+		if aimUI.assistedDamageStates[player.UserId] ~= state then
+			return
+		end
+
+		local previousHealth = state.health
+		state.health = newHealth
+		if previousHealth == nil or not aimUI.shouldAssistVictim(player) then
+			return
+		end
+
+		local damageAmount = previousHealth - newHealth
+		if damageAmount <= 0 then
+			return
+		end
+
+		local attacker, hadAttackerTag =
+			taggedAttacker(humanoid, character, player)
+		if not hadAttackerTag then
+			attacker = closestPlayerWhenDamaged(character, player)
+		end
+		if not attacker then
+			return
+		end
+
+		screenGui:SetAttribute("LastAssistedVictim", player.Name)
+		screenGui:SetAttribute("LastAssistedAttacker", attacker.Name)
+		screenGui:SetAttribute("LastAssistedDamageAmount", damageAmount)
+		addDamageAttacker(attacker)
+	end)
+end
+
+aimUI.bindAssistedDamageWatcher = function(player)
+	if player == localPlayer or aimUI.assistedWatcherPlayerIds[player.UserId] then
+		return
+	end
+	aimUI.assistedWatcherPlayerIds[player.UserId] = true
+
+	connect(player.CharacterAdded, function(character)
+		task.spawn(aimUI.watchAssistedDamage, player, character)
+	end)
+	if player.Character then
+		task.spawn(aimUI.watchAssistedDamage, player, player.Character)
+	end
+end
+
+for _, player in Players:GetPlayers() do
+	aimUI.bindAssistedDamageWatcher(player)
+end
+
+connect(Players.PlayerAdded, aimUI.bindAssistedDamageWatcher)
+connect(Players.PlayerRemoving, function(player)
+	local state = aimUI.assistedDamageStates[player.UserId]
+	if state and state.connection then
+		state.connection:Disconnect()
+	end
+	aimUI.assistedDamageStates[player.UserId] = nil
+	aimUI.assistedWatcherPlayerIds[player.UserId] = nil
+end)
+
+local function clampPosition(target, position)
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return position
+	end
+
+	local viewport = camera.ViewportSize
+	local targetSize = target.AbsoluteSize
+	if targetSize.X <= 0 or targetSize.Y <= 0 then
+		targetSize = Vector2.new(target.Size.X.Offset, target.Size.Y.Offset)
+	end
+
+	local desiredX = viewport.X * position.X.Scale + position.X.Offset
+	local desiredY = viewport.Y * position.Y.Scale + position.Y.Offset
+	local halfWidth = targetSize.X * target.AnchorPoint.X
+	local halfHeight = targetSize.Y * target.AnchorPoint.Y
+	local rightSpace = targetSize.X * (1 - target.AnchorPoint.X)
+	local bottomSpace = targetSize.Y * (1 - target.AnchorPoint.Y)
+	local margin = 6
+
+	local minX = halfWidth + margin
+	local maxX = math.max(minX, viewport.X - rightSpace - margin)
+	local minY = halfHeight + margin
+	local maxY = math.max(minY, viewport.Y - bottomSpace - margin)
+
+	return UDim2.fromOffset(
+		math.clamp(desiredX, minX, maxX),
+		math.clamp(desiredY, minY, maxY)
+	)
+end
+
+local windowHasMoved = false
+local tabHasMoved = false
+
+local function makeDraggable(handle, target, onDragged, onClicked)
+	local dragging = false
+	local pointerInput
+	local dragInput
+	local dragStart = Vector3.zero
+	local startPosition = target.Position
+	local moved = false
+	local lastDraggedAt = -math.huge
+
+	connect(handle.InputBegan, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		dragging = true
+		pointerInput = input
+		dragStart = input.Position
+		startPosition = target.Position
+		moved = false
+	end)
+
+	connect(handle.InputChanged, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+
+	connect(UserInputService.InputChanged, function(input)
+		if not dragging then
+			return
+		end
+
+		local isMouseMove = input.UserInputType == Enum.UserInputType.MouseMovement
+		local isActiveTouch = input.UserInputType == Enum.UserInputType.Touch and input == pointerInput
+		if not isMouseMove and not isActiveTouch then
+			return
+		end
+
+		local delta = input.Position - dragStart
+		if delta.Magnitude >= 4 and not moved then
+			moved = true
+			lastDraggedAt = os.clock()
+			onDragged()
+		end
+
+		local nextPosition = UDim2.new(
+			startPosition.X.Scale,
+			startPosition.X.Offset + delta.X,
+			startPosition.Y.Scale,
+			startPosition.Y.Offset + delta.Y
+		)
+		target.Position = clampPosition(target, nextPosition)
+	end)
+
+	connect(UserInputService.InputEnded, function(input)
+		if input ~= pointerInput then
+			return
+		end
+
+		local didMove = moved or target.Position ~= startPosition
+		dragging = false
+		pointerInput = nil
+		dragInput = nil
+		if didMove then
+			lastDraggedAt = os.clock()
+		elseif onClicked then
+			onClicked()
+		end
+	end)
+end
+
+local openMinimizedTab
+
+makeDraggable(minimizedTab, minimizedTab, function()
+	tabHasMoved = true
+end, function()
+	if openMinimizedTab then
+		openMinimizedTab()
+	end
+end)
+
+makeDraggable(topBar, window, function()
+	windowHasMoved = true
+end)
+
+local function setMinimized(minimized)
+	if isClosed then
+		return
+	end
+
+	if minimized then
+		tabHasMoved = windowHasMoved
+		minimizedTab.Position = if tabHasMoved
+			then clampPosition(minimizedTab, window.Position)
+			else UDim2.fromScale(0.5, 0.5)
+		window.Visible = false
+		minimizedTab.Visible = true
+	else
+		windowHasMoved = tabHasMoved
+		window.Position = if windowHasMoved
+			then clampPosition(window, minimizedTab.Position)
+			else UDim2.fromScale(0.5, 0.5)
+		minimizedTab.Visible = false
+		window.Visible = true
+	end
+end
+
+openMinimizedTab = function()
+	setMinimized(false)
+end
+
+local function closeRuntime()
+	if isClosed then
+		return
+	end
+
+	isClosed = true
+	updateSerial += 1
+	cancelActiveCommand(true)
+	clearNavigation()
+	stopSimulatedShiftlock()
+	screenGui.Enabled = false
+
+	for _, connection in runtimeConnections do
+		connection:Disconnect()
+	end
+	table.clear(runtimeConnections)
+
+	screenGui:Destroy()
 	script:Destroy()
 end
 
---////////////////////////////////////////////////////
--- UI
---////////////////////////////////////////////////////
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "AutoCommandKeyPresser"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.DisplayOrder = 999999
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-gui.Parent = playerGui
-
-local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(340, 200)
-frame.Position = UDim2.new(0.5, -170, 0.5, -100)
-frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-frame.BorderSizePixel = 0
-frame.ZIndex = 999999
-frame.Parent = gui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = frame
-
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Size = UDim2.new(1, -70, 0, 28)
-title.Position = UDim2.fromOffset(8, 0)
-title.Text = "Auto Command Key Presser"
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.SourceSansBold
-title.TextSize = 20
-title.ZIndex = 999999
-title.Parent = frame
-
-local closeButton = Instance.new("TextButton")
-closeButton.Size = UDim2.fromOffset(28, 28)
-closeButton.Position = UDim2.new(1, -32, 0, 2)
-closeButton.Text = "X"
-closeButton.Font = Enum.Font.SourceSansBold
-closeButton.TextSize = 18
-closeButton.BackgroundColor3 = Color3.fromRGB(170, 40, 40)
-closeButton.TextColor3 = Color3.new(1,1,1)
-closeButton.ZIndex = 999999
-closeButton.Parent = frame
-
-local closeCorner = Instance.new("UICorner")
-closeCorner.Parent = closeButton
-
-local commanderLabel = Instance.new("TextLabel")
-commanderLabel.BackgroundTransparency = 1
-commanderLabel.Position = UDim2.fromOffset(10, 35)
-commanderLabel.Size = UDim2.fromOffset(150, 20)
-commanderLabel.Text = "Commander(s)"
-commanderLabel.TextColor3 = Color3.new(1,1,1)
-commanderLabel.Font = Enum.Font.SourceSansBold
-commanderLabel.TextXAlignment = Enum.TextXAlignment.Left
-commanderLabel.TextSize = 18
-commanderLabel.ZIndex = 999999
-commanderLabel.Parent = frame
-
-local commanderBox = Instance.new("TextBox")
-commanderBox.Size = UDim2.new(1, -20, 0, 30)
-commanderBox.Position = UDim2.fromOffset(10, 58)
-commanderBox.PlaceholderText = "Player1, Player2"
-commanderBox.Text = ""
-commanderBox.ClearTextOnFocus = false
-commanderBox.TextColor3 = Color3.new(1,1,1)
-commanderBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-commanderBox.ZIndex = 999999
-commanderBox.Parent = frame
-
-local commanderCorner = Instance.new("UICorner")
-commanderCorner.Parent = commanderBox
-
-local keyLabel = Instance.new("TextLabel")
-keyLabel.BackgroundTransparency = 1
-keyLabel.Position = UDim2.fromOffset(10, 96)
-keyLabel.Size = UDim2.fromOffset(80, 20)
-keyLabel.Text = "Key"
-keyLabel.TextColor3 = Color3.new(1,1,1)
-keyLabel.Font = Enum.Font.SourceSansBold
-keyLabel.TextXAlignment = Enum.TextXAlignment.Left
-keyLabel.TextSize = 18
-keyLabel.ZIndex = 999999
-keyLabel.Parent = frame
-
-local keyBox = Instance.new("TextBox")
-keyBox.Size = UDim2.fromOffset(80, 30)
-keyBox.Position = UDim2.fromOffset(10, 118)
-keyBox.PlaceholderText = "R"
-keyBox.Text = "R"
-keyBox.ClearTextOnFocus = false
-keyBox.TextColor3 = Color3.new(1,1,1)
-keyBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-keyBox.ZIndex = 999999
-keyBox.Parent = frame
-
-local keyCorner = Instance.new("UICorner")
-keyCorner.Parent = keyBox
-
-local cooldownLabel = Instance.new("TextLabel")
-cooldownLabel.BackgroundTransparency = 1
-cooldownLabel.Position = UDim2.fromOffset(110, 96)
-cooldownLabel.Size = UDim2.fromOffset(100, 20)
-cooldownLabel.Text = "Cooldown"
-cooldownLabel.TextColor3 = Color3.new(1,1,1)
-cooldownLabel.Font = Enum.Font.SourceSansBold
-cooldownLabel.TextXAlignment = Enum.TextXAlignment.Left
-cooldownLabel.TextSize = 18
-cooldownLabel.ZIndex = 999999
-cooldownLabel.Parent = frame
-
-local cooldownBox = Instance.new("TextBox")
-cooldownBox.Size = UDim2.fromOffset(100, 30)
-cooldownBox.Position = UDim2.fromOffset(110, 118)
-cooldownBox.PlaceholderText = "12"
-cooldownBox.Text = "12"
-cooldownBox.ClearTextOnFocus = false
-cooldownBox.TextColor3 = Color3.new(1,1,1)
-cooldownBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-cooldownBox.ZIndex = 999999
-cooldownBox.Parent = frame
-
-local cooldownCorner = Instance.new("UICorner")
-cooldownCorner.Parent = cooldownBox
-
-local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.fromOffset(110, 32)
-toggleButton.Position = UDim2.fromOffset(220, 118)
-toggleButton.Text = "OFF"
-toggleButton.Font = Enum.Font.SourceSansBold
-toggleButton.TextSize = 18
-toggleButton.TextColor3 = Color3.new(1,1,1)
-toggleButton.BackgroundColor3 = Color3.fromRGB(170,50,50)
-toggleButton.ZIndex = 999999
-toggleButton.Parent = frame
-
-local toggleCorner = Instance.new("UICorner")
-toggleCorner.Parent = toggleButton
-
-local statusLabel = Instance.new("TextLabel")
-statusLabel.BackgroundTransparency = 1
-statusLabel.Position = UDim2.fromOffset(10, 160)
-statusLabel.Size = UDim2.new(1, -20, 0, 25)
-statusLabel.Text = "Waiting..."
-statusLabel.TextColor3 = Color3.new(1,1,1)
-statusLabel.Font = Enum.Font.SourceSansBold
-statusLabel.TextSize = 18
-statusLabel.ZIndex = 999999
-statusLabel.Parent = frame
-
---////////////////////////////////////////////////////
--- Dragging (PC + Mobile)
---////////////////////////////////////////////////////
-
-local dragging = false
-local dragStart
-local startPos
-
-local function updateDrag(input)
-	local delta = input.Position - dragStart
-	frame.Position = UDim2.new(
-		startPos.X.Scale,
-		startPos.X.Offset + delta.X,
-		startPos.Y.Scale,
-		startPos.Y.Offset + delta.Y
-	)
-end
-
-track(frame.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-	or input.UserInputType == Enum.UserInputType.Touch then
-
-		dragging = true
-		dragStart = input.Position
-		startPos = frame.Position
-
-		track(input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
+connect(commandBox:GetPropertyChangedSignal("Text"), updateResults)
+connect(Players.PlayerAdded, function(player)
+	watchPlayerChat(player)
+	updateResults()
+	aimUI.updateTeamList()
+end)
+connect(Players.PlayerRemoving, function(player)
+	watchedPlayerIds[player.UserId] = nil
+	recentCommanderCommands[player.UserId] = nil
+	if activeCommander == player or followTarget == player then
+		cancelActiveCommand(false)
+		clearNavigation()
+	elseif commandMode == "Attack" then
+		for index = #attackTargets, 1, -1 do
+			if attackTargets[index] == player then
+				table.remove(attackTargets, index)
 			end
-		end))
-	end
-end))
-
-track(UserInputService.InputChanged:Connect(function(input)
-	if dragging and (
-		input.UserInputType == Enum.UserInputType.MouseMovement
-		or input.UserInputType == Enum.UserInputType.Touch
-	) then
-		updateDrag(input)
-	end
-end))
-
-track(closeButton.MouseButton1Click:Connect(cleanup))
-
-local enabled = false
-local autoRunning = false
---////////////////////////////////////////////////////
--- Commander Handling
---////////////////////////////////////////////////////
-
-local function splitCommanders()
-	local results = {}
-
-	for entry in string.gmatch(commanderBox.Text, "[^,]+") do
-		entry = entry:gsub("^%s+", "")
-		entry = entry:gsub("%s+$", "")
-
-		if entry ~= "" then
-			table.insert(results, string.lower(entry))
+		end
+		if attackTarget == player then
+			attackTarget = nil
+		end
+		if #attackTargets == 0 then
+			cancelActiveCommand(false)
+			clearNavigation()
 		end
 	end
+	task.defer(updateResults)
+	task.defer(aimUI.updateTeamList)
+end)
 
-	return results
-end
+connect(commandBox.Focused, function()
+	boxStroke.Color = Color3.fromRGB(155, 158, 172)
+	boxStroke.Transparency = 0.05
+end)
 
-local function isCommander(playerName)
-	local lowerName = string.lower(playerName)
+connect(commandBox.FocusLost, function()
+	boxStroke.Color = Color3.fromRGB(100, 102, 112)
+	boxStroke.Transparency = 0.35
+	updateResults()
+end)
 
-	for _, commander in ipairs(splitCommanders()) do
-		if string.find(lowerName, commander, 1, true) then
-			return true
+connect(aimUI.noFriendlyFireButton.Activated, function()
+	aimUI.noFriendlyFireEnabled = not aimUI.noFriendlyFireEnabled
+	updateToggleVisual(
+		aimUI.noFriendlyFireButton,
+		aimUI.noFriendlyFireStroke,
+		"No Friendly Fire",
+		aimUI.noFriendlyFireEnabled
+	)
+	aimUI.validateAttackBox(true)
+end)
+
+connect(aimUI.teamBox.Focused, function()
+	aimUI.teamBoxStroke.Color = Color3.fromRGB(155, 158, 172)
+	aimUI.teamBoxStroke.Transparency = 0.05
+end)
+
+connect(aimUI.teamBox.FocusLost, function()
+	aimUI.teamBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+	aimUI.teamBoxStroke.Transparency = 0.35
+	aimUI.updateTeamList()
+end)
+
+connect(aimUI.teamBox:GetPropertyChangedSignal("Text"), aimUI.updateTeamList)
+
+connect(aimUI.teamAssistButton.Activated, function()
+	aimUI.teamAssistEnabled = not aimUI.teamAssistEnabled
+	updateToggleVisual(
+		aimUI.teamAssistButton,
+		aimUI.teamAssistStroke,
+		"Team Assist",
+		aimUI.teamAssistEnabled
+	)
+end)
+
+connect(followBox.Focused, function()
+	followBoxStroke.Color = Color3.fromRGB(155, 158, 172)
+	followBoxStroke.Transparency = 0.05
+end)
+
+connect(followBox.FocusLost, function()
+	followBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+	followBoxStroke.Transparency = 0.35
+	if followEnabled and not suppressFollowBoxUpdate then
+		local targets = resolveAttackTargets(followBox.Text, nil, true)
+		if targets[1] then
+			beginFollowCommand(nil, targets[1], nil)
 		end
 	end
+end)
 
-	return false
-end
-
---////////////////////////////////////////////////////
--- Key Pressing
---////////////////////////////////////////////////////
-
-local function pressKey()
-	local keyText = string.upper(keyBox.Text)
-
-	if keyText == "" then
-		return
+connect(followButton.Activated, function()
+	local enabled = not followEnabled
+	if enabled and commandMode ~= "None" then
+		cancelActiveCommand(false)
 	end
-
-	local success, keyCode = pcall(function()
-		return Enum.KeyCode[keyText]
-	end)
-
-	if not success or not keyCode then
-		return
-	end
-
-	pcall(function()
-		VirtualInputManager:SendKeyEvent(
-			true,
-			keyCode,
-			false,
-			game
-		)
-
-		task.wait(0.05)
-
-		VirtualInputManager:SendKeyEvent(
-			false,
-			keyCode,
-			false,
-			game
-		)
-	end)
-end
-
-local loopThread
-
-local function stopLoop()
-	autoRunning = false
-end
-
-local function startLoop()
-	if autoRunning then
-		return
-	end
-
-	autoRunning = true
-
-	loopThread = task.spawn(function()
-
-		while autoRunning and not destroyed do
-
-			local cooldown =
-				tonumber(cooldownBox.Text)
-				or 1
-
-			cooldown = math.max(0.05, cooldown)
-
-			statusLabel.Text =
-				"Running (" ..
-				string.upper(keyBox.Text) ..
-				" every " ..
-				tostring(cooldown) ..
-				"s)"
-
-			pressKey()
-
-			local startTime = tick()
-
-			repeat
-				task.wait(0.1)
-			until
-				not autoRunning
-				or destroyed
-				or (tick() - startTime >= cooldown)
-
-		end
-
-		statusLabel.Text = "Waiting for -start"
-	end)
-end
-
---////////////////////////////////////////////////////
--- Toggle
---////////////////////////////////////////////////////
-
-local function updateToggle()
-	if enabled then
-		toggleButton.Text = "ON"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(50,170,50)
-	else
-		toggleButton.Text = "OFF"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(170,50,50)
-
-		stopLoop()
-	end
-end
-
-track(toggleButton.MouseButton1Click:Connect(function()
-
-	enabled = not enabled
-
-	updateToggle()
+	setFollowEnabled(enabled)
 
 	if enabled then
-		statusLabel.Text = "Listening..."
-	else
-		statusLabel.Text = "Disabled"
+		local targets = resolveAttackTargets(followBox.Text, nil, true)
+		if targets[1] then
+			beginFollowCommand(nil, targets[1], nil)
+		end
+	elseif commandMode == "Follow" or commandMode == "Hold" then
+		cancelActiveCommand(false)
+	end
+end)
+
+connect(deathFollowButton.Activated, function()
+	deathFollowEnabled = not deathFollowEnabled
+	updateToggleVisual(deathFollowButton, deathFollowStroke, "Death Follow", deathFollowEnabled)
+end)
+
+connect(attackBox.Focused, function()
+	attackBoxStroke.Color = Color3.fromRGB(155, 158, 172)
+	attackBoxStroke.Transparency = 0.05
+end)
+
+connect(attackBox.FocusLost, function()
+	attackBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+	attackBoxStroke.Transparency = 0.35
+	if suppressAttackBoxUpdate then
+		return
 	end
 
-end))
+	local targets, valid = aimUI.validateAttackBox(true)
+	if not valid then
+		if commandMode == "Attack" then
+			cancelActiveCommand(false)
+		else
+			setAttackEnabled(false)
+		end
+		return
+	end
+	if attackEnabled and #targets > 0 then
+		beginAttackCommand(nil, targets, nil)
+	end
+end)
 
-updateToggle()
+connect(attackBox:GetPropertyChangedSignal("Text"), function()
+	if not suppressAttackBoxUpdate then
+		local _, valid = aimUI.validateAttackBox(true)
+		if not valid and commandMode == "Attack" then
+			cancelActiveCommand(false)
+		end
+	end
+end)
 
---////////////////////////////////////////////////////
--- TextChatService Detection
---////////////////////////////////////////////////////
-
-local function handleChatMessage(senderName, message)
-
+connect(attackButton.Activated, function()
+	local enabled = not attackEnabled
 	if not enabled then
-		return
-	end
-
-	if not isCommander(senderName) then
-		return
-	end
-
-	local lowerMessage =
-		string.lower(
-			tostring(message)
-		)
-
-	if lowerMessage == "-start" then
-		startLoop()
-		return
-	end
-
-	if lowerMessage == ".stop" then
-		stopLoop()
-		statusLabel.Text = "Stopped"
-		return
-	end
-end
---////////////////////////////////////////////////////
--- Modern TextChatService
---////////////////////////////////////////////////////
-
-local textChannels = TextChatService:WaitForChild("TextChannels", 10)
-
-if textChannels then
-
-	local generalChannel =
-		textChannels:FindFirstChild("RBXGeneral")
-
-	if generalChannel then
-
-		track(
-			generalChannel.MessageReceived:Connect(function(message)
-
-				if destroyed then
-					return
-				end
-
-				local source = message.TextSource
-
-				if not source then
-					return
-				end
-
-				local sender =
-					Players:GetPlayerByUserId(
-						source.UserId
-					)
-
-				if not sender then
-					return
-				end
-
-				handleChatMessage(
-					sender.Name,
-					message.Text
-				)
-
-			end)
-		)
-
-	end
-
-end
-
---////////////////////////////////////////////////////
--- Fallback For Older Chat Systems
---////////////////////////////////////////////////////
-
-local function hookPlayer(playerObj)
-
-	track(
-		playerObj.Chatted:Connect(function(message)
-
-			if destroyed then
-				return
-			end
-
-			handleChatMessage(
-				playerObj.Name,
-				message
-			)
-
-		end)
-	)
-
-end
-
-for _, plr in ipairs(Players:GetPlayers()) do
-	hookPlayer(plr)
-end
-
-track(
-	Players.PlayerAdded:Connect(function(plr)
-		hookPlayer(plr)
-	end)
-)
-
---////////////////////////////////////////////////////
--- Startup
---////////////////////////////////////////////////////
-
-statusLabel.Text = "Disabled"
-
-updateToggle()
-
---////////////////////////////////////////////////////
--- Safety Cleanup
---////////////////////////////////////////////////////
-
-track(
-	game:GetService("Players").PlayerRemoving:Connect(function()
-
-		if player == Players.LocalPlayer then
-			cleanup()
+		if commandMode == "Attack" then
+			cancelActiveCommand(false)
+		else
+			setAttackEnabled(false)
 		end
+		return
+	end
 
-	end)
-)
+	local targets, valid = aimUI.validateAttackBox(true)
+	if not valid then
+		if commandMode == "Attack" then
+			cancelActiveCommand(false)
+		else
+			setAttackEnabled(false)
+		end
+		return
+	end
 
-track(
-	gui.Destroying:Connect(function()
-		destroyed = true
-	end)
-)
+	if commandMode ~= "None" then
+		cancelActiveCommand(false)
+	end
+	setFollowEnabled(false)
+	setAttackEnabled(true)
 
-print("[Auto Command Key Presser] Loaded")
-print("Commands:")
-print("-start = begin auto key press")
-print("-stop = stop auto key press")
+	if #targets > 0 then
+		beginAttackCommand(nil, targets, nil)
+	end
+end)
 
---////////////////////////////////////////////////////
--- Finished
---////////////////////////////////////////////////////
+connect(deathAttackButton.Activated, function()
+	deathAttackEnabled = not deathAttackEnabled
+	updateToggleVisual(deathAttackButton, deathAttackStroke, "Death Attack", deathAttackEnabled)
+end)
+
+connect(toolPickerBox.Focused, function()
+	toolPickerBoxStroke.Color = Color3.fromRGB(155, 158, 172)
+	toolPickerBoxStroke.Transparency = 0.05
+end)
+
+connect(toolPickerBox.FocusLost, function()
+	toolPickerBoxStroke.Color = Color3.fromRGB(100, 102, 112)
+	toolPickerBoxStroke.Transparency = 0.35
+	pickedTool = nil
+end)
+
+connect(toolPickerBox:GetPropertyChangedSignal("Text"), function()
+	pickedTool = nil
+end)
+
+connect(toolPickerButton.Activated, function()
+	toolPickerEnabled = not toolPickerEnabled
+	pickedTool = nil
+	updateToggleVisual(toolPickerButton, toolPickerStroke, "Tool Picker", toolPickerEnabled)
+end)
+
+connect(aimUI.baddiesButton.Activated, function()
+	aimUI.baddiesEnabled = not aimUI.baddiesEnabled
+	screenGui:SetAttribute("BaddiesEnabled", aimUI.baddiesEnabled)
+	if not aimUI.baddiesEnabled then
+		aimUI.stompTargetUserId = nil
+		aimUI.stompArmed = true
+		screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
+		screenGui:SetAttribute("BaddiesDragReady", false)
+		screenGui:SetAttribute("BaddiesStompState", "Idle")
+	end
+	aimUI.updateBaddiesVisual()
+end)
+
+connect(aimUI.commandListButton.Activated, function()
+	aimUI.commandListOpen = not aimUI.commandListOpen
+	aimUI.commandListBody.Visible = aimUI.commandListOpen
+	updateToggleVisual(
+		aimUI.commandListButton,
+		aimUI.commandListStroke,
+		"Command List",
+		aimUI.commandListOpen
+	)
+	aimUI.commandListButton.Text = "Command List: "
+		.. (if aimUI.commandListOpen then "OPEN" else "CLOSED")
+end)
+
+connect(aimUI.masterButton.Activated, function()
+	aimSectionEnabled = not aimSectionEnabled
+	aimUI.toggleRow.Visible = aimSectionEnabled
+	aimUI.shiftlockButton.Visible = aimSectionEnabled
+	aimUI.slider.Visible = aimSectionEnabled
+
+	if not aimSectionEnabled then
+		lockonEnabled = false
+		predictionEnabled = false
+		snapEnabled = false
+		shiftlockEnabled = false
+		resetAimLock()
+		stopSimulatedShiftlock()
+	end
+
+	updateToggleVisual(aimUI.masterButton, aimUI.masterStroke, "Aim Section", aimSectionEnabled)
+	updateToggleVisual(aimUI.lockonButton, aimUI.lockonStroke, "Lock On", lockonEnabled)
+	updateToggleVisual(aimUI.predictionButton, aimUI.predictionStroke, "Prediction", predictionEnabled)
+	updateToggleVisual(aimUI.snapButton, aimUI.snapStroke, "Snap", snapEnabled)
+	updateToggleVisual(aimUI.shiftlockButton, aimUI.shiftlockStroke, "Shiftlock", shiftlockEnabled)
+end)
+
+connect(aimUI.lockonButton.Activated, function()
+	if not aimSectionEnabled then
+		return
+	end
+
+	lockonEnabled = not lockonEnabled
+	if lockonEnabled then
+		predictionEnabled = false
+	end
+	resetAimLock()
+
+	updateToggleVisual(aimUI.lockonButton, aimUI.lockonStroke, "Lock On", lockonEnabled)
+	updateToggleVisual(aimUI.predictionButton, aimUI.predictionStroke, "Prediction", predictionEnabled)
+end)
+
+connect(aimUI.predictionButton.Activated, function()
+	if not aimSectionEnabled then
+		return
+	end
+
+	predictionEnabled = not predictionEnabled
+	if predictionEnabled then
+		lockonEnabled = false
+	end
+	resetAimLock()
+
+	updateToggleVisual(aimUI.lockonButton, aimUI.lockonStroke, "Lock On", lockonEnabled)
+	updateToggleVisual(aimUI.predictionButton, aimUI.predictionStroke, "Prediction", predictionEnabled)
+end)
+
+connect(aimUI.snapButton.Activated, function()
+	if not aimSectionEnabled then
+		return
+	end
+	snapEnabled = not snapEnabled
+	resetAimLock()
+	updateToggleVisual(aimUI.snapButton, aimUI.snapStroke, "Snap", snapEnabled)
+end)
+
+connect(aimUI.shiftlockButton.Activated, function()
+	if not aimSectionEnabled then
+		return
+	end
+
+	shiftlockEnabled = not shiftlockEnabled
+	if not shiftlockEnabled then
+		stopSimulatedShiftlock()
+	end
+	updateToggleVisual(aimUI.shiftlockButton, aimUI.shiftlockStroke, "Shiftlock", shiftlockEnabled)
+end)
+
+connect(minimizeButton.Activated, function()
+	setMinimized(true)
+end)
+
+connect(closeButton.Activated, closeRuntime)
+
+aimUI.updateTeamList()
+aimUI.validateAttackBox(false)
+
+local cameraConnection
+
+local function applyResponsiveLayout()
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	local viewport = camera.ViewportSize
+	local isPortrait = viewport.Y > viewport.X
+	local shortSide = math.min(viewport.X, viewport.Y)
+	local compactScale = math.clamp(shortSide / 520, 0.82, 1)
+
+	local targetWidth = viewport.X * (if isPortrait then 0.9 else 0.54)
+	local targetHeight = viewport.Y * (if isPortrait then 0.38 else 0.68)
+
+	targetWidth = math.clamp(targetWidth, 250, 520)
+	targetHeight = math.clamp(targetHeight, 190, 360)
+	targetWidth = math.min(targetWidth, math.max(viewport.X - 24, 220))
+	targetHeight = math.min(targetHeight, math.max(viewport.Y - 24, 170))
+
+	window.Size = UDim2.fromOffset(math.floor(targetWidth), math.floor(targetHeight))
+
+	local headerHeight = math.max(40, math.floor(44 * compactScale))
+	local controlSize = math.max(28, math.floor(30 * compactScale))
+	topBar.Size = UDim2.new(1, 0, 0, headerHeight)
+	brand.TextSize = math.max(13, math.floor(15 * compactScale))
+	minimizeButton.Size = UDim2.fromOffset(controlSize, controlSize)
+	closeButton.Size = UDim2.fromOffset(controlSize, controlSize)
+	scrollingFrame.Position = UDim2.fromOffset(0, headerHeight)
+	scrollingFrame.Size = UDim2.new(1, 0, 1, -headerHeight)
+	scrollingFrame.ScrollBarThickness = math.max(3, math.floor(5 * compactScale))
+	minimizedTab.Size = UDim2.fromOffset(
+		math.max(108, math.floor(124 * compactScale)),
+		math.max(40, math.floor(44 * compactScale))
+	)
+	minimizedTab.TextSize = math.max(13, math.floor(15 * compactScale))
+
+	local outerPadding = math.floor(18 * compactScale)
+	padding.PaddingTop = UDim.new(0, outerPadding)
+	padding.PaddingBottom = UDim.new(0, outerPadding)
+	padding.PaddingLeft = UDim.new(0, outerPadding)
+	padding.PaddingRight = UDim.new(0, outerPadding)
+	listLayout.Padding = UDim.new(0, math.floor(12 * compactScale))
+
+	local inputHeight = math.max(48, math.floor(54 * compactScale))
+	if targetWidth >= 420 then
+		aimUI.commanderArea.Size = UDim2.new(1, 0, 0, math.max(56, math.floor(62 * compactScale)))
+		commandBox.Position = UDim2.fromScale(0, 0)
+		commandBox.Size = UDim2.new(0.54, -8, 1, 0)
+		aimUI.noFriendlyFireButton.Position = UDim2.new(0.54, 0, 0, 0)
+		aimUI.noFriendlyFireButton.Size = UDim2.new(0.22, -5, 1, 0)
+		aimUI.noFriendlyFireDescription.Position = UDim2.new(0.76, 3, 0, 0)
+		aimUI.noFriendlyFireDescription.Size = UDim2.new(0.24, -3, 1, 0)
+	else
+		aimUI.commanderArea.Size = UDim2.new(1, 0, 0, inputHeight + math.max(38, math.floor(42 * compactScale)) + 8)
+		commandBox.Position = UDim2.fromScale(0, 0)
+		commandBox.Size = UDim2.new(1, 0, 0, inputHeight)
+		aimUI.noFriendlyFireButton.Position = UDim2.new(0, 0, 0, inputHeight + 8)
+		aimUI.noFriendlyFireButton.Size = UDim2.new(0.46, -4, 0, math.max(38, math.floor(42 * compactScale)))
+		aimUI.noFriendlyFireDescription.Position = UDim2.new(0.46, 4, 0, inputHeight + 8)
+		aimUI.noFriendlyFireDescription.Size = UDim2.new(0.54, -4, 0, math.max(38, math.floor(42 * compactScale)))
+	end
+	commandBox.TextSize = math.max(13, math.floor(15 * compactScale))
+	boxPadding.PaddingLeft = UDim.new(0, math.floor(16 * compactScale))
+	boxPadding.PaddingRight = UDim.new(0, math.floor(16 * compactScale))
+	aimUI.noFriendlyFireDescription.TextSize = math.max(8, math.floor(9 * compactScale))
+	aimUI.teamArea.Size = UDim2.new(1, 0, 0, inputHeight)
+	aimUI.teamBox.Position = UDim2.fromScale(0, 0)
+	aimUI.teamBox.Size = UDim2.new(0.7, -5, 1, 0)
+	aimUI.teamAssistButton.Position = UDim2.new(0.7, 5, 0, 0)
+	aimUI.teamAssistButton.Size = UDim2.new(0.3, -5, 1, 0)
+	aimUI.teamBox.TextSize = math.max(13, math.floor(15 * compactScale))
+	aimUI.teamBoxPadding.PaddingLeft = UDim.new(0, math.floor(16 * compactScale))
+	aimUI.teamBoxPadding.PaddingRight = UDim.new(0, math.floor(16 * compactScale))
+	followBox.Size = UDim2.new(1, 0, 0, inputHeight)
+	followBox.TextSize = math.max(13, math.floor(15 * compactScale))
+	followBoxPadding.PaddingLeft = UDim.new(0, math.floor(16 * compactScale))
+	followBoxPadding.PaddingRight = UDim.new(0, math.floor(16 * compactScale))
+	toggleRow.Size = UDim2.new(1, 0, 0, math.max(44, math.floor(48 * compactScale)))
+	toggleLayout.Padding = UDim.new(0, math.max(8, math.floor(10 * compactScale)))
+	attackBox.Size = UDim2.new(1, 0, 0, math.max(48, math.floor(54 * compactScale)))
+	attackBox.TextSize = math.max(13, math.floor(15 * compactScale))
+	attackBoxPadding.PaddingLeft = UDim.new(0, math.floor(16 * compactScale))
+	attackBoxPadding.PaddingRight = UDim.new(0, math.floor(16 * compactScale))
+	attackToggleRow.Size = UDim2.new(1, 0, 0, math.max(44, math.floor(48 * compactScale)))
+	attackToggleLayout.Padding = UDim.new(0, math.max(8, math.floor(10 * compactScale)))
+	toolPickerRow.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
+	toolPickerLayout.Padding = UDim.new(0, math.max(8, math.floor(10 * compactScale)))
+	toolPickerBox.TextSize = math.max(12, math.floor(14 * compactScale))
+	toolPickerPadding.PaddingLeft = UDim.new(0, math.floor(14 * compactScale))
+	toolPickerPadding.PaddingRight = UDim.new(0, math.floor(12 * compactScale))
+
+	aimUI.masterButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
+	aimUI.toggleRow.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
+	aimUI.toggleLayout.Padding = UDim.new(0, math.max(6, math.floor(8 * compactScale)))
+	aimUI.shiftlockButton.Size = UDim2.new(1, 0, 0, math.max(38, math.floor(42 * compactScale)))
+	aimUI.slider.Size = UDim2.new(1, 0, 0, math.max(50, math.floor(54 * compactScale)))
+	aimUI.sliderLabel.TextSize = math.max(11, math.floor(12 * compactScale))
+	aimUI.baddiesButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
+	aimUI.commandListButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
+	aimUI.commandListBody.Size = UDim2.new(1, 0, 0, if targetWidth < 360 then 560 else 430)
+	aimUI.commandListBody.TextSize = math.max(10, math.floor(12 * compactScale))
+
+	hint.Size = UDim2.new(1, 0, 0, math.max(18, math.floor(20 * compactScale)))
+	hint.TextSize = math.max(12, math.floor(13 * compactScale))
+	results.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(42 * compactScale)))
+	results.TextSize = math.max(12, math.floor(14 * compactScale))
+
+	local resultPadding = math.floor(12 * compactScale)
+	resultsPadding.PaddingTop = UDim.new(0, resultPadding)
+	resultsPadding.PaddingBottom = UDim.new(0, resultPadding)
+	resultsPadding.PaddingLeft = UDim.new(0, math.floor(14 * compactScale))
+	resultsPadding.PaddingRight = UDim.new(0, math.floor(14 * compactScale))
+
+	if window.Visible then
+		window.Position = if windowHasMoved
+			then clampPosition(window, window.Position)
+			else UDim2.fromScale(0.5, 0.5)
+	elseif minimizedTab.Visible then
+		minimizedTab.Position = if tabHasMoved
+			then clampPosition(minimizedTab, minimizedTab.Position)
+			else UDim2.fromScale(0.5, 0.5)
+	end
+end
+
+local function watchCurrentCamera()
+	if cameraConnection then
+		cameraConnection:Disconnect()
+		cameraConnection = nil
+	end
+
+	local camera = workspace.CurrentCamera
+	if camera then
+		cameraConnection = connect(camera:GetPropertyChangedSignal("ViewportSize"), applyResponsiveLayout)
+	end
+
+	applyResponsiveLayout()
+end
+
+connect(workspace:GetPropertyChangedSignal("CurrentCamera"), watchCurrentCamera)
+watchCurrentCamera()
