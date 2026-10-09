@@ -219,6 +219,43 @@ aimUI.toastLayout.SortOrder = Enum.SortOrder.LayoutOrder
 aimUI.toastLayout.Padding = UDim.new(0, 8)
 aimUI.toastLayout.Parent = aimUI.toastRoot
 
+aimUI.pvpCircle = Instance.new("TextButton")
+aimUI.pvpCircle.Name = "PvpClickCircle"
+aimUI.pvpCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+aimUI.pvpCircle.Position = UDim2.new(1, -78, 0.5, 0)
+aimUI.pvpCircle.Size = UDim2.fromOffset(68, 68)
+aimUI.pvpCircle.AutoButtonColor = false
+aimUI.pvpCircle.Active = true
+aimUI.pvpCircle.BackgroundColor3 = Color3.fromRGB(255, 45, 145)
+aimUI.pvpCircle.BackgroundTransparency = 0.32
+aimUI.pvpCircle.BorderSizePixel = 0
+aimUI.pvpCircle.Font = Enum.Font.GothamBold
+aimUI.pvpCircle.Text = "DRAG\nPVP"
+aimUI.pvpCircle.TextColor3 = Color3.fromRGB(255, 245, 251)
+aimUI.pvpCircle.TextScaled = true
+aimUI.pvpCircle.Visible = false
+aimUI.pvpCircle.ZIndex = 100
+aimUI.pvpCircle.Parent = screenGui
+
+aimUI.pvpCircleCorner = Instance.new("UICorner")
+aimUI.pvpCircleCorner.CornerRadius = UDim.new(1, 0)
+aimUI.pvpCircleCorner.Parent = aimUI.pvpCircle
+
+aimUI.pvpCircleStroke = Instance.new("UIStroke")
+aimUI.pvpCircleStroke.Color = Color3.fromRGB(255, 170, 215)
+aimUI.pvpCircleStroke.Transparency = 0.05
+aimUI.pvpCircleStroke.Thickness = 3
+aimUI.pvpCircleStroke.Parent = aimUI.pvpCircle
+
+aimUI.pvpCircleAspect = Instance.new("UIAspectRatioConstraint")
+aimUI.pvpCircleAspect.AspectRatio = 1
+aimUI.pvpCircleAspect.Parent = aimUI.pvpCircle
+
+aimUI.pvpCircleTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.pvpCircleTextConstraint.MinTextSize = 9
+aimUI.pvpCircleTextConstraint.MaxTextSize = 14
+aimUI.pvpCircleTextConstraint.Parent = aimUI.pvpCircle
+
 aimUI.commanderArea = Instance.new("Frame")
 aimUI.commanderArea.Name = "CommanderArea"
 aimUI.commanderArea.LayoutOrder = 1
@@ -905,9 +942,37 @@ aimUI.baddiesTextConstraint.MinTextSize = 10
 aimUI.baddiesTextConstraint.MaxTextSize = 14
 aimUI.baddiesTextConstraint.Parent = aimUI.baddiesButton
 
+aimUI.circleButton = Instance.new("TextButton")
+aimUI.circleButton.Name = "PvpCircleToggle"
+aimUI.circleButton.LayoutOrder = 13
+aimUI.circleButton.Size = UDim2.new(1, 0, 0, 44)
+aimUI.circleButton.AutoButtonColor = false
+aimUI.circleButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.circleButton.BorderSizePixel = 0
+aimUI.circleButton.Font = Enum.Font.GothamBold
+aimUI.circleButton.Text = "PvP Circle: OFF"
+aimUI.circleButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.circleButton.TextScaled = true
+aimUI.circleButton.Parent = scrollingFrame
+
+aimUI.circleButtonCorner = Instance.new("UICorner")
+aimUI.circleButtonCorner.CornerRadius = UDim.new(0, 10)
+aimUI.circleButtonCorner.Parent = aimUI.circleButton
+
+aimUI.circleButtonStroke = Instance.new("UIStroke")
+aimUI.circleButtonStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.circleButtonStroke.Transparency = 0.12
+aimUI.circleButtonStroke.Thickness = 1
+aimUI.circleButtonStroke.Parent = aimUI.circleButton
+
+aimUI.circleButtonTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.circleButtonTextConstraint.MinTextSize = 10
+aimUI.circleButtonTextConstraint.MaxTextSize = 14
+aimUI.circleButtonTextConstraint.Parent = aimUI.circleButton
+
 aimUI.debugButton = Instance.new("TextButton")
 aimUI.debugButton.Name = "DebugPrintsToggle"
-aimUI.debugButton.LayoutOrder = 13
+aimUI.debugButton.LayoutOrder = 14
 aimUI.debugButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.debugButton.AutoButtonColor = false
 aimUI.debugButton.BackgroundColor3 = Color3.fromRGB(29, 84, 54)
@@ -935,7 +1000,7 @@ aimUI.debugTextConstraint.Parent = aimUI.debugButton
 
 aimUI.commandListButton = Instance.new("TextButton")
 aimUI.commandListButton.Name = "CommandListToggle"
-aimUI.commandListButton.LayoutOrder = 14
+aimUI.commandListButton.LayoutOrder = 15
 aimUI.commandListButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.commandListButton.AutoButtonColor = false
 aimUI.commandListButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
@@ -963,13 +1028,13 @@ aimUI.commandListTextConstraint.Parent = aimUI.commandListButton
 
 aimUI.commandListBody = Instance.new("TextLabel")
 aimUI.commandListBody.Name = "CommandList"
-aimUI.commandListBody.LayoutOrder = 15
+aimUI.commandListBody.LayoutOrder = 16
 aimUI.commandListBody.Size = UDim2.new(1, 0, 0, 410)
 aimUI.commandListBody.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
 aimUI.commandListBody.BackgroundTransparency = 0.12
 aimUI.commandListBody.BorderSizePixel = 0
 aimUI.commandListBody.Font = Enum.Font.Gotham
-aimUI.commandListBody.Text = "FOLLOW [player] — Follow a named player; with no player, follow the commander.\n\nC / F — Exact shortcuts that immediately follow the commander.\n\nCOME [player] — Same as Follow.\n\nGOTO [player] — Same as Follow.\n\nHOLD — Walk to the commander's current position and remain there.\n\nATTACK / ATK [players] — Attack comma-separated targets; with no target, use the saved Attack Textbox.\n\nHELP / H — Ignore all commander and teammate attack-safety pauses or retreats for 30 seconds.\n\nSTOP — Stop movement and attack, and disable all Follow, Attack, Death Follow, and Death Attack modes.\n\nCLEAR — Clear the saved Attack Textbox and stop its active attack.\n\nDEATH FOLLOW / NO DEATH FOLLOW — Enable or disable following again after a respawn.\n\nDEATH ATTACK / NO DEATH ATTACK — Enable or disable attacking again after a respawn.\n\nTEAM ASSIST / NO TEAM ASSIST — Enable or disable retaliation when a listed teammate is damaged.\n\nCommands are case-insensitive. Names support usernames, display names, partial names, and commas."
+aimUI.commandListBody.Text = "FOLLOW [player] — Follow a named player; with no player, follow the commander.\n\nC / F — Exact shortcuts that immediately follow the commander.\n\nCOME [player] — Same as Follow.\n\nGOTO [player] — Same as Follow.\n\nHOLD — Walk to the commander's current position and remain there.\n\nATTACK / ATK [players] — Attack comma-separated targets; with no target, use the saved Attack Textbox.\n\nHELP / H — Ignore attack safety for 30 seconds, or continuously while Baddies is ON.\n\nNO HELP — Disable the continuous Baddies help override.\n\nSTOP — Stop movement and attack, and disable all Follow, Attack, Death Follow, and Death Attack modes.\n\nCLEAR — Clear the saved Attack Textbox and stop its active attack.\n\nDEATH FOLLOW / NO DEATH FOLLOW — Enable or disable following again after a respawn.\n\nDEATH ATTACK / NO DEATH ATTACK — Enable or disable attacking again after a respawn.\n\nTEAM ASSIST / NO TEAM ASSIST — Enable or disable retaliation when a listed teammate is damaged.\n\nCommands are case-insensitive. Names support usernames, display names, partial names, and commas."
 aimUI.commandListBody.TextColor3 = Color3.fromRGB(205, 207, 216)
 aimUI.commandListBody.TextSize = 12
 aimUI.commandListBody.TextWrapped = true
@@ -991,7 +1056,7 @@ aimUI.commandListBodyPadding.Parent = aimUI.commandListBody
 
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
-hint.LayoutOrder = 16
+hint.LayoutOrder = 17
 hint.Size = UDim2.new(1, 0, 0, 20)
 hint.AutomaticSize = Enum.AutomaticSize.Y
 hint.BackgroundTransparency = 1
@@ -1005,7 +1070,7 @@ hint.Parent = scrollingFrame
 
 local results = Instance.new("TextLabel")
 results.Name = "ResolvedPlayers"
-results.LayoutOrder = 17
+results.LayoutOrder = 18
 results.Size = UDim2.new(1, 0, 0, 42)
 results.AutomaticSize = Enum.AutomaticSize.Y
 results.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
@@ -1079,6 +1144,14 @@ aimUI.attackCheckmateFriendlyDistance = 6
 aimUI.attackRetreatDistance = 6
 aimUI.attackSafetyOverrideUntil = 0
 aimUI.baddiesEnabled = false
+aimUI.baddiesHelpOverride = false
+aimUI.baddiesWeaponDistance = 6.5
+aimUI.pvpCircleEnabled = false
+aimUI.pvpCircleDragging = false
+aimUI.pvpCircleDragInput = nil
+aimUI.pvpCircleDragStart = nil
+aimUI.pvpCircleStartCenter = nil
+aimUI.pvpCircleMoved = false
 aimUI.debugEnabled = true
 aimUI.activeToasts = {}
 aimUI.debugLastAt = {}
@@ -1103,6 +1176,9 @@ aimUI.F_PRESS_INTERVAL = 0.12
 screenGui:SetAttribute("AttackSafetyState", "Idle")
 screenGui:SetAttribute("AttackSafetyOverrideRemaining", 0)
 screenGui:SetAttribute("BaddiesEnabled", false)
+screenGui:SetAttribute("BaddiesHelpContinuous", false)
+screenGui:SetAttribute("BaddiesWeaponInRange", false)
+screenGui:SetAttribute("PvpCircleEnabled", false)
 screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
 screenGui:SetAttribute("BaddiesDragReady", false)
 screenGui:SetAttribute("BaddiesStompState", "Idle")
@@ -1355,6 +1431,7 @@ updateToggleVisual(aimUI.lockonButton, aimUI.lockonStroke, "Lock On", lockonEnab
 updateToggleVisual(aimUI.predictionButton, aimUI.predictionStroke, "Prediction", predictionEnabled)
 updateToggleVisual(aimUI.snapButton, aimUI.snapStroke, "Snap", snapEnabled)
 updateToggleVisual(aimUI.shiftlockButton, aimUI.shiftlockStroke, "Shiftlock", shiftlockEnabled)
+updateToggleVisual(aimUI.circleButton, aimUI.circleButtonStroke, "PvP Circle", aimUI.pvpCircleEnabled)
 updateToggleVisual(aimUI.debugButton, aimUI.debugStroke, "Debug Prints", aimUI.debugEnabled)
 aimUI.updateBaddiesVisual()
 task.defer(function()
@@ -1605,9 +1682,12 @@ aimUI.resetAttackSafety = function()
 end
 
 aimUI.attackSafetyAction = function(targetPlayer, targetRoot, localRoot)
-	local overrideRemaining = math.max(0, aimUI.attackSafetyOverrideUntil - os.clock())
-	screenGui:SetAttribute("AttackSafetyOverrideRemaining", overrideRemaining)
-	if overrideRemaining > 0 then
+	local continuousOverride = aimUI.baddiesEnabled and aimUI.baddiesHelpOverride
+	local overrideRemaining = if continuousOverride
+		then math.huge
+		else math.max(0, aimUI.attackSafetyOverrideUntil - os.clock())
+	screenGui:SetAttribute("AttackSafetyOverrideRemaining", if continuousOverride then -1 else overrideRemaining)
+	if continuousOverride or overrideRemaining > 0 then
 		aimUI.attackSafetyPaused = false
 		aimUI.attackSafetyTargetUserId = targetPlayer.UserId
 		aimUI.attackSafetyFriendlyUserId = nil
@@ -1929,11 +2009,30 @@ end
 
 local function activateAttackTool(character, humanoid)
 	local tool = selectedTool(character)
-	if toolPickerEnabled and tool and tool.Parent ~= character then
-		humanoid:EquipTool(tool)
+	local equipped = character:FindFirstChildOfClass("Tool")
+
+	if toolPickerEnabled then
+		if not tool then
+			if equipped then
+				pcall(function()
+					equipped:Deactivate()
+					humanoid:UnequipTools()
+				end)
+			end
+			return
+		end
+
+		if equipped ~= tool or tool.Parent ~= character then
+			pcall(function()
+				humanoid:UnequipTools()
+				humanoid:EquipTool(tool)
+			end)
+		end
+		equipped = if tool.Parent == character then tool else nil
+	else
+		equipped = character:FindFirstChildOfClass("Tool")
 	end
 
-	local equipped = character:FindFirstChildOfClass("Tool")
 	if not equipped then
 		return
 	end
@@ -2073,7 +2172,21 @@ local function followPlanStep()
 			destination = safetyDestination
 		else
 			destination = targetRoot.Position
-			activateAttackTool(localCharacter, localHumanoid)
+			local attackDistance = (localRoot.Position - targetRoot.Position).Magnitude
+			local weaponInRange = not aimUI.baddiesEnabled
+				or attackDistance <= aimUI.baddiesWeaponDistance
+			screenGui:SetAttribute("BaddiesWeaponInRange", weaponInRange)
+			if weaponInRange then
+				activateAttackTool(localCharacter, localHumanoid)
+			else
+				local equippedTool = localCharacter:FindFirstChildOfClass("Tool")
+				if equippedTool then
+					pcall(function()
+						equippedTool:Deactivate()
+						localHumanoid:UnequipTools()
+					end)
+				end
+			end
 		end
 	else
 		cancelActiveCommand(false)
@@ -2106,6 +2219,7 @@ local function handleCommanderMessage(player, message)
 
 	local quickFollowCommand = normalized == "c" or normalized == "f"
 	local helpCommand = normalized == "help" or normalized == "h"
+	local noHelpCommand = normalized == "no help"
 	local teamAssistOnCommand = normalized == "team assist"
 		or normalized == "help teammates"
 	local teamAssistOffCommand = normalized == "no team assist"
@@ -2117,6 +2231,7 @@ local function handleCommanderMessage(player, message)
 		or teamAssistOnCommand
 		or teamAssistOffCommand
 		or helpCommand
+		or noHelpCommand
 	local command, targetText = string.match(normalized, "^(%a+)%s*(.-)%s*$")
 	local recognized = settingCommand
 		or quickFollowCommand
@@ -2138,10 +2253,28 @@ local function handleCommanderMessage(player, message)
 	}
 
 	if helpCommand then
-		aimUI.attackSafetyOverrideUntil = os.clock() + 30
+		aimUI.baddiesHelpOverride = aimUI.baddiesEnabled
+		aimUI.attackSafetyOverrideUntil = if aimUI.baddiesEnabled then math.huge else os.clock() + 30
 		aimUI.resetAttackSafety()
+		screenGui:SetAttribute("BaddiesHelpContinuous", aimUI.baddiesHelpOverride)
 		screenGui:SetAttribute("AttackSafetyState", "HelpOverride")
-		screenGui:SetAttribute("AttackSafetyOverrideRemaining", 30)
+		screenGui:SetAttribute("AttackSafetyOverrideRemaining", if aimUI.baddiesHelpOverride then -1 else 30)
+		aimUI.debugToast(
+			"SUCCESS",
+			"Help Override",
+			if aimUI.baddiesHelpOverride
+				then "Attack safety is disabled continuously until a commander says no help."
+				else "Attack safety is disabled for 30 seconds.",
+			"help_override",
+			0
+		)
+	elseif noHelpCommand then
+		aimUI.baddiesHelpOverride = false
+		aimUI.attackSafetyOverrideUntil = 0
+		aimUI.resetAttackSafety()
+		screenGui:SetAttribute("BaddiesHelpContinuous", false)
+		screenGui:SetAttribute("AttackSafetyOverrideRemaining", 0)
+		aimUI.debugToast("SUCCESS", "Help Override", "Continuous help override was disabled.", "no_help", 0)
 	elseif quickFollowCommand then
 		beginFollowCommand(player, player, nil)
 	elseif teamAssistOnCommand then
@@ -2340,29 +2473,64 @@ aimUI.readPvpState = function(button)
 	return nil
 end
 
-aimUI.clickRuntimeButton = function(button)
+aimUI.findCirclePvpButton = function()
+	if not aimUI.pvpCircleEnabled or not aimUI.pvpCircle.Visible then
+		return nil
+	end
+	local center = aimUI.pvpCircle.AbsolutePosition + aimUI.pvpCircle.AbsoluteSize * 0.5
+	local objects
+	local success = pcall(function()
+		objects = playerGui:GetGuiObjectsAtPosition(center.X, center.Y)
+	end)
+	if not success or not objects then
+		return nil
+	end
+	for _, object in objects do
+		if object ~= aimUI.pvpCircle
+			and object:IsA("TextButton")
+			and aimUI.readPvpState(object) ~= nil
+		then
+			return object
+		end
+	end
+	return nil
+end
+
+aimUI.clickRuntimeButton = function(button, overrideCenter)
 	if not button or not button.Parent then
 		return false, "Button disappeared before it could be clicked."
 	end
-	local center = button.AbsolutePosition + button.AbsoluteSize * 0.5
-	return pcall(function()
+	local center = overrideCenter or (button.AbsolutePosition + button.AbsoluteSize * 0.5)
+	local restoreCircle = aimUI.pvpCircleEnabled and aimUI.pvpCircle.Visible and overrideCenter ~= nil
+	if restoreCircle then
+		aimUI.pvpCircle.Visible = false
+		RunService.RenderStepped:Wait()
+	end
+	local success, reason = pcall(function()
 		aimUI.virtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
 		task.wait(0.05)
 		aimUI.virtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
 	end)
+	if restoreCircle and not isClosed then
+		aimUI.pvpCircle.Visible = true
+	end
+	return success, reason
 end
 
 aimUI.updateBaddiesPvp = function()
-	local button = aimUI.findPvpButton()
+	local usingCircle = aimUI.pvpCircleEnabled
+	local button = if usingCircle then aimUI.findCirclePvpButton() else aimUI.findPvpButton()
 	local currentState = aimUI.readPvpState(button)
 	if currentState == nil then
-		screenGui:SetAttribute("BaddiesPvPStatus", "NotFound")
+		screenGui:SetAttribute("BaddiesPvPStatus", if usingCircle then "CircleNotOverButton" else "NotFound")
 		aimUI.lastReportedPvpState = nil
 		aimUI.debugToast(
 			"WARNING",
-			"PvP Button Missing",
-			"Could not find a visible top-right button reading PvP: ON or PvP: OFF.",
-			"pvp_not_found",
+			if usingCircle then "PvP Circle Misaligned" else "PvP Button Missing",
+			if usingCircle
+				then "Drag the pink circle directly over the visible PvP: ON/OFF button."
+				else "Could not find a visible top-right button reading PvP: ON or PvP: OFF.",
+			if usingCircle then "pvp_circle_misaligned" else "pvp_not_found",
 			12
 		)
 		return
@@ -2406,7 +2574,10 @@ aimUI.updateBaddiesPvp = function()
 		return
 	end
 
-	local clicked, reason = aimUI.clickRuntimeButton(button)
+	local circleCenter = if usingCircle
+		then aimUI.pvpCircle.AbsolutePosition + aimUI.pvpCircle.AbsoluteSize * 0.5
+		else nil
+	local clicked, reason = aimUI.clickRuntimeButton(button, circleCenter)
 	if clicked then
 		aimUI.lastPvpToggleAt = os.clock()
 		screenGui:SetAttribute("BaddiesPvPStatus", "Toggling")
@@ -3405,10 +3576,82 @@ connect(toolPickerButton.Activated, function()
 	updateToggleVisual(toolPickerButton, toolPickerStroke, "Tool Picker", toolPickerEnabled)
 end)
 
+connect(aimUI.pvpCircle.InputBegan, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+	then
+		aimUI.pvpCircleDragging = true
+		aimUI.pvpCircleDragStart = input.Position
+		aimUI.pvpCircleStartCenter =
+			aimUI.pvpCircle.AbsolutePosition + aimUI.pvpCircle.AbsoluteSize * 0.5
+	end
+end)
+
+connect(aimUI.pvpCircle.InputChanged, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch
+	then
+		aimUI.pvpCircleDragInput = input
+	end
+end)
+
+connect(UserInputService.InputChanged, function(input)
+	if not aimUI.pvpCircleDragging then
+		return
+	end
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement
+		and input.UserInputType ~= Enum.UserInputType.Touch
+	then
+		return
+	end
+	local camera = workspace.CurrentCamera
+	if not camera or not aimUI.pvpCircleDragStart or not aimUI.pvpCircleStartCenter then
+		return
+	end
+	local delta = input.Position - aimUI.pvpCircleDragStart
+	local radius = aimUI.pvpCircle.AbsoluteSize.X * 0.5
+	local viewport = camera.ViewportSize
+	local x = math.clamp(aimUI.pvpCircleStartCenter.X + delta.X, radius + 4, viewport.X - radius - 4)
+	local y = math.clamp(aimUI.pvpCircleStartCenter.Y + delta.Y, radius + 4, viewport.Y - radius - 4)
+	aimUI.pvpCircle.Position = UDim2.fromOffset(x, y)
+	aimUI.pvpCircleMoved = true
+end)
+
+connect(UserInputService.InputEnded, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+	then
+		aimUI.pvpCircleDragging = false
+		aimUI.pvpCircleDragInput = nil
+	end
+end)
+
+connect(aimUI.circleButton.Activated, function()
+	aimUI.pvpCircleEnabled = not aimUI.pvpCircleEnabled
+	aimUI.pvpCircle.Visible = aimUI.pvpCircleEnabled
+	aimUI.cachedPvpButton = nil
+	aimUI.lastReportedPvpState = nil
+	screenGui:SetAttribute("PvpCircleEnabled", aimUI.pvpCircleEnabled)
+	updateToggleVisual(aimUI.circleButton, aimUI.circleButtonStroke, "PvP Circle", aimUI.pvpCircleEnabled)
+	aimUI.debugToast(
+		"SUCCESS",
+		"PvP Circle",
+		if aimUI.pvpCircleEnabled
+			then "Circle deployed. Drag it directly over the PvP: ON/OFF button."
+			else "Circle hidden; automatic PvP button detection will be used.",
+		"pvp_circle_toggle",
+		0
+	)
+end)
+
 connect(aimUI.baddiesButton.Activated, function()
 	aimUI.baddiesEnabled = not aimUI.baddiesEnabled
 	screenGui:SetAttribute("BaddiesEnabled", aimUI.baddiesEnabled)
 	if not aimUI.baddiesEnabled then
+		aimUI.baddiesHelpOverride = false
+		aimUI.attackSafetyOverrideUntil = 0
+		screenGui:SetAttribute("BaddiesHelpContinuous", false)
+		screenGui:SetAttribute("AttackSafetyOverrideRemaining", 0)
 		aimUI.stompTargetUserId = nil
 		aimUI.stompArmed = true
 		aimUI.lastReportedPvpState = nil
@@ -3553,6 +3796,11 @@ local function applyResponsiveLayout()
 	local toastWidth = math.clamp(viewport.X * (if isPortrait then 0.82 else 0.34), 220, 340)
 	aimUI.toastRoot.Size = UDim2.new(0, math.floor(toastWidth), 1, -24)
 	aimUI.maxDebugToasts = math.clamp(math.floor(math.max(viewport.Y - 24, 74) / 82), 1, 4)
+	local circleSize = math.clamp(math.floor(shortSide * 0.12), 54, 72)
+	aimUI.pvpCircle.Size = UDim2.fromOffset(circleSize, circleSize)
+	if not aimUI.pvpCircleMoved then
+		aimUI.pvpCircle.Position = UDim2.new(1, -(circleSize + 10), 0.5, 0)
+	end
 
 	local targetWidth = viewport.X * (if isPortrait then 0.9 else 0.54)
 	local targetHeight = viewport.Y * (if isPortrait then 0.38 else 0.68)
@@ -3641,6 +3889,7 @@ local function applyResponsiveLayout()
 	aimUI.slider.Size = UDim2.new(1, 0, 0, math.max(50, math.floor(54 * compactScale)))
 	aimUI.sliderLabel.TextSize = math.max(11, math.floor(12 * compactScale))
 	aimUI.baddiesButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
+	aimUI.circleButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
 	aimUI.debugButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
 	aimUI.commandListButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
 	aimUI.commandListBody.Size = UDim2.new(1, 0, 0, if targetWidth < 360 then 560 else 430)
