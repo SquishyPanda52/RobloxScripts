@@ -201,6 +201,24 @@ minimizedStroke.Parent = minimizedTab
 
 local aimUI = {}
 
+aimUI.toastRoot = Instance.new("Frame")
+aimUI.toastRoot.Name = "DebugToastRoot"
+aimUI.toastRoot.AnchorPoint = Vector2.new(1, 0)
+aimUI.toastRoot.Position = UDim2.new(1, -12, 0, 12)
+aimUI.toastRoot.Size = UDim2.new(0, 330, 1, -24)
+aimUI.toastRoot.BackgroundTransparency = 1
+aimUI.toastRoot.BorderSizePixel = 0
+aimUI.toastRoot.ClipsDescendants = true
+aimUI.toastRoot.ZIndex = 40
+aimUI.toastRoot.Parent = screenGui
+
+aimUI.toastLayout = Instance.new("UIListLayout")
+aimUI.toastLayout.FillDirection = Enum.FillDirection.Vertical
+aimUI.toastLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+aimUI.toastLayout.SortOrder = Enum.SortOrder.LayoutOrder
+aimUI.toastLayout.Padding = UDim.new(0, 8)
+aimUI.toastLayout.Parent = aimUI.toastRoot
+
 aimUI.commanderArea = Instance.new("Frame")
 aimUI.commanderArea.Name = "CommanderArea"
 aimUI.commanderArea.LayoutOrder = 1
@@ -859,9 +877,65 @@ aimUI.knobCorner = Instance.new("UICorner")
 aimUI.knobCorner.CornerRadius = UDim.new(1, 0)
 aimUI.knobCorner.Parent = aimUI.knob
 
+aimUI.baddiesButton = Instance.new("TextButton")
+aimUI.baddiesButton.Name = "BaddiesToggle"
+aimUI.baddiesButton.LayoutOrder = 12
+aimUI.baddiesButton.Size = UDim2.new(1, 0, 0, 44)
+aimUI.baddiesButton.AutoButtonColor = false
+aimUI.baddiesButton.BackgroundColor3 = Color3.fromRGB(255, 190, 214)
+aimUI.baddiesButton.BorderSizePixel = 0
+aimUI.baddiesButton.Font = Enum.Font.GothamBold
+aimUI.baddiesButton.Text = "Baddies: OFF"
+aimUI.baddiesButton.TextColor3 = Color3.fromRGB(92, 20, 58)
+aimUI.baddiesButton.TextScaled = true
+aimUI.baddiesButton.Parent = scrollingFrame
+
+aimUI.baddiesCorner = Instance.new("UICorner")
+aimUI.baddiesCorner.CornerRadius = UDim.new(0, 10)
+aimUI.baddiesCorner.Parent = aimUI.baddiesButton
+
+aimUI.baddiesStroke = Instance.new("UIStroke")
+aimUI.baddiesStroke.Color = Color3.fromRGB(255, 130, 180)
+aimUI.baddiesStroke.Transparency = 0.08
+aimUI.baddiesStroke.Thickness = 1
+aimUI.baddiesStroke.Parent = aimUI.baddiesButton
+
+aimUI.baddiesTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.baddiesTextConstraint.MinTextSize = 10
+aimUI.baddiesTextConstraint.MaxTextSize = 14
+aimUI.baddiesTextConstraint.Parent = aimUI.baddiesButton
+
+aimUI.debugButton = Instance.new("TextButton")
+aimUI.debugButton.Name = "DebugPrintsToggle"
+aimUI.debugButton.LayoutOrder = 13
+aimUI.debugButton.Size = UDim2.new(1, 0, 0, 44)
+aimUI.debugButton.AutoButtonColor = false
+aimUI.debugButton.BackgroundColor3 = Color3.fromRGB(29, 84, 54)
+aimUI.debugButton.BorderSizePixel = 0
+aimUI.debugButton.Font = Enum.Font.GothamBold
+aimUI.debugButton.Text = "Debug Prints: ON"
+aimUI.debugButton.TextColor3 = Color3.fromRGB(214, 255, 228)
+aimUI.debugButton.TextScaled = true
+aimUI.debugButton.Parent = scrollingFrame
+
+aimUI.debugCorner = Instance.new("UICorner")
+aimUI.debugCorner.CornerRadius = UDim.new(0, 10)
+aimUI.debugCorner.Parent = aimUI.debugButton
+
+aimUI.debugStroke = Instance.new("UIStroke")
+aimUI.debugStroke.Color = Color3.fromRGB(70, 190, 116)
+aimUI.debugStroke.Transparency = 0.12
+aimUI.debugStroke.Thickness = 1
+aimUI.debugStroke.Parent = aimUI.debugButton
+
+aimUI.debugTextConstraint = Instance.new("UITextSizeConstraint")
+aimUI.debugTextConstraint.MinTextSize = 10
+aimUI.debugTextConstraint.MaxTextSize = 14
+aimUI.debugTextConstraint.Parent = aimUI.debugButton
+
 aimUI.commandListButton = Instance.new("TextButton")
 aimUI.commandListButton.Name = "CommandListToggle"
-aimUI.commandListButton.LayoutOrder = 12
+aimUI.commandListButton.LayoutOrder = 14
 aimUI.commandListButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.commandListButton.AutoButtonColor = false
 aimUI.commandListButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
@@ -889,7 +963,7 @@ aimUI.commandListTextConstraint.Parent = aimUI.commandListButton
 
 aimUI.commandListBody = Instance.new("TextLabel")
 aimUI.commandListBody.Name = "CommandList"
-aimUI.commandListBody.LayoutOrder = 13
+aimUI.commandListBody.LayoutOrder = 15
 aimUI.commandListBody.Size = UDim2.new(1, 0, 0, 410)
 aimUI.commandListBody.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
 aimUI.commandListBody.BackgroundTransparency = 0.12
@@ -917,7 +991,7 @@ aimUI.commandListBodyPadding.Parent = aimUI.commandListBody
 
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
-hint.LayoutOrder = 14
+hint.LayoutOrder = 16
 hint.Size = UDim2.new(1, 0, 0, 20)
 hint.AutomaticSize = Enum.AutomaticSize.Y
 hint.BackgroundTransparency = 1
@@ -931,7 +1005,7 @@ hint.Parent = scrollingFrame
 
 local results = Instance.new("TextLabel")
 results.Name = "ResolvedPlayers"
-results.LayoutOrder = 15
+results.LayoutOrder = 17
 results.Size = UDim2.new(1, 0, 0, 42)
 results.AutomaticSize = Enum.AutomaticSize.Y
 results.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
@@ -1004,8 +1078,36 @@ aimUI.attackCheckmateTargetDistance = 4.5
 aimUI.attackCheckmateFriendlyDistance = 6
 aimUI.attackRetreatDistance = 6
 aimUI.attackSafetyOverrideUntil = 0
+aimUI.baddiesEnabled = false
+aimUI.debugEnabled = true
+aimUI.activeToasts = {}
+aimUI.debugLastAt = {}
+aimUI.toastCounter = 0
+aimUI.maxDebugToasts = 4
+aimUI.tweenService = game:GetService("TweenService")
+aimUI.lastReportedPvpState = nil
+aimUI.lastDragReady = false
+aimUI.virtualInputManager = game:GetService("VirtualInputManager")
+aimUI.lastPvpToggleAt = -math.huge
+aimUI.cachedPvpButton = nil
+aimUI.lastPvpScanAt = -math.huge
+aimUI.lastFPressAt = -math.huge
+aimUI.stompTargetUserId = nil
+aimUI.stompArmed = true
+aimUI.stompRunning = false
+aimUI.PVP_TOGGLE_COOLDOWN = 7
+aimUI.BADDIES_MELEE_DISTANCE = 5.5
+aimUI.STOMP_BURST_PRESSES = 12
+aimUI.STOMP_PRESS_INTERVAL = 0.1
+aimUI.F_PRESS_INTERVAL = 0.12
 screenGui:SetAttribute("AttackSafetyState", "Idle")
 screenGui:SetAttribute("AttackSafetyOverrideRemaining", 0)
+screenGui:SetAttribute("BaddiesEnabled", false)
+screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
+screenGui:SetAttribute("BaddiesDragReady", false)
+screenGui:SetAttribute("BaddiesStompState", "Idle")
+screenGui:SetAttribute("BaddiesLastInput", "")
+screenGui:SetAttribute("DebugPrintsEnabled", true)
 
 local OFF_BACKGROUND = Color3.fromRGB(82, 33, 40)
 local OFF_STROKE = Color3.fromRGB(170, 68, 82)
@@ -1019,6 +1121,199 @@ local function updateToggleVisual(button, buttonStroke, label, enabled)
 	button.BackgroundColor3 = if enabled then ON_BACKGROUND else OFF_BACKGROUND
 	button.TextColor3 = if enabled then ON_TEXT else OFF_TEXT
 	buttonStroke.Color = if enabled then ON_STROKE else OFF_STROKE
+end
+
+aimUI.updateBaddiesVisual = function()
+	aimUI.baddiesButton.Text = "Baddies: " .. (if aimUI.baddiesEnabled then "ON" else "OFF")
+	aimUI.baddiesButton.BackgroundColor3 = if aimUI.baddiesEnabled
+		then Color3.fromRGB(255, 45, 145)
+		else Color3.fromRGB(255, 190, 214)
+	aimUI.baddiesButton.TextColor3 = if aimUI.baddiesEnabled
+		then Color3.fromRGB(255, 245, 251)
+		else Color3.fromRGB(92, 20, 58)
+	aimUI.baddiesStroke.Color = if aimUI.baddiesEnabled
+		then Color3.fromRGB(255, 120, 190)
+		else Color3.fromRGB(255, 130, 180)
+end
+
+aimUI.removeDebugToast = function(slot)
+	local index = table.find(aimUI.activeToasts, slot)
+	if index then
+		table.remove(aimUI.activeToasts, index)
+	end
+end
+
+aimUI.dismissDebugToast = function(slot)
+	if not slot or not slot.Parent or slot:GetAttribute("Closing") then
+		return
+	end
+	slot:SetAttribute("Closing", true)
+	local card = slot:FindFirstChild("Card")
+	if not card then
+		aimUI.removeDebugToast(slot)
+		slot:Destroy()
+		return
+	end
+
+	aimUI.tweenService:Create(
+		card,
+		TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{
+			Position = UDim2.new(1, 24, 0, 0),
+			GroupTransparency = 1,
+		}
+	):Play()
+	task.delay(0.26, function()
+		aimUI.removeDebugToast(slot)
+		if slot.Parent then
+			slot:Destroy()
+		end
+	end)
+end
+
+aimUI.debugToast = function(level, titleText, message, key, cooldown)
+	if not aimUI.debugEnabled or isClosed then
+		return
+	end
+
+	level = string.upper(level or "SUCCESS")
+	local now = os.clock()
+	if key then
+		local lastAt = aimUI.debugLastAt[key] or -math.huge
+		if now - lastAt < (cooldown or 5) then
+			return
+		end
+		aimUI.debugLastAt[key] = now
+	end
+
+	if level == "ERROR" then
+		warn("[Bots+][ERROR] " .. tostring(message))
+	elseif level == "WARNING" then
+		warn("[Bots+][WARNING] " .. tostring(message))
+	else
+		print("[Bots+][SUCCESS] " .. tostring(message))
+	end
+
+	while #aimUI.activeToasts >= aimUI.maxDebugToasts do
+		local oldest = table.remove(aimUI.activeToasts, 1)
+		if oldest and oldest.Parent then
+			oldest:Destroy()
+		end
+	end
+
+	aimUI.toastCounter += 1
+	local slot = Instance.new("Frame")
+	slot.Name = "DebugToast"
+	slot.LayoutOrder = aimUI.toastCounter
+	slot.Size = UDim2.new(1, 0, 0, 74)
+	slot.BackgroundTransparency = 1
+	slot.BorderSizePixel = 0
+	slot.ZIndex = 41
+	slot.Parent = aimUI.toastRoot
+
+	local card = Instance.new("CanvasGroup")
+	card.Name = "Card"
+	card.Position = UDim2.new(1, 24, 0, 0)
+	card.Size = UDim2.fromScale(1, 1)
+	card.BackgroundColor3 = if level == "ERROR"
+		then Color3.fromRGB(104, 26, 34)
+		elseif level == "WARNING"
+		then Color3.fromRGB(105, 79, 20)
+		else Color3.fromRGB(24, 92, 56)
+	card.BackgroundTransparency = 0.16
+	card.BorderSizePixel = 0
+	card.GroupTransparency = 0
+	card.ZIndex = 42
+	card.Parent = slot
+
+	local cardCorner = Instance.new("UICorner")
+	cardCorner.CornerRadius = UDim.new(0, 11)
+	cardCorner.Parent = card
+
+	local cardStroke = Instance.new("UIStroke")
+	cardStroke.Color = if level == "ERROR"
+		then Color3.fromRGB(255, 92, 108)
+		elseif level == "WARNING"
+		then Color3.fromRGB(255, 205, 74)
+		else Color3.fromRGB(78, 225, 134)
+	cardStroke.Transparency = 0.08
+	cardStroke.Thickness = 1
+	cardStroke.Parent = card
+
+	local accent = Instance.new("Frame")
+	accent.Name = "Accent"
+	accent.Size = UDim2.new(0, 5, 1, 0)
+	accent.BackgroundColor3 = cardStroke.Color
+	accent.BorderSizePixel = 0
+	accent.ZIndex = 43
+	accent.Parent = card
+
+	local accentCorner = Instance.new("UICorner")
+	accentCorner.CornerRadius = UDim.new(0, 11)
+	accentCorner.Parent = accent
+
+	local close = Instance.new("TextButton")
+	close.Name = "Close"
+	close.AnchorPoint = Vector2.new(1, 0)
+	close.Position = UDim2.new(1, -6, 0, 6)
+	close.Size = UDim2.fromOffset(24, 24)
+	close.AutoButtonColor = false
+	close.BackgroundColor3 = Color3.fromRGB(16, 17, 20)
+	close.BackgroundTransparency = 0.35
+	close.BorderSizePixel = 0
+	close.Font = Enum.Font.GothamBold
+	close.Text = "×"
+	close.TextColor3 = Color3.fromRGB(245, 246, 250)
+	close.TextSize = 18
+	close.ZIndex = 45
+	close.Parent = card
+
+	local closeCorner = Instance.new("UICorner")
+	closeCorner.CornerRadius = UDim.new(1, 0)
+	closeCorner.Parent = close
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Position = UDim2.fromOffset(16, 8)
+	title.Size = UDim2.new(1, -52, 0, 18)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.Text = string.upper(titleText or level)
+	title.TextColor3 = cardStroke.Color
+	title.TextSize = 13
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.ZIndex = 44
+	title.Parent = card
+
+	local body = Instance.new("TextLabel")
+	body.Name = "Message"
+	body.Position = UDim2.fromOffset(16, 28)
+	body.Size = UDim2.new(1, -48, 1, -34)
+	body.BackgroundTransparency = 1
+	body.Font = Enum.Font.Gotham
+	body.Text = tostring(message)
+	body.TextColor3 = Color3.fromRGB(247, 248, 250)
+	body.TextSize = 12
+	body.TextWrapped = true
+	body.TextXAlignment = Enum.TextXAlignment.Left
+	body.TextYAlignment = Enum.TextYAlignment.Top
+	body.ZIndex = 44
+	body.Parent = card
+
+	table.insert(aimUI.activeToasts, slot)
+	close.Activated:Connect(function()
+		aimUI.dismissDebugToast(slot)
+	end)
+
+	aimUI.tweenService:Create(
+		card,
+		TweenInfo.new(0.38, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		{ Position = UDim2.fromScale(0, 0) }
+	):Play()
+
+	task.delay(4.8, function()
+		aimUI.dismissDebugToast(slot)
+	end)
 end
 
 local function clearNavigation()
@@ -1060,6 +1355,11 @@ updateToggleVisual(aimUI.lockonButton, aimUI.lockonStroke, "Lock On", lockonEnab
 updateToggleVisual(aimUI.predictionButton, aimUI.predictionStroke, "Prediction", predictionEnabled)
 updateToggleVisual(aimUI.snapButton, aimUI.snapStroke, "Snap", snapEnabled)
 updateToggleVisual(aimUI.shiftlockButton, aimUI.shiftlockStroke, "Shiftlock", shiftlockEnabled)
+updateToggleVisual(aimUI.debugButton, aimUI.debugStroke, "Debug Prints", aimUI.debugEnabled)
+aimUI.updateBaddiesVisual()
+task.defer(function()
+	aimUI.debugToast("SUCCESS", "Bots+ Ready", "Debug printing is active.", "debug_startup", 0)
+end)
 
 local function trim(value)
 	return string.match(value, "^%s*(.-)%s*$") or ""
@@ -1961,6 +2261,307 @@ task.spawn(function()
 	end
 end)
 
+aimUI.pressRuntimeKey = function(keyCode)
+	if isClosed or not aimUI.baddiesEnabled then
+		return false
+	end
+
+	local success, reason = pcall(function()
+		aimUI.virtualInputManager:SendKeyEvent(true, keyCode, false, game)
+		task.wait(0.05)
+		aimUI.virtualInputManager:SendKeyEvent(false, keyCode, false, game)
+	end)
+	if success then
+		screenGui:SetAttribute("BaddiesLastInput", keyCode.Name)
+	else
+		aimUI.debugToast(
+			"ERROR",
+			"Input Failed",
+			"Could not press " .. keyCode.Name .. ": " .. tostring(reason),
+			"key_failed_" .. keyCode.Name,
+			8
+		)
+	end
+	return success
+end
+
+aimUI.findPvpButton = function()
+	if aimUI.cachedPvpButton and aimUI.cachedPvpButton.Parent then
+		local compact = string.lower(aimUI.cachedPvpButton.Text):gsub("%s+", "")
+		if compact == "pvp:on" or compact == "pvp:off" then
+			return aimUI.cachedPvpButton
+		end
+	end
+
+	if os.clock() - aimUI.lastPvpScanAt < 0.5 then
+		return nil
+	end
+	aimUI.lastPvpScanAt = os.clock()
+
+	local camera = workspace.CurrentCamera
+	local viewport = if camera then camera.ViewportSize else Vector2.new(1920, 1080)
+	local bestButton
+	local bestScore = -math.huge
+	local fallbackButton
+	local fallbackScore = -math.huge
+
+	for _, descendant in playerGui:GetDescendants() do
+		if descendant:IsA("TextButton") and descendant.Visible then
+			local compact = string.lower(descendant.Text):gsub("%s+", "")
+			if compact == "pvp:on" or compact == "pvp:off" then
+				local center = descendant.AbsolutePosition + descendant.AbsoluteSize * 0.5
+				local score = center.X - center.Y * 0.35
+				if score > fallbackScore then
+					fallbackScore = score
+					fallbackButton = descendant
+				end
+				if center.X >= viewport.X * 0.5 and center.Y <= viewport.Y * 0.5 and score > bestScore then
+					bestScore = score
+					bestButton = descendant
+				end
+			end
+		end
+	end
+
+	aimUI.cachedPvpButton = bestButton or fallbackButton
+	return aimUI.cachedPvpButton
+end
+
+aimUI.readPvpState = function(button)
+	if not button or not button.Parent then
+		return nil
+	end
+	local compact = string.lower(button.Text):gsub("%s+", "")
+	if compact == "pvp:on" then
+		return true
+	elseif compact == "pvp:off" then
+		return false
+	end
+	return nil
+end
+
+aimUI.clickRuntimeButton = function(button)
+	if not button or not button.Parent then
+		return false, "Button disappeared before it could be clicked."
+	end
+	local center = button.AbsolutePosition + button.AbsoluteSize * 0.5
+	return pcall(function()
+		aimUI.virtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+		task.wait(0.05)
+		aimUI.virtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+	end)
+end
+
+aimUI.updateBaddiesPvp = function()
+	local button = aimUI.findPvpButton()
+	local currentState = aimUI.readPvpState(button)
+	if currentState == nil then
+		screenGui:SetAttribute("BaddiesPvPStatus", "NotFound")
+		aimUI.lastReportedPvpState = nil
+		aimUI.debugToast(
+			"WARNING",
+			"PvP Button Missing",
+			"Could not find a visible top-right button reading PvP: ON or PvP: OFF.",
+			"pvp_not_found",
+			12
+		)
+		return
+	end
+
+	if aimUI.lastReportedPvpState ~= currentState then
+		aimUI.lastReportedPvpState = currentState
+		aimUI.debugToast(
+			"SUCCESS",
+			"PvP Detected",
+			"Found the PvP button. Current state: " .. (if currentState then "ON" else "OFF") .. ".",
+			"pvp_state_" .. tostring(currentState),
+			2
+		)
+	end
+
+	local wantsPvp = commandMode == "Attack" and attackEnabled
+	if not wantsPvp then
+		local _, humanoid = getLivingCharacter(localPlayer)
+		if not humanoid or humanoid.Health < humanoid.MaxHealth - 0.01 then
+			screenGui:SetAttribute("BaddiesPvPStatus", "WaitingForFullHealth")
+			aimUI.debugToast(
+				"WARNING",
+				"PvP Waiting",
+				"PvP will turn off after your health is completely full.",
+				"pvp_waiting_health",
+				10
+			)
+			return
+		end
+	end
+
+	if currentState == wantsPvp then
+		screenGui:SetAttribute("BaddiesPvPStatus", if wantsPvp then "ON" else "OFF")
+		return
+	end
+
+	local remaining = aimUI.PVP_TOGGLE_COOLDOWN - (os.clock() - aimUI.lastPvpToggleAt)
+	if remaining > 0 then
+		screenGui:SetAttribute("BaddiesPvPStatus", string.format("Cooldown %.1f", remaining))
+		return
+	end
+
+	local clicked, reason = aimUI.clickRuntimeButton(button)
+	if clicked then
+		aimUI.lastPvpToggleAt = os.clock()
+		screenGui:SetAttribute("BaddiesPvPStatus", "Toggling")
+		aimUI.debugToast(
+			"SUCCESS",
+			"PvP Toggle",
+			"Requested PvP " .. (if wantsPvp then "ON" else "OFF") .. ".",
+			"pvp_toggle_" .. tostring(wantsPvp),
+			2
+		)
+	else
+		aimUI.cachedPvpButton = nil
+		screenGui:SetAttribute("BaddiesPvPStatus", "InputFailed")
+		aimUI.debugToast(
+			"ERROR",
+			"PvP Toggle Failed",
+			"Found the PvP button but could not click it: " .. tostring(reason),
+			"pvp_input_failed",
+			8
+		)
+	end
+end
+
+aimUI.getBaddiesAttackSnapshot = function()
+	if commandMode ~= "Attack" or not attackEnabled or not attackTarget then
+		return nil
+	end
+	local _, localHumanoid, localRoot = getLivingCharacter(localPlayer)
+	local _, targetHumanoid, targetRoot = getLivingCharacter(attackTarget)
+	if not localHumanoid or not localRoot or not targetHumanoid or not targetRoot then
+		return nil
+	end
+	return {
+		player = attackTarget,
+		humanoid = targetHumanoid,
+		root = targetRoot,
+		distance = (targetRoot.Position - localRoot.Position).Magnitude,
+	}
+end
+
+aimUI.isDragReady = function()
+	local generalGui = playerGui:FindFirstChild("GeneralGUI")
+	if not generalGui then
+		return false, "GeneralGUI was not found."
+	end
+	local bars = generalGui:FindFirstChild("bars")
+	if not bars then
+		return false, "GeneralGUI.bars was not found."
+	end
+	local charge = bars:FindFirstChild("jaladaDePeloCharge")
+	if not charge then
+		return false, "GeneralGUI.bars.jaladaDePeloCharge was not found."
+	end
+	local label = charge:FindFirstChild("Label")
+	if not label or not label:IsA("TextLabel") then
+		return false, "The charge Label TextLabel was not found."
+	end
+	if label.Text:gsub("%s+", "") == "100/100" then
+		return true, "Ready"
+	end
+	return false, "Charging"
+end
+
+aimUI.updateBaddiesCombat = function()
+	local snapshot = aimUI.getBaddiesAttackSnapshot()
+	if not snapshot then
+		aimUI.stompTargetUserId = nil
+		aimUI.stompArmed = true
+		screenGui:SetAttribute("BaddiesDragReady", false)
+		screenGui:SetAttribute("BaddiesStompState", "Idle")
+		return
+	end
+
+	if aimUI.stompTargetUserId ~= snapshot.player.UserId then
+		aimUI.stompTargetUserId = snapshot.player.UserId
+		aimUI.stompArmed = true
+	end
+
+	local dragReady, dragState = aimUI.isDragReady()
+	screenGui:SetAttribute("BaddiesDragReady", dragReady)
+	if dragState ~= "Ready" and dragState ~= "Charging" then
+		aimUI.debugToast("WARNING", "Charge UI Missing", dragState, "charge_ui_missing", 12)
+	elseif dragReady and not aimUI.lastDragReady then
+		aimUI.debugToast("SUCCESS", "Drag Ready", "Charge reached 100/100; F input is ready.", "drag_ready", 2)
+	end
+	aimUI.lastDragReady = dragReady
+	if dragReady
+		and snapshot.distance <= aimUI.BADDIES_MELEE_DISTANCE
+		and os.clock() - aimUI.lastFPressAt >= aimUI.F_PRESS_INTERVAL
+	then
+		aimUI.lastFPressAt = os.clock()
+		task.spawn(aimUI.pressRuntimeKey, Enum.KeyCode.F)
+	end
+
+	local lowHealth = snapshot.humanoid.Health <= math.max(10, snapshot.humanoid.MaxHealth * 0.2)
+	local stompOpportunity = lowHealth and snapshot.distance <= aimUI.BADDIES_MELEE_DISTANCE
+	if not stompOpportunity then
+		aimUI.stompArmed = true
+		screenGui:SetAttribute("BaddiesStompState", "Waiting")
+		return
+	end
+	if not aimUI.stompArmed or aimUI.stompRunning then
+		return
+	end
+
+	aimUI.stompArmed = false
+	aimUI.stompRunning = true
+	screenGui:SetAttribute("BaddiesStompState", "PressingE")
+	aimUI.debugToast(
+		"SUCCESS",
+		"Finisher Opportunity",
+		"Target is very low and within melee range; starting the E input burst.",
+		"stomp_" .. tostring(snapshot.player.UserId),
+		5
+	)
+	task.spawn(function()
+		for _ = 1, aimUI.STOMP_BURST_PRESSES do
+			if isClosed or not aimUI.baddiesEnabled or commandMode ~= "Attack"
+				or not attackEnabled or attackTarget ~= snapshot.player
+				or snapshot.humanoid.Health <= 0
+			then
+				break
+			end
+
+			local _, _, localRoot = getLivingCharacter(localPlayer)
+			local _, targetHumanoid, targetRoot = getLivingCharacter(snapshot.player)
+			if not localRoot or not targetHumanoid or not targetRoot
+				or targetHumanoid.Health > math.max(10, targetHumanoid.MaxHealth * 0.2)
+				or (targetRoot.Position - localRoot.Position).Magnitude > aimUI.BADDIES_MELEE_DISTANCE
+			then
+				break
+			end
+
+			aimUI.pressRuntimeKey(Enum.KeyCode.E)
+			task.wait(aimUI.STOMP_PRESS_INTERVAL)
+		end
+		aimUI.stompRunning = false
+		screenGui:SetAttribute("BaddiesStompState", "Spent")
+	end)
+end
+
+task.spawn(function()
+	while not isClosed do
+		if aimUI.baddiesEnabled then
+			aimUI.updateBaddiesPvp()
+			aimUI.updateBaddiesCombat()
+		else
+			screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
+			screenGui:SetAttribute("BaddiesDragReady", false)
+			screenGui:SetAttribute("BaddiesStompState", "Idle")
+		end
+		task.wait(0.1)
+	end
+end)
+
 local function resetAimLock()
 	aimLastTargetRoot = nil
 	aimTransitionActive = false
@@ -2804,6 +3405,44 @@ connect(toolPickerButton.Activated, function()
 	updateToggleVisual(toolPickerButton, toolPickerStroke, "Tool Picker", toolPickerEnabled)
 end)
 
+connect(aimUI.baddiesButton.Activated, function()
+	aimUI.baddiesEnabled = not aimUI.baddiesEnabled
+	screenGui:SetAttribute("BaddiesEnabled", aimUI.baddiesEnabled)
+	if not aimUI.baddiesEnabled then
+		aimUI.stompTargetUserId = nil
+		aimUI.stompArmed = true
+		aimUI.lastReportedPvpState = nil
+		aimUI.lastDragReady = false
+		screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
+		screenGui:SetAttribute("BaddiesDragReady", false)
+		screenGui:SetAttribute("BaddiesStompState", "Idle")
+	end
+	aimUI.updateBaddiesVisual()
+	aimUI.debugToast(
+		"SUCCESS",
+		"Baddies",
+		"Baddies mode is now " .. (if aimUI.baddiesEnabled then "ON." else "OFF."),
+		"baddies_toggle",
+		0
+	)
+end)
+
+connect(aimUI.debugButton.Activated, function()
+	aimUI.debugEnabled = not aimUI.debugEnabled
+	screenGui:SetAttribute("DebugPrintsEnabled", aimUI.debugEnabled)
+	updateToggleVisual(aimUI.debugButton, aimUI.debugStroke, "Debug Prints", aimUI.debugEnabled)
+	if aimUI.debugEnabled then
+		aimUI.debugToast("SUCCESS", "Debugging Enabled", "On-screen debug printing is active.", "debug_enabled", 0)
+	else
+		for _, slot in aimUI.activeToasts do
+			if slot and slot.Parent then
+				slot:Destroy()
+			end
+		end
+		table.clear(aimUI.activeToasts)
+	end
+end)
+
 connect(aimUI.commandListButton.Activated, function()
 	aimUI.commandListOpen = not aimUI.commandListOpen
 	aimUI.commandListBody.Visible = aimUI.commandListOpen
@@ -2911,6 +3550,9 @@ local function applyResponsiveLayout()
 	local isPortrait = viewport.Y > viewport.X
 	local shortSide = math.min(viewport.X, viewport.Y)
 	local compactScale = math.clamp(shortSide / 520, 0.82, 1)
+	local toastWidth = math.clamp(viewport.X * (if isPortrait then 0.82 else 0.34), 220, 340)
+	aimUI.toastRoot.Size = UDim2.new(0, math.floor(toastWidth), 1, -24)
+	aimUI.maxDebugToasts = math.clamp(math.floor(math.max(viewport.Y - 24, 74) / 82), 1, 4)
 
 	local targetWidth = viewport.X * (if isPortrait then 0.9 else 0.54)
 	local targetHeight = viewport.Y * (if isPortrait then 0.38 else 0.68)
@@ -2998,6 +3640,8 @@ local function applyResponsiveLayout()
 	aimUI.shiftlockButton.Size = UDim2.new(1, 0, 0, math.max(38, math.floor(42 * compactScale)))
 	aimUI.slider.Size = UDim2.new(1, 0, 0, math.max(50, math.floor(54 * compactScale)))
 	aimUI.sliderLabel.TextSize = math.max(11, math.floor(12 * compactScale))
+	aimUI.baddiesButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
+	aimUI.debugButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
 	aimUI.commandListButton.Size = UDim2.new(1, 0, 0, math.max(40, math.floor(44 * compactScale)))
 	aimUI.commandListBody.Size = UDim2.new(1, 0, 0, if targetWidth < 360 then 560 else 430)
 	aimUI.commandListBody.TextSize = math.max(10, math.floor(12 * compactScale))
