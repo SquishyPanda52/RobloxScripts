@@ -35,17 +35,21 @@ local function disconnectConnections(connections)
 			connection:Disconnect()
 		end)
 	end
+
 	table.clear(connections)
 end
 
--- Robust Animation ID Extraction with Retry Fallback
+-- Block-animation ID extraction
 local targetBlockId = ""
+
 task.spawn(function()
 	while not isClosed and targetBlockId == "" do
 		pcall(function()
 			local fistAnims = ReplicatedStorage:FindFirstChild("FistAnims")
+
 			if fistAnims then
 				local animObj = fistAnims:FindFirstChild("block")
+
 				if animObj and animObj:IsA("Animation") then
 					targetBlockId = string.lower(animObj.AnimationId)
 				end
@@ -63,6 +67,7 @@ end)
 ----------------------------------------------------
 -- GUI CREATION
 ----------------------------------------------------
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "CombatESP_Gui"
 screenGui.ResetOnSpawn = false
@@ -91,7 +96,7 @@ if not parentSuccess then
 	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Main Draggable Frame
+-- Main draggable frame
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0, 160, 0, 95)
@@ -111,7 +116,7 @@ mainStroke.Color = Color3.fromRGB(45, 45, 55)
 mainStroke.Thickness = 1.5
 mainStroke.Parent = mainFrame
 
--- Title Bar
+-- Title bar
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 32)
 titleBar.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
@@ -140,7 +145,7 @@ titleText.Text = "BLOCK ESP"
 titleText.TextXAlignment = Enum.TextXAlignment.Left
 titleText.Parent = titleBar
 
--- Minimize Button
+-- Minimize button
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Name = "MinimizeButton"
 minimizeButton.Size = UDim2.new(0, 24, 0, 24)
@@ -157,7 +162,7 @@ local minCorner = Instance.new("UICorner")
 minCorner.CornerRadius = UDim.new(0, 6)
 minCorner.Parent = minimizeButton
 
--- Close Button
+-- Close button
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "CloseButton"
 closeButton.Size = UDim2.new(0, 24, 0, 24)
@@ -174,7 +179,7 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 6)
 closeCorner.Parent = closeButton
 
--- Content Container
+-- Content container
 local contentHolder = Instance.new("Frame")
 contentHolder.Size = UDim2.new(1, 0, 1, -32)
 contentHolder.Position = UDim2.new(0, 0, 0, 32)
@@ -191,7 +196,7 @@ local uiPadding = Instance.new("UIPadding")
 uiPadding.PaddingTop = UDim.new(0, 10)
 uiPadding.Parent = contentHolder
 
--- ESP Toggle Button
+-- ESP toggle
 local espButton = Instance.new("TextButton")
 espButton.Name = "EspToggleButton"
 espButton.Size = UDim2.new(1, -16, 0, 30)
@@ -207,18 +212,13 @@ local espCorner = Instance.new("UICorner")
 espCorner.CornerRadius = UDim.new(0, 6)
 espCorner.Parent = espButton
 
--- Keep the cursor visible and clickable while the UI exists.
+-- Show the cursor once without forcing it every frame.
 UserInputService.MouseIconEnabled = true
 
-rememberConnection(RunService.RenderStepped:Connect(function()
-	if not isClosed and not UserInputService.MouseIconEnabled then
-		UserInputService.MouseIconEnabled = true
-	end
-end))
+----------------------------------------------------
+-- RED BLOCK-ONLY ESP
+----------------------------------------------------
 
-----------------------------------------------------
--- RED BLOCK-ONLY ESP LOGIC
-----------------------------------------------------
 local function removeHighlightForPlayer(player)
 	local data = activeHighlights[player]
 
@@ -262,15 +262,6 @@ local function setupHighlight(player, character)
 	local connections = {}
 	targetBlockTimes[player] = 0
 
-	table.insert(connections, RunService.Heartbeat:Connect(function()
-		if isClosed or not highlight.Parent then
-			return
-		end
-
-		local isBlocking = os.clock() < (targetBlockTimes[player] or 0)
-		highlight.Enabled = espEnabled and isBlocking
-	end))
-
 	local humanoid = character:WaitForChild("Humanoid", 5)
 
 	if isClosed or not character.Parent then
@@ -297,12 +288,15 @@ local function setupHighlight(player, character)
 					or string.find(animName, "guard", 1, true) ~= nil
 
 				if isBlock then
-					local animLength = track.Length > 0 and track.Length or 1.5
+					local animationLength =
+						track.Length > 0 and track.Length or 1.5
 
 					targetBlockTimes[player] = math.max(
 						targetBlockTimes[player] or 0,
-						os.clock() + animLength
+						os.clock() + animationLength
 					)
+
+					highlight.Enabled = espEnabled
 				end
 			end))
 		end
@@ -359,9 +353,49 @@ for _, player in ipairs(Players:GetPlayers()) do
 	trackPlayer(player)
 end
 
+-- One throttled updater handles every highlight.
+-- It only runs ten times per second.
+local lastEspUpdate = 0
+
+rememberConnection(RunService.Heartbeat:Connect(function()
+	if isClosed then
+		return
+	end
+
+	local now = os.clock()
+
+	if now - lastEspUpdate < 0.1 then
+		return
+	end
+
+	lastEspUpdate = now
+
+	local stalePlayers = nil
+
+	for player, data in pairs(activeHighlights) do
+		local highlight = data.highlight
+
+		if highlight and highlight.Parent then
+			highlight.Enabled =
+				espEnabled
+				and now < (targetBlockTimes[player] or 0)
+		else
+			stalePlayers = stalePlayers or {}
+			table.insert(stalePlayers, player)
+		end
+	end
+
+	if stalePlayers then
+		for _, player in ipairs(stalePlayers) do
+			removeHighlightForPlayer(player)
+		end
+	end
+end))
+
 ----------------------------------------------------
 -- UI CONTROLS
 ----------------------------------------------------
+
 rememberConnection(minimizeButton.MouseButton1Click:Connect(function()
 	if isClosed then
 		return
@@ -386,11 +420,13 @@ rememberConnection(espButton.MouseButton1Click:Connect(function()
 	end
 
 	espEnabled = not espEnabled
-	espButton.Text = espEnabled and "Block ESP: ON" or "Block ESP: OFF"
+	espButton.Text =
+		espEnabled and "Block ESP: ON" or "Block ESP: OFF"
 
-	espButton.BackgroundColor3 = espEnabled
-		and Color3.fromRGB(40, 160, 90)
-		or Color3.fromRGB(180, 50, 50)
+	espButton.BackgroundColor3 =
+		espEnabled
+			and Color3.fromRGB(40, 160, 90)
+			or Color3.fromRGB(180, 50, 50)
 
 	if not espEnabled then
 		for _, data in pairs(activeHighlights) do
@@ -402,8 +438,9 @@ rememberConnection(espButton.MouseButton1Click:Connect(function()
 end))
 
 ----------------------------------------------------
--- COMPLETE RUNTIME CLEANUP
+-- COMPLETE CLEANUP
 ----------------------------------------------------
+
 local function shutdown()
 	if isClosed then
 		return
@@ -436,7 +473,8 @@ local function shutdown()
 
 	table.clear(targetBlockTimes)
 
-	UserInputService.MouseIconEnabled = previousMouseIconEnabled
+	UserInputService.MouseIconEnabled =
+		previousMouseIconEnabled
 
 	if screenGui and screenGui.Parent then
 		screenGui:Destroy()
@@ -451,4 +489,6 @@ local function shutdown()
 	end)
 end
 
-rememberConnection(closeButton.MouseButton1Click:Connect(shutdown))
+rememberConnection(
+	closeButton.MouseButton1Click:Connect(shutdown)
+)
