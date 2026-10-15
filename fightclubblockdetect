@@ -1,0 +1,295 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+ 
+local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+	task.wait(0.1)
+	LocalPlayer = Players.LocalPlayer
+end
+ 
+-- Configurations
+local espEnabled = true
+local isMinimized = false
+ 
+local COLOR_DEFAULT = Color3.fromRGB(130, 180, 255)  -- Clean Ice Blue
+local COLOR_BLOCKING = Color3.fromRGB(255, 95, 95)   -- Vibrant Danger Red
+local TRANSPARENCY = 0.65
+ 
+local activeHighlights = {}
+local targetBlockTimes = {}
+ 
+-- Robust Animation ID Extraction with Retry Fallback
+local targetBlockId = ""
+task.spawn(function()
+	while targetBlockId == "" do
+		pcall(function()
+			local fistAnims = ReplicatedStorage:FindFirstChild("FistAnims")
+			if fistAnims then
+				local animObj = fistAnims:FindFirstChild("block")
+				if animObj and animObj:IsA("Animation") then
+					targetBlockId = string.lower(animObj.AnimationId)
+				end
+			end
+		end)
+		if targetBlockId ~= "" then break end
+		task.wait(1)
+	end
+end)
+ 
+----------------------------------------------------
+-- GUI CREATION (Clean Minimalist ESP Hub)
+----------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CombatESP_Gui"
+screenGui.ResetOnSpawn = false
+ 
+local parentSuccess = false
+pcall(function()
+	if syn and typeof(syn.protect_gui) == "function" then
+		syn.protect_gui(screenGui)
+		screenGui.Parent = CoreGui
+		parentSuccess = true
+	elseif typeof(gethui) == "function" then
+		screenGui.Parent = gethui()
+		parentSuccess = true
+	end
+end)
+ 
+if not parentSuccess then
+	pcall(function()
+		screenGui.Parent = CoreGui
+		parentSuccess = true
+	end)
+end
+ 
+if not parentSuccess then
+	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+ 
+-- Main Draggable Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 160, 0, 95)
+mainFrame.Position = UDim2.new(0.02, 0, 0.4, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+ 
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 10)
+mainCorner.Parent = mainFrame
+ 
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(45, 45, 55)
+mainStroke.Thickness = 1.5
+mainStroke.Parent = mainFrame
+ 
+-- Title Bar / Header
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 32)
+titleBar.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+ 
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 10)
+titleCorner.Parent = titleBar
+ 
+local titleCover = Instance.new("Frame")
+titleCover.Size = UDim2.new(1, 0, 0, 6)
+titleCover.Position = UDim2.new(0, 0, 1, -6)
+titleCover.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+titleCover.BorderSizePixel = 0
+titleCover.Parent = titleBar
+ 
+local titleText = Instance.new("TextLabel")
+titleText.Size = UDim2.new(1, -35, 1, 0)
+titleText.Position = UDim2.new(0, 10, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.TextColor3 = Color3.fromRGB(235, 235, 245)
+titleText.Font = Enum.Font.GothamBold
+titleText.TextSize = 12
+titleText.Text = "BLOCK ESP"
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Parent = titleBar
+ 
+-- Minimize Button (-)
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 24, 0, 24)
+minimizeButton.Position = UDim2.new(1, -26, 0, 4)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+minimizeButton.TextColor3 = Color3.fromRGB(200, 200, 210)
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.TextSize = 13
+minimizeButton.Text = "-"
+minimizeButton.Parent = titleBar
+ 
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minimizeButton
+ 
+-- Content Container
+local contentHolder = Instance.new("Frame")
+contentHolder.Size = UDim2.new(1, 0, 1, -32)
+contentHolder.Position = UDim2.new(0, 0, 0, 32)
+contentHolder.BackgroundTransparency = 1
+contentHolder.Parent = mainFrame
+ 
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Padding = UDim.new(0, 8)
+uiListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+uiListLayout.Parent = contentHolder
+ 
+local uiPadding = Instance.new("UIPadding")
+uiPadding.PaddingTop = UDim.new(0, 10)
+uiPadding.Parent = contentHolder
+ 
+-- ESP Toggle Button
+local espButton = Instance.new("TextButton")
+espButton.Size = UDim2.new(1, -16, 0, 30)
+espButton.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+espButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+espButton.Font = Enum.Font.GothamSemibold
+espButton.TextSize = 12
+espButton.Text = "Block ESP: ON"
+espButton.Parent = contentHolder
+ 
+local espCorner = Instance.new("UICorner")
+espCorner.CornerRadius = UDim.new(0, 6)
+espCorner.Parent = espButton
+ 
+----------------------------------------------------
+-- MINIMIZE / EXPAND LOGIC
+----------------------------------------------------
+minimizeButton.MouseButton1Click:Connect(function()
+	isMinimized = not isMinimized
+	if isMinimized then
+		contentHolder.Visible = false
+		mainFrame.Size = UDim2.new(0, 160, 0, 32)
+		minimizeButton.Text = "+"
+	else
+		contentHolder.Visible = true
+		mainFrame.Size = UDim2.new(0, 160, 0, 95)
+		minimizeButton.Text = "-"
+	end
+end)
+ 
+----------------------------------------------------
+-- PERSISTENT BLOCK ESP LOGIC
+----------------------------------------------------
+local function removeHighlightForPlayer(player)
+	if activeHighlights[player] then
+		pcall(function()
+			if activeHighlights[player].highlight and activeHighlights[player].highlight.Parent then
+				activeHighlights[player].highlight:Destroy()
+			end
+			for _, conn in ipairs(activeHighlights[player].connections or {}) do
+				conn:Disconnect()
+			end
+		end)
+		activeHighlights[player] = nil
+	end
+	targetBlockTimes[player] = nil
+end
+ 
+local function setupHighlight(player, character)
+	if player == LocalPlayer then return end
+	removeHighlightForPlayer(player)
+ 
+	if not character then return end
+ 
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "PlayerESP"
+	highlight.Adornee = character
+	highlight.FillColor = COLOR_DEFAULT
+	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+	highlight.FillTransparency = TRANSPARENCY
+	highlight.OutlineTransparency = TRANSPARENCY + 0.1
+	highlight.Enabled = espEnabled
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+ 
+	pcall(function()
+		highlight.Parent = character
+	end)
+ 
+	local connections = {}
+	targetBlockTimes[player] = 0
+ 
+	table.insert(connections, RunService.Heartbeat:Connect(function()
+		if not highlight.Parent then return end
+		local endTime = targetBlockTimes[player] or 0
+		if os.clock() < endTime then
+			highlight.FillColor = COLOR_BLOCKING
+		else
+			highlight.FillColor = COLOR_DEFAULT
+		end
+	end))
+ 
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if humanoid then
+		local animator = humanoid:WaitForChild("Animator", 5)
+		if animator then
+			table.insert(connections, animator.AnimationPlayed:Connect(function(track)
+				if not track or not track.Animation then return end
+				local animId = string.lower(track.Animation.AnimationId)
+				local animName = string.lower(track.Animation.Name)
+ 
+				local isBlock = false
+				if targetBlockId ~= "" and animId == targetBlockId then
+					isBlock = true
+				elseif string.find(animName, "block") or string.find(animName, "guard") then
+					isBlock = true
+				end
+ 
+				if isBlock then
+					local animLength = track.Length > 0 and track.Length or 1.5
+					targetBlockTimes[player] = math.max(targetBlockTimes[player] or 0, os.clock() + animLength)
+				end
+			end))
+		end
+	end
+ 
+	activeHighlights[player] = {
+		highlight = highlight,
+		connections = connections
+	}
+end
+ 
+local function trackPlayer(player)
+	if player == LocalPlayer then return end
+	player.CharacterAdded:Connect(function(character)
+		task.wait(0.2)
+		setupHighlight(player, character)
+	end)
+	player.CharacterRemoving:Connect(function()
+		removeHighlightForPlayer(player)
+	end)
+	if player.Character then
+		task.spawn(function()
+			setupHighlight(player, player.Character)
+		end)
+	end
+end
+ 
+Players.PlayerAdded:Connect(trackPlayer)
+Players.PlayerRemoving:Connect(removeHighlightForPlayer)
+ 
+for _, player in ipairs(Players:GetPlayers()) do
+	trackPlayer(player)
+end
+ 
+espButton.MouseButton1Click:Connect(function()
+	espEnabled = not espEnabled
+	espButton.Text = espEnabled and "Block ESP: ON" or "Block ESP: OFF"
+	espButton.BackgroundColor3 = espEnabled and Color3.fromRGB(40, 160, 90) or Color3.fromRGB(180, 50, 50)
+	for _, data in pairs(activeHighlights) do
+		if data.highlight and data.highlight.Parent then
+			data.highlight.Enabled = espEnabled
+		end
+	end
+end)
