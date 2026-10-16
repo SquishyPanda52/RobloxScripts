@@ -1,7 +1,8 @@
 -- TornadoScript | one runtime LocalScript in StarterPlayerScripts.
 -- Creates UI only in PlayerGui. Does not create anything in Workspace.
 -- Direct LOCAL movement is independent of mass. It does not grant server authority.
--- OFF / X / respawn restores each captured assembly's starting pose and collision flags.
+-- Return Speed controls OFF transitions; X cleans up immediately.
+-- Collision, touch, anchoring, and collision groups are NEVER changed.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -18,8 +19,15 @@ if oldGui then
 	oldGui:Destroy()
 end
 
-local state = { enabled = false, closed = false, minimized = false }
-local settings = { speed = 80, landing = 3, range = 150 }
+local state = { enabled = false, closed = false, minimized = false, rotation = false, spin = false, selection = false }
+local settings = { speed = 80, landing = 3, range = 150, returnSpeed = 0, orbitSpeed = 60, orbitRadius = 12 }
+local selected, groups, registry = {}, {}, {}
+local objectIds = setmetatable({}, { __mode = "k" })
+local nextId = 0
+local resolvedTargets, targetErrors = {}, {}
+local orbitPhase = 0
+local targetClock, inventoryClock = 1, 1
+local refreshInventory, drawInventory, drawGroups
 local connections = {}
 local controlled = {}
 local scanClock = 0
@@ -55,8 +63,8 @@ local function protectedPart(part)
 	return false
 end
 
-local function characterRoot()
-	local character = player.Character
+local function characterRoot(targetPlayer)
+	local character = (targetPlayer or player).Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if humanoid and humanoid.Health > 0 and root and root:IsA("BasePart") then
@@ -65,58 +73,106 @@ local function characterRoot()
 	return nil
 end
 
-local function restore(root)
+local function validAssembly(root, parts)
+	if not root:IsDescendantOf(workspace) or root.Anchored or root.AssemblyRootPart ~= root or protectedPart(root) then return false end
+	for _, part in ipairs(parts) do
+		if not part:IsDescendantOf(workspace) or part.Anchored or part.AssemblyRootPart ~= root or protectedPart(part) then return false end
+	end
+	return true
+end
+
+local function assemblyParts(root)
+	local parts = root:GetConnectedParts(true)
+	if not table.find(parts, root) then table.insert(parts, root) end
+	return validAssembly(root, parts) and parts or nil
+end
+
+local function writePose(root, pose)
+	-- Existing collision flags stay untouched, even while returning or spinning.
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	root.CFrame = pose
+end
+
+local function restoreInstant(root)
 	local record = controlled[root]
 	if not record then return end
 	controlled[root] = nil
-	-- Restore the starting pose before enabling collisions; never drop a pile
-	-- of overlapping parts on the player. Do not unanchor anything.
-	if root.Parent and not root.Anchored and root.AssemblyRootPart == root then
-		pcall(function()
-			root.CFrame = record.startCFrame
-			root.AssemblyLinearVelocity = Vector3.zero
-			root.AssemblyAngularVelocity = Vector3.zero
-		end)
-	end
-	for part, saved in pairs(record.parts) do
-		if part.Parent then
-			pcall(function()
-				part.CanCollide = saved.collide
-			end)
-		end
+	if validAssembly(root, record.parts) then
+		pcall(writePose, root, record.startCFrame)
 	end
 end
 
-local function restoreAll()
+local function requestReturn(root)
+	local record = controlled[root]
+	if not record then return end
+	if settings.returnSpeed == 0 then
+		restoreInstant(root)
+	else
+		record.mode = "return"
+		record.lastTarget = nil
+		record.arrived = false
+	end
+end
+
+local function returnAll(instant)
 	local roots = {}
 	for root in pairs(controlled) do table.insert(roots, root) end
-	for _, root in ipairs(roots) do restore(root) end
-	nextSlot = 0
+	for _, root in ipairs(roots) do
+		if instant then restoreInstant(root) else requestReturn(root) end
+	end
 end
 
 local function capture(root)
-	if controlled[root] or not root.Parent or root.Anchored or protectedPart(root) then return end
-	local parts = root:GetConnectedParts(true)
-	if not table.find(parts, root) then table.insert(parts, root) end
-	-- Check the entire connected assembly, including welded character/tool parts.
-	for _, part in ipairs(parts) do
-		if part.Anchored or protectedPart(part) then return end
-	end
-	local savedParts = {}
-	for _, part in ipairs(parts) do
-		savedParts[part] = { collide = part.CanCollide }
-	end
+	local previous = controlled[root]
+	if previous then previous.mode = "pull"; return end
+	local parts = assemblyParts(root)
+	if not parts then return end
 	nextSlot += 1
 	controlled[root] = {
-		startCFrame = root.CFrame,
-		pose = root.CFrame,
+		startCFrame = root.CFrame, pose = root.CFrame, baseRotation = root.CFrame.Rotation,
 		centerOffset = root.CFrame:PointToObjectSpace(root.AssemblyCenterOfMass),
-		parts = savedParts,
-		slot = nextSlot,
+		parts = parts, slot = nextSlot, mode = "pull", spinPhase = 0,
 	}
-	for part in pairs(savedParts) do
-		part.CanCollide = false
+end
+
+local function getObjectId(root)
+	if not objectIds[root] then nextId += 1; objectIds[root] = nextId end
+	return objectIds[root]
+end
+
+local function trim(text)
+	return text:match("^%s*(.-)%s*$")
+end
+
+local function resolveNames(text)
+	if trim(text) == "" then return { player }, {} end
+	local result, seen, errors = {}, {}, {}
+	local players = Players:GetPlayers()
+	table.sort(players, function(a, b) return a.UserId < b.UserId end)
+	for token in text:gmatch("[^,]+") do
+		local query = string.lower(trim(token)):gsub("^@", "")
+		if query ~= "" then
+			local matches = {}
+			for tier = 1, 4 do
+				for _, candidate in ipairs(players) do
+					local name, display = string.lower(candidate.Name), string.lower(candidate.DisplayName)
+					local match = (tier == 1 and name == query)
+						or (tier == 2 and display == query)
+						or (tier == 3 and (name:sub(1, #query) == query or display:sub(1, #query) == query))
+						or (tier == 4 and (name:find(query, 1, true) or display:find(query, 1, true)))
+					if match then table.insert(matches, candidate) end
+				end
+				if #matches > 0 then break end
+			end
+			if #matches == 0 then table.insert(errors, trim(token)) end
+			for _, candidate in ipairs(matches) do
+				if not seen[candidate] then seen[candidate] = true; table.insert(result, candidate) end
+			end
+		end
 	end
+	if #result == 0 and #errors == 0 then table.insert(errors, "Enter a player name") end
+	return result, errors
 end
 
 -- Everything below this point is built at runtime by this LocalScript.
@@ -224,7 +280,8 @@ local function slider(name, noteText, minimum, maximum, key, order, decimals)
 		local alpha = (settings[key] - minimum) / (maximum - minimum)
 		fill.Size = UDim2.fromScale(alpha, 1)
 		knob.Position = UDim2.fromScale(alpha, 0.5)
-		value.Text = decimals == 0 and tostring(settings[key]) or string.format("%.1f", settings[key])
+		value.Text = key == "returnSpeed" and settings[key] == 0 and "Instant"
+			or (decimals == 0 and tostring(settings[key]) or string.format("%.1f", settings[key]))
 	end
 	local function setFromX(x)
 		local alpha = math.clamp((x - hit.AbsolutePosition.X) / math.max(1, hit.AbsoluteSize.X), 0, 1)
@@ -241,18 +298,263 @@ local function slider(name, noteText, minimum, maximum, key, order, decimals)
 		end
 	end)
 	paint()
+	return row
 end
-slider("Pull Speed", "Maximum travel speed in studs per second", 10, 250, "speed", 2, 0)
-slider("Landing Speed", "Lower = gentler, slower arrival near you", 0.5, 12, "landing", 3, 1)
-slider("Pull Range", "Distance in studs to the object's bounding box", 20, 500, "range", 4, 0)
-local status = make("TextLabel", content, {
-	Name = "Status", LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 64),
-	BackgroundColor3 = Color3.fromRGB(25, 43, 50), BorderSizePixel = 0,
-	Text = "READY\nLocal effect. OFF restores starting positions.",
-	TextColor3 = Color3.fromRGB(155, 220, 240), Font = Enum.Font.Gotham,
-	TextSize = 11, TextWrapped = true,
+local function textLabel(parent, name, text, order, height)
+	return make("TextLabel", parent, {
+		Name = name, LayoutOrder = order, Size = UDim2.new(1, 0, 0, height or 36),
+		BackgroundTransparency = 1, Text = text, Font = Enum.Font.Gotham,
+		TextSize = 11, TextWrapped = true, TextColor3 = Color3.fromRGB(177, 196, 219),
+	})
+end
+local function button(parent, name, text, order)
+	local result = make("TextButton", parent, {
+		Name = name, LayoutOrder = order, Size = UDim2.new(1, 0, 0, 36),
+		BackgroundColor3 = Color3.fromRGB(48, 57, 76), BorderSizePixel = 0,
+		Text = text, Font = Enum.Font.GothamBold, TextSize = 12,
+		TextColor3 = Color3.fromRGB(239, 245, 255),
+	})
+	round(result, 8)
+	return result
+end
+local function textbox(parent, name, placeholder, order)
+	local result = make("TextBox", parent, {
+		Name = name, LayoutOrder = order, Size = UDim2.new(1, 0, 0, 40),
+		BackgroundColor3 = Color3.fromRGB(32, 38, 50), BorderSizePixel = 0,
+		Text = "", PlaceholderText = placeholder, ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham, TextSize = 13, TextColor3 = Color3.fromRGB(235, 244, 255),
+		PlaceholderColor3 = Color3.fromRGB(157, 172, 193),
+	})
+	round(result, 8)
+	return result
+end
+local targetsBox = textbox(content, "Targets", "Targets: name, name (blank = yourself)", 2)
+local targetNote = textLabel(content, "TargetNote", "Usernames, display names, partial names. Commas separate targets.", 3, 36)
+slider("Pull Speed", "Maximum approach speed in studs per second", 10, 250, "speed", 4, 0)
+slider("Landing Speed", "Lower = gentler, slower arrival at targets", 0.5, 12, "landing", 5, 1)
+slider("Pull Range", "Acquires objects near you; targets may be farther away", 20, 500, "range", 6, 0)
+slider("Return Speed", "0 = instant. Otherwise studs/sec; X always returns instantly.", 0, 250, "returnSpeed", 7, 0)
+local rotation = button(content, "RotationToggle", "ROTATION: OFF", 8)
+local rotationSpeed = slider("Rotation Speed", "Orbit speed in degrees per second", 0, 360, "orbitSpeed", 9, 0)
+local rotationDistance = slider("Orbit Distance", "Ring radius in studs around each target", 3, 100, "orbitRadius", 10, 0)
+-- A checkmark next to the orbit slider adds fast individual-object spin.
+rotationDistance.Track.Size = UDim2.new(1, -112, 0, 28)
+local spin = make("TextButton", rotationDistance, {
+	Name = "SpinToggle", Position = UDim2.new(1, -94, 0, 45), Size = UDim2.fromOffset(82, 28),
+	Text = "[ ] SPIN", BackgroundColor3 = Color3.fromRGB(55, 61, 80), BorderSizePixel = 0,
+	Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = Color3.new(1, 1, 1),
 })
+round(spin, 6)
+rotationSpeed.Visible = false
+rotationDistance.Visible = false
+connect(rotation.Activated, function()
+	state.rotation = not state.rotation
+	rotation.Text = state.rotation and "ROTATION: ON" or "ROTATION: OFF"
+	rotation.BackgroundColor3 = state.rotation and Color3.fromRGB(37, 113, 89) or Color3.fromRGB(48, 57, 76)
+	rotationSpeed.Visible = state.rotation
+	rotationDistance.Visible = state.rotation
+end)
+connect(spin.Activated, function()
+	state.spin = not state.spin
+	spin.Text = state.spin and "[✓] SPIN" or "[ ] SPIN"
+	spin.BackgroundColor3 = state.spin and Color3.fromRGB(37, 113, 89) or Color3.fromRGB(55, 61, 80)
+end)
+local status = textLabel(content, "Status", "READY · Collision settings are preserved.", 11, 56)
+status.BackgroundTransparency = 0
+status.BackgroundColor3 = Color3.fromRGB(25, 43, 50)
 round(status, 10)
+
+textLabel(content, "SelectionHeading", "WORKSPACE OBJECTS / SAVED GROUPS", 12, 26)
+local selectionToggle = button(content, "SelectionToggle", "OBJECT SELECTION: OFF · grab everything", 13)
+local selectionPanel = make("Frame", content, {
+	Name = "SelectionPanel", LayoutOrder = 14, Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Visible = false,
+})
+make("UIListLayout", selectionPanel, { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder })
+textLabel(selectionPanel, "SelectionHelp", "Select assemblies below. Welded parts move together. Groups are saved selections, not Workspace models.", 1, 42)
+local inventoryInfo = textLabel(selectionPanel, "InventoryInfo", "", 2, 28)
+local filterBox = textbox(selectionPanel, "Filter", "Filter object names or paths", 3)
+local selectionActions = make("Frame", selectionPanel, {
+	Name = "Actions", LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1,
+})
+local selectAll = button(selectionActions, "SelectAll", "SELECT ALL", 0)
+selectAll.Size = UDim2.new(0.49, 0, 1, 0)
+local selectNone = button(selectionActions, "SelectNone", "CLEAR", 0)
+selectNone.Position = UDim2.fromScale(0.51, 0)
+selectNone.Size = UDim2.new(0.49, 0, 1, 0)
+local objectList = make("Frame", selectionPanel, {
+	Name = "ObjectList", LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+})
+make("UIListLayout", objectList, { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder })
+local pageActions = make("Frame", selectionPanel, {
+	Name = "Pages", LayoutOrder = 6, Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1,
+})
+local previousPage = button(pageActions, "Previous", "< PREV", 0)
+previousPage.Size = UDim2.new(0.3, 0, 1, 0)
+local pageLabel = textLabel(pageActions, "Page", "", 0, 34)
+pageLabel.Position = UDim2.fromScale(0.3, 0)
+pageLabel.Size = UDim2.new(0.4, 0, 1, 0)
+local nextPage = button(pageActions, "Next", "NEXT >", 0)
+nextPage.Position = UDim2.fromScale(0.7, 0)
+nextPage.Size = UDim2.new(0.3, 0, 1, 0)
+local groupName = textbox(selectionPanel, "GroupName", "Group name", 7)
+local saveGroup = button(selectionPanel, "SaveGroup", "SAVE / UPDATE SELECTED GROUP", 8)
+local groupNote = textLabel(selectionPanel, "GroupNote", "Load replaces selection; + adds a group to it. Saved for this play session.", 9, 36)
+local groupList = make("Frame", selectionPanel, {
+	Name = "Groups", LayoutOrder = 10, Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+})
+make("UIListLayout", groupList, { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder })
+
+local inventory, inventorySignature = {}, ""
+local page, pageSize = 1, 12
+local function clearRows(container)
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+end
+drawInventory = function()
+	if not state.selection then return end
+	local filtered, chosen = {}, 0
+	local query = string.lower(trim(filterBox.Text))
+	for _, entry in ipairs(inventory) do
+		if selected[entry.root] then chosen += 1 end
+		if query == "" or string.find(string.lower(entry.description), query, 1, true) then table.insert(filtered, entry) end
+	end
+	local pages = math.max(1, math.ceil(#filtered / pageSize))
+	page = math.clamp(page, 1, pages)
+	inventoryInfo.Text = string.format("%d unanchored assemblies · %d selected", #inventory, chosen)
+	pageLabel.Text = string.format("%d / %d", page, pages)
+	clearRows(objectList)
+	for index = (page - 1) * pageSize + 1, math.min(page * pageSize, #filtered) do
+		local entry = filtered[index]
+		local row = button(objectList, "Object_" .. entry.id, "", index)
+		row.Size = UDim2.new(1, 0, 0, 52)
+		row.TextSize = 10
+		row.TextWrapped = true
+		row.Text = (selected[entry.root] and "[✓] " or "[ ] ") .. entry.description
+		row.BackgroundColor3 = selected[entry.root] and Color3.fromRGB(38, 94, 78) or Color3.fromRGB(43, 50, 66)
+		-- These connections belong to their row and are released when it is destroyed.
+		row.Activated:Connect(function()
+			if not state.selection or not entry.root.Parent then return end
+			selected[entry.root] = not selected[entry.root] or nil
+			scanClock = scanInterval
+			drawInventory()
+		end)
+	end
+end
+
+refreshInventory = function()
+	if not state.selection then return end
+	local roots, result, signatures = {}, {}, {}
+	for part in pairs(registry) do
+		if part:IsDescendantOf(workspace) and not part.Anchored and not protectedPart(part) then
+			local root = part.AssemblyRootPart or part
+			if not roots[root] then
+				roots[root] = true
+				local parts = assemblyParts(root)
+				if parts then
+					local id = getObjectId(root)
+					local names = {}
+					for i = 1, math.min(3, #parts) do table.insert(names, parts[i].Name) end
+					local size = root.Size
+					local description = string.format("#%d %s · %s · %.0fx%.0fx%.0f\n%s (%d part%s)",
+						id, table.concat(names, ", "), root.ClassName, size.X, size.Y, size.Z,
+						root:GetFullName(), #parts, #parts == 1 and "" or "s")
+					table.insert(result, { root = root, id = id, description = description })
+				end
+			end
+		end
+	end
+	table.sort(result, function(a, b) return a.id < b.id end)
+	for _, entry in ipairs(result) do table.insert(signatures, entry.description) end
+	local signature = table.concat(signatures, "|")
+	inventory = result
+	if signature ~= inventorySignature then
+		inventorySignature = signature
+		drawInventory()
+		if drawGroups then drawGroups() end
+	end
+end
+drawGroups = function()
+	clearRows(groupList)
+	local names = {}
+	for name in pairs(groups) do table.insert(names, name) end
+	table.sort(names)
+	for i, name in ipairs(names) do
+		local set = groups[name]
+		local count = 0
+		for root in pairs(set) do if root:IsDescendantOf(workspace) then count += 1 end end
+		local row = make("Frame", groupList, {
+			Name = "Group_" .. i, LayoutOrder = i, Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1,
+		})
+		local loadButton = button(row, "Load", string.format("%s (%d)", name, count), 0)
+		loadButton.Size = UDim2.new(1, -82, 1, 0)
+		loadButton.TextTruncate = Enum.TextTruncate.AtEnd
+		local add = button(row, "Add", "+", 0)
+		add.Position = UDim2.new(1, -76, 0, 0); add.Size = UDim2.fromOffset(34, 36)
+		local delete = button(row, "Delete", "X", 0)
+		delete.Position = UDim2.new(1, -36, 0, 0); delete.Size = UDim2.fromOffset(34, 36)
+		local function apply(additive)
+			if not state.selection then return end
+			if not additive then table.clear(selected) end
+			for root in pairs(set) do if root:IsDescendantOf(workspace) then selected[root] = true end end
+			groupName.Text = name
+			scanClock = scanInterval
+			drawInventory()
+		end
+		loadButton.Activated:Connect(function() apply(false) end)
+		add.Activated:Connect(function() apply(true) end)
+		delete.Activated:Connect(function()
+			if not state.selection then return end
+			groups[name] = nil
+			drawGroups()
+		end)
+	end
+end
+connect(selectionToggle.Activated, function()
+	state.selection = not state.selection
+	selectionPanel.Visible = state.selection
+	selectionToggle.Text = state.selection and "OBJECT SELECTION: ON · selected objects only" or "OBJECT SELECTION: OFF · grab everything"
+	selectionToggle.BackgroundColor3 = state.selection and Color3.fromRGB(37, 113, 89) or Color3.fromRGB(48, 57, 76)
+	scanClock = scanInterval
+	if state.selection then refreshInventory(); drawInventory(); drawGroups() end
+end)
+connect(filterBox:GetPropertyChangedSignal("Text"), function() page = 1; drawInventory() end)
+connect(selectAll.Activated, function()
+	if not state.selection then return end
+	for _, entry in ipairs(inventory) do selected[entry.root] = true end
+	scanClock = scanInterval; drawInventory()
+end)
+connect(selectNone.Activated, function()
+	if not state.selection then return end
+	table.clear(selected); scanClock = scanInterval; drawInventory()
+end)
+connect(previousPage.Activated, function() page = math.max(1, page - 1); drawInventory() end)
+connect(nextPage.Activated, function() page += 1; drawInventory() end)
+connect(saveGroup.Activated, function()
+	if not state.selection then return end
+	local name = trim(groupName.Text):sub(1, 40)
+	if name == "" then groupNote.Text = "Type a group name first."; return end
+	local set = {}
+	for root in pairs(selected) do if root:IsDescendantOf(workspace) then set[root] = true end end
+	groups[name] = set
+	groupNote.Text = "Saved: " .. name .. ". Load replaces; + combines selections."
+	drawGroups()
+end)
+local function register(instance)
+	if instance:IsA("BasePart") then registry[instance] = true end
+end
+for _, instance in ipairs(workspace:GetDescendants()) do register(instance) end
+connect(workspace.DescendantAdded, register)
+connect(workspace.DescendantRemoving, function(instance)
+	registry[instance] = nil
+	selected[instance] = nil
+	for _, set in pairs(groups) do set[instance] = nil end
+	inventoryClock = 1
+end)
+connect(targetsBox.FocusLost, function() targetClock = 1; scanClock = scanInterval end)
 
 local panelDrag
 local viewport = Vector2.zero
@@ -314,28 +616,26 @@ local function boxDistance(position, part)
 	return (p - closest).Magnitude
 end
 
-local function scan(root)
-	local remove = {}
-	for assembly, record in pairs(controlled) do
-		local valid = assembly:IsDescendantOf(workspace) and not assembly.Anchored and assembly.AssemblyRootPart == assembly
-		local nearest = math.huge
-		for part in pairs(record.parts) do
-			if not part:IsDescendantOf(workspace) or part.Anchored or protectedPart(part) or part.AssemblyRootPart ~= assembly then
-				valid = false
-				break
-			end
-			nearest = math.min(nearest, boxDistance(root.Position, part))
-		end
-		if not valid or nearest > settings.range + 1 then table.insert(remove, assembly) end
-	end
-	for _, assembly in ipairs(remove) do restore(assembly) end
+local function allowed(root)
+	return not state.selection or selected[root] == true
+end
 
+local function scan(root, haveTargets)
+	for assembly, record in pairs(controlled) do
+		if not validAssembly(assembly, record.parts) then
+			controlled[assembly] = nil
+		elseif not haveTargets or not allowed(assembly) then
+			requestReturn(assembly)
+		elseif record.mode == "return" then
+			record.mode = "pull"
+		end
+	end
+	if not root or not haveTargets then return end
 	overlap.FilterDescendantsInstances = player.Character and { player.Character } or {}
-	local parts = workspace:GetPartBoundsInRadius(root.Position, settings.range, overlap)
 	local seen = {}
-	for _, part in ipairs(parts) do
+	for _, part in ipairs(workspace:GetPartBoundsInRadius(root.Position, settings.range, overlap)) do
 		local assembly = part.AssemblyRootPart or part
-		if not seen[assembly] and not controlled[assembly] and not part.Anchored and not protectedPart(part) then
+		if not seen[assembly] and not controlled[assembly] and allowed(assembly) and not part.Anchored and not protectedPart(part) then
 			if boxDistance(root.Position, part) <= settings.range then
 				seen[assembly] = true
 				capture(assembly)
@@ -347,51 +647,120 @@ end
 local function update(dt)
 	if state.closed then return end
 	layout()
-	if not state.enabled then return end
-	local root = characterRoot()
-	if not root then
-		if next(controlled) then restoreAll() end
-		status.Text = "WAITING FOR RESPAWN\nPull will resume with your next character."
-		return
-	end
-	scanClock += dt
-	if scanClock >= scanInterval then
-		scanClock = 0
-		scan(root)
-	end
-
-	local count = 0
-	local invalid = {}
 	local step = math.min(dt, 0.1)
-	for assembly, record in pairs(controlled) do
-		if not assembly.Parent or assembly.Anchored or assembly.AssemblyRootPart ~= assembly then
-			table.insert(invalid, assembly)
-		else
-			-- Fixed world directions prevent objects orbiting when the player turns.
-			local angle = record.slot * 2.399963229728653
-			local target = root.Position + Vector3.new(math.cos(angle) * 6, 2, math.sin(angle) * 6)
-			local center = record.pose:PointToWorldSpace(record.centerOffset)
-			local delta = target - center
-			local distance = delta.Magnitude
-			-- Exponential arrival controls deceleration independently from the speed cap.
-			local travel = math.min(settings.speed * step, distance * (1 - math.exp(-settings.landing * step)))
-			if distance > 0.0001 then record.pose = record.pose + delta * (travel / distance) end
-			local ok = pcall(function()
-				-- Read from the persistent local pose, so gravity/network updates cannot
-				-- reset the interpolation every frame. Mass and shape do not affect it.
-				for part in pairs(record.parts) do
-					part.CanCollide = false
-				end
-				assembly.AssemblyLinearVelocity = Vector3.zero
-				assembly.AssemblyAngularVelocity = Vector3.zero
-				assembly.CFrame = record.pose
-			end)
-			if ok then count += 1 else table.insert(invalid, assembly) end
+	targetClock += dt
+	inventoryClock += dt
+	if targetClock >= 0.5 then
+		targetClock = 0
+		resolvedTargets, targetErrors = resolveNames(targetsBox.Text)
+		local names = {}
+		for _, p in ipairs(resolvedTargets) do table.insert(names, "@" .. p.Name) end
+		targetNote.Text = #targetErrors > 0 and ("Not found: " .. table.concat(targetErrors, ", "))
+			or ("Targets: " .. table.concat(names, ", "))
+		targetsBox.TextColor3 = #targetErrors > 0 and Color3.fromRGB(255, 131, 139) or Color3.fromRGB(235, 244, 255)
+	end
+	if inventoryClock >= 1 then inventoryClock = 0; refreshInventory() end
+
+	local aliveTargets = {}
+	for _, p in ipairs(resolvedTargets) do
+		if p.Parent == Players then
+			local root = characterRoot(p)
+			if root then table.insert(aliveTargets, { player = p, root = root }) end
 		end
 	end
-	for _, assembly in ipairs(invalid) do restore(assembly) end
-	local message = string.format("PULLING: %d assemblies\nLocal effect. OFF restores starting positions.", count)
-	if status.Text ~= message then status.Text = message end
+	local localRoot = characterRoot()
+	if state.enabled then
+		scanClock += dt
+		if not localRoot then
+			returnAll(false)
+		elseif scanClock >= scanInterval then
+			scanClock = 0
+			scan(localRoot, #aliveTargets > 0)
+		end
+	end
+	if state.rotation then orbitPhase = (orbitPhase + math.rad(settings.orbitSpeed) * step) % (2 * math.pi) end
+
+	local active = {}
+	for root, record in pairs(controlled) do
+		if record.mode == "pull" then table.insert(active, { root = root, record = record }) end
+	end
+	table.sort(active, function(a, b) return a.record.slot < b.record.slot end)
+	local targetCount = #aliveTargets
+	local failed = {}
+	for index, entry in ipairs(active) do
+		local assembly, record = entry.root, entry.record
+		if not assembly:IsDescendantOf(workspace) or assembly.Anchored or assembly.AssemblyRootPart ~= assembly then
+			table.insert(failed, assembly)
+		elseif targetCount == 0 then
+			requestReturn(assembly)
+		else
+			local targetIndex = (index - 1) % targetCount + 1
+			local withinIndex = math.floor((index - 1) / targetCount)
+			local withinCount = math.floor((#active - targetIndex) / targetCount) + 1
+			local target = aliveTargets[targetIndex]
+			local phase = 2 * math.pi * withinIndex / withinCount
+			local radius = state.rotation and settings.orbitRadius or 6
+			local angle = phase + (state.rotation and orbitPhase or 0)
+			local point = target.root.Position + Vector3.new(math.cos(angle) * radius, 2, math.sin(angle) * radius)
+			local center = record.pose:PointToWorldSpace(record.centerOffset)
+			local key = tostring(target.player.UserId) .. ":" .. withinIndex .. ":" .. withinCount .. ":" .. tostring(state.rotation) .. ":" .. radius
+			if record.targetKey ~= key then record.arrived = false; record.lastTarget = nil end
+			if record.arrived and record.lastTarget then
+				local motion = point - record.lastTarget
+				if motion.Magnitude < 30 then center += motion else record.arrived = false end
+			end
+			local delta = point - center
+			local distance = delta.Magnitude
+			local travel = math.min(settings.speed * step, distance * (1 - math.exp(-settings.landing * step)))
+			if distance > 0.0001 then center += delta * (travel / distance) end
+			if distance < 0.1 then record.arrived = true end
+			local orientation = record.pose.Rotation
+			if state.rotation and state.spin then
+				record.spinPhase = (record.spinPhase + math.rad(720) * step) % (4 * math.pi)
+				orientation = record.baseRotation * CFrame.Angles(record.spinPhase * 0.5, record.spinPhase, record.spinPhase * 0.5)
+			end
+			record.pose = CFrame.new(center) * orientation * CFrame.new(-record.centerOffset)
+			record.lastTarget, record.targetKey = point, key
+			record.targetUserId = target.player.UserId
+			if not pcall(writePose, assembly, record.pose) then table.insert(failed, assembly) end
+		end
+	end
+	for _, root in ipairs(failed) do controlled[root] = nil end
+
+	local returning, completed = 0, {}
+	for assembly, record in pairs(controlled) do
+		if record.mode == "return" then
+			returning += 1
+			if not assembly.Parent or assembly.Anchored or assembly.AssemblyRootPart ~= assembly then
+				table.insert(completed, assembly)
+			elseif settings.returnSpeed == 0 then
+				restoreInstant(assembly)
+			else
+				local distance = (record.pose.Position - record.startCFrame.Position).Magnitude
+				local alpha = math.min(1 - math.exp(-7 * step), settings.returnSpeed * step / math.max(distance, 0.0001))
+				record.pose = record.pose:Lerp(record.startCFrame, alpha)
+				local _, angle = (record.pose.Rotation:Inverse() * record.startCFrame.Rotation):ToAxisAngle()
+				if distance < 0.05 and math.abs(angle) < 0.01 then
+					pcall(writePose, assembly, record.startCFrame)
+					table.insert(completed, assembly)
+				elseif not pcall(writePose, assembly, record.pose) then
+					table.insert(completed, assembly)
+				end
+			end
+		end
+	end
+	for _, root in ipairs(completed) do controlled[root] = nil end
+	local text
+	if not state.enabled then
+		text = returning > 0 and string.format("RETURNING: %d assemblies", returning) or "PAUSED · Objects restored."
+	elseif not localRoot then
+		text = "WAITING FOR YOUR RESPAWN"
+	elseif targetCount == 0 then
+		text = "WAITING · No valid living targets"
+	else
+		text = string.format("PULLING: %d · TARGETS: %d · RETURNING: %d", #active, targetCount, returning)
+	end
+	status.Text = text .. "\nOriginal collision settings preserved."
 end
 
 connect(pull.Activated, function()
@@ -399,13 +768,11 @@ connect(pull.Activated, function()
 	pull.Text = state.enabled and "PULL: ON" or "PULL: OFF"
 	pull.BackgroundColor3 = state.enabled and Color3.fromRGB(37, 113, 89) or Color3.fromRGB(83, 43, 58)
 	scanClock = scanInterval
-	if not state.enabled then
-		restoreAll()
-		status.Text = "PAUSED\nCaptured objects and collision settings restored."
-	end
+	targetClock = 1
+	if not state.enabled then returnAll(false) end
 end)
-connect(player.CharacterRemoving, restoreAll)
-connect(player.CharacterAdded, function() restoreAll(); scanClock = scanInterval end)
+connect(player.CharacterRemoving, function() returnAll(false) end)
+connect(player.CharacterAdded, function() scanClock = scanInterval; targetClock = 1 end)
 
 shutdown = function(destroyScript)
 	if state.closed then return end
@@ -414,7 +781,10 @@ shutdown = function(destroyScript)
 	RunService:UnbindFromRenderStep(renderName)
 	for _, connection in ipairs(connections) do connection:Disconnect() end
 	table.clear(connections)
-	restoreAll()
+	returnAll(true)
+	table.clear(registry)
+	table.clear(groups)
+	table.clear(selected)
 	if gui.Parent then gui:Destroy() end
 	if destroyScript and script.Parent then script:Destroy() end
 end
