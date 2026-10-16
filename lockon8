@@ -19,7 +19,6 @@ local state = {
 	minimized = false,
 	mode = "Off", -- Off, Lockon, or Predict
 	snap = false,
-	autoSelect = false,
 	teams = false,
 	selectedTarget = nil,
 	hoveredTarget = nil,
@@ -450,7 +449,6 @@ sliderKnob.Parent = sliderBar
 rounded(sliderKnob, 8)
 
 makeSectionLabel("SELECTION & SAFETY", 9)
-local autoButton, autoLabel = makeButton("Auto Select", "Shortcut: A toggles · F selects/unlocks", 10)
 local teamsButton, teamsLabel = makeButton("Teams", "Shortcut: T · Ignores players on your team", 11)
 
 local help = Instance.new("TextLabel")
@@ -458,7 +456,7 @@ help.LayoutOrder = 12
 help.Size = UDim2.new(1, 0, 0, 58)
 help.BackgroundColor3 = Color3.fromRGB(25, 27, 34)
 help.BorderSizePixel = 0
-help.Text = "Q focuses the target box\nAuto Select aims near your cursor; press F to confirm or unlock."
+help.Text = "Q focuses the target box · F selects/unlocks near your cursor.\nTyped targets are used when no F-selected target is locked."
 help.TextColor3 = Color3.fromRGB(161, 166, 183)
 help.Font = Enum.Font.Gotham
 help.TextSize = 10
@@ -502,7 +500,6 @@ local function updateUI()
 	setButtonVisual(lockButton, lockLabel, "Lock On", state.mode == "Lockon", Color3.fromRGB(34, 102, 76))
 	setButtonVisual(predictButton, predictLabel, "Predict", state.mode == "Predict", Color3.fromRGB(38, 92, 126))
 	setButtonVisual(snapButton, snapLabel, "Snap", state.snap, Color3.fromRGB(96, 73, 34))
-	setButtonVisual(autoButton, autoLabel, "Auto Select", state.autoSelect, Color3.fromRGB(73, 63, 130))
 	setButtonVisual(teamsButton, teamsLabel, "Teams", state.teams, Color3.fromRGB(34, 102, 76))
 end
 
@@ -598,19 +595,13 @@ local function refreshCurrentTarget()
 		return
 	end
 
-	if state.autoSelect then
-		if state.selectedTarget and state.selectedTarget:IsA("Player") and isTeammate(state.selectedTarget) then
-			state.selectedTarget = nil
-			state.currentTarget = nil
-			state.currentPart = nil
-			setStatus("Teammate ignored because Teams is ON", "idle")
-		elseif state.selectedTarget then
-			state.currentTarget = state.selectedTarget
-			state.currentPart = targetPart(state.selectedTarget)
-		else
-			state.currentTarget = nil
-			state.currentPart = nil
-		end
+	if state.selectedTarget and state.selectedTarget:IsA("Player") and isTeammate(state.selectedTarget) then
+		state.selectedTarget = nil
+		setStatus("Teammate ignored because Teams is ON", "idle")
+	end
+	if state.selectedTarget then
+		state.currentTarget = state.selectedTarget
+		state.currentPart = targetPart(state.selectedTarget)
 	else
 		state.currentTarget, state.currentPart = closestManualTarget()
 	end
@@ -618,7 +609,7 @@ end
 
 local function refreshHoveredTarget()
 	state.hoveredTarget = nil
-	if state.mode == "Off" or not state.autoSelect or state.selectedTarget then
+	if state.mode == "Off" or state.selectedTarget then
 		return
 	end
 
@@ -663,7 +654,7 @@ local function refreshHoveredTarget()
 	if state.hoveredTarget then
 		setStatus("F TO SELECT · " .. targetName(state.hoveredTarget), "active")
 	else
-		setStatus("AUTO SELECT · Aim near a target", "idle")
+		setStatus("Aim near a target and press F, or type a target name", "idle")
 	end
 end
 
@@ -672,17 +663,14 @@ local function selectOrUnlockHovered()
 		setStatus("Enable Lock On or Predict before selecting", "error")
 		return
 	end
-	if not state.autoSelect then
-		setStatus("Turn Auto Select ON before pressing F", "error")
-		return
-	end
 	if state.selectedTarget then
 		state.selectedTarget = nil
 		state.currentTarget = nil
 		state.currentPart = nil
-		setStatus("UNLOCKED · Aim near another target", "idle")
+		setStatus("UNLOCKED · Using typed targets, or press F near another target", "idle")
 		return
 	end
+	refreshHoveredTarget() -- Resolve at the instant F is pressed.
 	if state.hoveredTarget and isValidTarget(state.hoveredTarget) then
 		state.selectedTarget = state.hoveredTarget
 		state.currentTarget = state.hoveredTarget
@@ -694,6 +682,7 @@ local function selectOrUnlockHovered()
 end
 
 connect(targetBox:GetPropertyChangedSignal("Text"), function()
+	state.selectedTarget = nil -- Editing names returns to typed-target selection.
 	manualCandidatesDirty = true
 	state.currentTarget = nil
 	state.currentPart = nil
@@ -740,12 +729,6 @@ connect(predictButton.MouseButton1Click, function()
 end)
 connect(snapButton.MouseButton1Click, function()
 	state.snap = not state.snap
-	updateUI()
-end)
-connect(autoButton.MouseButton1Click, function()
-	state.autoSelect = not state.autoSelect
-	resetTargeting(state.autoSelect and "AUTO SELECT ON · Press F near a target" or "AUTO SELECT OFF · Using typed targets")
-	manualCandidatesDirty = true
 	updateUI()
 end)
 connect(teamsButton.MouseButton1Click, function()
@@ -803,11 +786,6 @@ connect(UserInputService.InputBegan, function(input, processed)
 		setMode("Predict")
 	elseif input.KeyCode == Enum.KeyCode.Z then
 		state.snap = not state.snap
-		updateUI()
-	elseif input.KeyCode == Enum.KeyCode.A then
-		state.autoSelect = not state.autoSelect
-		resetTargeting(state.autoSelect and "AUTO SELECT ON · Press F near a target" or "AUTO SELECT OFF · Using typed targets")
-		manualCandidatesDirty = true
 		updateUI()
 	elseif input.KeyCode == Enum.KeyCode.F then
 		selectOrUnlockHovered()
@@ -930,10 +908,10 @@ connect(RunService.RenderStepped, function(deltaTime)
 	local part = target and targetPart(target) or nil
 	state.currentPart = part
 	if not target or not part then
-		if state.autoSelect and state.selectedTarget then
+		if state.selectedTarget then
 			setStatus("WAITING FOR RESPAWN · " .. targetName(state.selectedTarget), "idle")
-		elseif not state.autoSelect and trim(targetBox.Text) == "" then
-			setStatus("Enter a target name or enable Auto Select", "idle")
+		elseif not state.hoveredTarget and trim(targetBox.Text) == "" then
+			setStatus("Enter a target name or press F near a target", "idle")
 		end
 		return
 	end
@@ -951,7 +929,7 @@ connect(RunService.RenderStepped, function(deltaTime)
 		camera.CFrame = camera.CFrame:Lerp(desired, alpha)
 	end
 
-	if not state.autoSelect then
+	if not state.selectedTarget then
 		setStatus((state.mode == "Predict" and "PREDICTING · " or "LOCKED · ") .. targetName(target), "active")
 	end
 end)
