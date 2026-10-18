@@ -4,6 +4,14 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Teams = game:GetService("Teams")
 local LocalPlayer = Players.LocalPlayer
+local connections = {}
+
+local oldGui = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("HighlightManagerUI")
+if oldGui then
+    local oldCleanup = oldGui:FindFirstChild("Cleanup")
+    if oldCleanup and oldCleanup:IsA("BindableEvent") then oldCleanup:Fire() end
+    oldGui:Destroy()
+end
 
 ---------------------------------------------------------------------
 -- UI CREATION
@@ -13,6 +21,9 @@ screenGui.Name = "HighlightManagerUI"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+local cleanupEvent = Instance.new("BindableEvent")
+cleanupEvent.Name = "Cleanup"
+cleanupEvent.Parent = screenGui
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
@@ -216,17 +227,17 @@ local function createSlider(nameText, minValue, maxValue, defaultValue)
         end
     end)
 
-    game:GetService("UserInputService").InputEnded:Connect(function(input)
+    table.insert(connections, game:GetService("UserInputService").InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
-    end)
+    end))
 
-    game:GetService("UserInputService").InputChanged:Connect(function(input)
+    table.insert(connections, game:GetService("UserInputService").InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             setFromX(input.Position.X)
         end
-    end)
+    end))
 
     return {
         GetValue = function()
@@ -291,13 +302,13 @@ do
         end
     end)
 
-    UIS.InputEnded:Connect(function(input)
+    table.insert(connections, UIS.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
-    end)
+    end))
 
-    UIS.InputChanged:Connect(function(input)
+    table.insert(connections, UIS.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = input.Position - dragStart
             mainFrame.Position = UDim2.new(
@@ -307,7 +318,7 @@ do
                 startPos.Y.Offset + delta.Y
             )
         end
-    end)
+    end))
 end
 
 ---------------------------------------------------------------------
@@ -332,11 +343,23 @@ local specificOutlineTransparencySlider = createSlider("Specific outline transpa
 createSectionLabel("Name label settings")
 local nameLabelSizeSlider = createSlider("Name label size", 10, 30, 18)
 
+createSectionLabel("Visibility from your camera")
+local visibilityNote = createSectionLabel("Bright = clear view · middle = partly covered · dim = blocked")
+visibilityNote.TextSize = 10
+visibilityNote.TextColor3 = Color3.fromRGB(175, 180, 193)
+
 ---------------------------------------------------------------------
 -- STATE
 ---------------------------------------------------------------------
-local connections = {}
 local characterData = {}
+local healthConnections = {}
+local VISIBILITY_INTERVAL = 0.10
+local UPDATE_INTERVAL = 0.10
+local MAX_VISIBILITY_TARGETS_PER_TICK = 8
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = false
+rayParams.RespectCanCollide = true
 
 local teamHighlightEnabled = false
 local hideTeammatesEnabled = false
@@ -393,8 +416,10 @@ end)
 ---------------------------------------------------------------------
 -- SPECIFIC NAMES PARSING
 ---------------------------------------------------------------------
+local cachedSpecificText, cachedSpecificNames = nil, {}
 local function getSpecificNameList()
     local text = specificNamesBox.Text or ""
+    if text == cachedSpecificText then return cachedSpecificNames end
     local list = {}
 
     for part in string.gmatch(text, "([^,]+)") do
@@ -405,6 +430,7 @@ local function getSpecificNameList()
         end
     end
 
+    cachedSpecificText, cachedSpecificNames = text, list
     return list
 end
 
@@ -419,6 +445,36 @@ local function isSpecificPlayer(player)
     end
 
     return false
+end
+
+local function visibleFraction(player, character)
+    local camera = workspace.CurrentCamera
+    if not camera or not character or player == LocalPlayer then return 1 end
+
+    local head = character:FindFirstChild("Head")
+    local torso = character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("HumanoidRootPart")
+    local sampleParts = {}
+    if head and head:IsA("BasePart") then table.insert(sampleParts, head) end
+    if torso and torso:IsA("BasePart") and torso ~= head then table.insert(sampleParts, torso) end
+    if #sampleParts == 0 then return 0 end
+
+    -- Only the local character is excluded. Terrain and collidable obstacles
+    -- between the camera and each sample count as cover.
+    rayParams.FilterDescendantsInstances = LocalPlayer.Character and { LocalPlayer.Character } or {}
+    local origin = camera.CFrame.Position
+    local clear = 0
+    for _, part in ipairs(sampleParts) do
+        local direction = part.Position - origin
+        if direction.Magnitude <= 15000 then
+            local hit = workspace:Raycast(origin, direction, rayParams)
+            if not hit or hit.Instance:IsDescendantOf(character) then
+                clear += 1
+            end
+        end
+    end
+    return clear / #sampleParts
 end
 
 ---------------------------------------------------------------------
@@ -484,10 +540,13 @@ local function createHighlightForCharacter(player, character)
     uiStroke.Parent = nameLabel
 
     characterData[player] = {
+        Character = character,
         Highlight = highlight,
         Billboard = billboard,
         NameLabel = nameLabel,
         UIStroke = uiStroke,
+        Visibility = 1,
+        NextVisibilityCheck = 0,
     }
 
     return highlight, billboard, nameLabel
@@ -536,8 +595,6 @@ local function updateHighlightForPlayer(player)
     local character = player.Character
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 
-    local isLocal = (player == LocalPlayer)
-
     local sameTeam = false
     if LocalPlayer.Team and player.Team then
         sameTeam = (LocalPlayer.Team == player.Team)
@@ -558,7 +615,7 @@ local function updateHighlightForPlayer(player)
     end
 
     if teamHighlightEnabled then
-        if not (hideTeammatesEnabled and sameTeam and isLocal) then
+        if not (hideTeammatesEnabled and sameTeam) then
             visible = true
             fillColor = getTeamColor(player)
             outlineColor = getTeamColor(player)
@@ -576,6 +633,24 @@ local function updateHighlightForPlayer(player)
     if not visible then
         fillTransparency = 1
         outlineTransparency = 1
+    else
+        local exposure = data.Visibility or 1
+        if exposure >= 1 then
+            fillColor = fillColor:Lerp(Color3.new(1, 1, 1), 0.23)
+            outlineColor = outlineColor:Lerp(Color3.new(1, 1, 1), 0.23)
+            if fillTransparency < 1 then fillTransparency = math.max(0, fillTransparency - 0.07) end
+            if outlineTransparency < 1 then outlineTransparency = math.max(0, outlineTransparency - 0.04) end
+        elseif exposure > 0 then
+            fillColor = fillColor:Lerp(Color3.new(0, 0, 0), 0.18)
+            outlineColor = outlineColor:Lerp(Color3.new(0, 0, 0), 0.18)
+            if fillTransparency < 1 then fillTransparency = math.min(1, fillTransparency + 0.16) end
+            if outlineTransparency < 1 then outlineTransparency = math.min(1, outlineTransparency + 0.12) end
+        else
+            fillColor = fillColor:Lerp(Color3.new(0, 0, 0), 0.52)
+            outlineColor = outlineColor:Lerp(Color3.new(0, 0, 0), 0.52)
+            if fillTransparency < 1 then fillTransparency = math.min(0.93, fillTransparency + 0.38) end
+            if outlineTransparency < 1 then outlineTransparency = math.min(0.86, outlineTransparency + 0.34) end
+        end
     end
 
     highlight.Enabled = visible
@@ -593,6 +668,7 @@ local function updateHighlightForPlayer(player)
 
         -- Use team color for the name label text
         nameLabel.TextColor3 = teamColor
+        nameLabel.TextTransparency = visible and (data.Visibility == 0 and 0.45 or data.Visibility < 1 and 0.18 or 0) or 0
 
         -- Hide built-in TextStroke and rely on UIStroke for a thin black outline
         nameLabel.TextStrokeTransparency = 1
@@ -619,17 +695,17 @@ end
 local function onCharacterAdded(player, character)
     local humanoid = character:WaitForChild("Humanoid", 5)
 
-    if not humanoid then
+    if not humanoid or player.Parent ~= Players or player.Character ~= character then
         return
     end
 
+    if healthConnections[player] then healthConnections[player]:Disconnect() end
+    removeHighlightForPlayer(player)
     createHighlightForCharacter(player, character)
 
-    local conn1 = humanoid.HealthChanged:Connect(function()
+    healthConnections[player] = humanoid.HealthChanged:Connect(function()
         updateHighlightForPlayer(player)
     end)
-
-    table.insert(connections, conn1)
 
     updateHighlightForPlayer(player)
 end
@@ -648,6 +724,10 @@ local function onPlayerAdded(player)
 end
 
 local function onPlayerRemoving(player)
+    if healthConnections[player] then
+        healthConnections[player]:Disconnect()
+        healthConnections[player] = nil
+    end
     removeHighlightForPlayer(player)
 end
 
@@ -662,9 +742,22 @@ table.insert(connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 -- RUNTIME UPDATE LOOP
 ---------------------------------------------------------------------
 local heartbeatConn
+local updateClock = 0
 
-heartbeatConn = RunService.Heartbeat:Connect(function()
-    for player, _ in pairs(characterData) do
+heartbeatConn = RunService.Heartbeat:Connect(function(deltaTime)
+    updateClock += deltaTime
+    if updateClock < UPDATE_INTERVAL then return end
+    updateClock = 0
+    local now = os.clock()
+    local checked = 0
+    local anyMode = allHighlightEnabled or teamHighlightEnabled or specificHighlightEnabled
+    for player, data in pairs(characterData) do
+        if anyMode and checked < MAX_VISIBILITY_TARGETS_PER_TICK
+            and data.Character == player.Character and now >= data.NextVisibilityCheck then
+            data.Visibility = visibleFraction(player, data.Character)
+            data.NextVisibilityCheck = now + VISIBILITY_INTERVAL
+            checked += 1
+        end
         updateHighlightForPlayer(player)
     end
 end)
@@ -691,6 +784,7 @@ minimizeButton.MouseButton1Click:Connect(function()
 end)
 
 local function cleanupAll()
+    if not screenGui then return end
     for _, conn in ipairs(connections) do
         if typeof(conn) == "RBXScriptConnection" then
             conn:Disconnect()
@@ -698,6 +792,10 @@ local function cleanupAll()
     end
 
     connections = {}
+    for player, conn in pairs(healthConnections) do
+        conn:Disconnect()
+        healthConnections[player] = nil
+    end
 
     for player, data in pairs(characterData) do
         if data.Highlight and data.Highlight.Parent then
@@ -711,14 +809,19 @@ local function cleanupAll()
 
     characterData = {}
 
-    if screenGui and screenGui.Parent then
-        screenGui:Destroy()
-    end
+    local guiToDestroy = screenGui
+    screenGui = nil
+    if guiToDestroy.Parent then guiToDestroy:Destroy() end
+    task.defer(function()
+        if script and script.Parent then script:Destroy() end
+    end)
 end
 
 closeButton.MouseButton1Click:Connect(function()
     cleanupAll()
 end)
+cleanupEvent.Event:Connect(cleanupAll)
+screenGui.Destroying:Connect(cleanupAll)
 
 -- END OF SCRIPT
 -- Script end marker: if script appears truncated, this is the end.
