@@ -1,5 +1,7 @@
 --// Renewed Lock-On LocalScript
 --// Runtime-only UI, no commander/chat features.
+--// Auto Predict (P) maps horizontal target speed to 0-0.5 seconds of lead.
+--// Aim Part (H) chooses Head or Torso, falling back to HumanoidRootPart.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,6 +13,8 @@ local playerGui = localPlayer:WaitForChild("PlayerGui")
 
 local oldGui = playerGui:FindFirstChild("RenewedLockonGUI")
 if oldGui then
+	local oldCleanup = oldGui:FindFirstChild("Cleanup")
+	if oldCleanup and oldCleanup:IsA("BindableEvent") then oldCleanup:Fire() end
 	oldGui:Destroy()
 end
 
@@ -20,6 +24,8 @@ local state = {
 	mode = "Off", -- Off, Lockon, or Predict
 	snap = false,
 	teams = false,
+	autoPredict = false,
+	aimPart = "Torso", -- Torso or Head
 	selectedTarget = nil,
 	hoveredTarget = nil,
 	currentTarget = nil,
@@ -31,11 +37,12 @@ local PREDICTION_MAX = 0.5
 local predictionStrength = 0.1
 local TARGET_REFRESH_INTERVAL = 0.05
 local HOVER_REFRESH_INTERVAL = 0.05
-local AUTO_SELECT_RADIUS = 125
+local SELECTION_RADIUS_MIN = 25
+local SELECTION_RADIUS_MAX = 400
+local selectionRadius = 125 -- Screen pixels around the cursor, not world distance.
 local SMOOTH_SPEED = 14
 
 local connections = {}
-local npcSet = {}
 local manualCandidates = {}
 local manualCandidatesDirty = true
 local lastTargetRefresh = 0
@@ -72,45 +79,13 @@ local function isTeammate(player)
 	return localPlayer.Team ~= nil and player.Team == localPlayer.Team
 end
 
-local function modelIsNPC(model)
-	if not model or not model:IsA("Model") or model == localPlayer.Character then
-		return false
-	end
-	if Players:GetPlayerFromCharacter(model) then
-		return false
-	end
-	return model:FindFirstChildOfClass("Humanoid") ~= nil
-		or model:FindFirstChild("HumanoidRootPart") ~= nil
-		or model.PrimaryPart ~= nil
-end
-
-local function addNPC(instance)
-	if instance:IsA("Model") and modelIsNPC(instance) then
-		npcSet[instance] = true
-		manualCandidatesDirty = true
-		return
-	end
-	local model = instance:FindFirstAncestorOfClass("Model")
-	if model and modelIsNPC(model) then
-		npcSet[model] = true
-		manualCandidatesDirty = true
-	end
-end
-
 local function targetCharacter(target)
-	if not target or not target.Parent then
+	-- Only real Player instances may enter either selection path.
+	if not target or not target:IsA("Player") or target.Parent ~= Players
+		or target == localPlayer or isTeammate(target) then
 		return nil
 	end
-	if target:IsA("Player") then
-		if target == localPlayer or isTeammate(target) then
-			return nil
-		end
-		return target.Character
-	end
-	if target:IsA("Model") and modelIsNPC(target) then
-		return target
-	end
-	return nil
+	return target.Character
 end
 
 local function targetPart(target)
@@ -122,7 +97,13 @@ local function targetPart(target)
 	if humanoid and humanoid.Health <= 0 then
 		return nil
 	end
-	local part = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
+	local part
+	if state.aimPart == "Head" then
+		part = character:FindFirstChild("Head")
+	else
+		part = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+	end
+	part = part or character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
 	if part and part:IsA("BasePart") then
 		return part
 	end
@@ -132,20 +113,6 @@ end
 local function isValidTarget(target)
 	return targetPart(target) ~= nil
 end
-
-for _, instance in ipairs(workspace:GetDescendants()) do
-	if instance:IsA("Model") then
-		addNPC(instance)
-	end
-end
-
-connect(workspace.DescendantAdded, addNPC)
-connect(workspace.DescendantRemoving, function(instance)
-	if npcSet[instance] then
-		npcSet[instance] = nil
-		manualCandidatesDirty = true
-	end
-end)
 
 ----------------------------------------------------
 -- UI
@@ -158,6 +125,9 @@ screenGui.IgnoreGuiInset = false
 screenGui.DisplayOrder = 9999
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
+local cleanupEvent = Instance.new("BindableEvent")
+cleanupEvent.Name = "Cleanup"
+cleanupEvent.Parent = screenGui
 
 local main = Instance.new("Frame")
 main.Name = "Main"
@@ -358,7 +328,7 @@ targetBox.Size = UDim2.new(1, 0, 0, 44)
 targetBox.BackgroundColor3 = Color3.fromRGB(29, 31, 39)
 targetBox.BorderSizePixel = 0
 targetBox.ClearTextOnFocus = false
-targetBox.PlaceholderText = "Player/display/NPC names, separated by commas"
+targetBox.PlaceholderText = "Player usernames/display names, separated by commas"
 targetBox.PlaceholderColor3 = Color3.fromRGB(132, 137, 153)
 targetBox.Text = ""
 targetBox.TextColor3 = Color3.fromRGB(242, 243, 248)
@@ -394,7 +364,7 @@ local snapButton, snapLabel = makeButton("Snap", "Shortcut: Z · Instant camera 
 
 local sliderFrame = Instance.new("Frame")
 sliderFrame.LayoutOrder = 8
-sliderFrame.Size = UDim2.new(1, 0, 0, 66)
+sliderFrame.Size = UDim2.new(1, 0, 0, 83)
 sliderFrame.BackgroundColor3 = Color3.fromRGB(29, 31, 39)
 sliderFrame.BorderSizePixel = 0
 sliderFrame.Parent = content
@@ -402,9 +372,9 @@ rounded(sliderFrame, 10)
 
 local sliderTitle = Instance.new("TextLabel")
 sliderTitle.Position = UDim2.fromOffset(12, 7)
-sliderTitle.Size = UDim2.new(1, -76, 0, 20)
+sliderTitle.Size = UDim2.new(1, -167, 0, 20)
 sliderTitle.BackgroundTransparency = 1
-sliderTitle.Text = "Prediction Strength"
+sliderTitle.Text = "Prediction Lead"
 sliderTitle.TextColor3 = Color3.fromRGB(239, 240, 246)
 sliderTitle.Font = Enum.Font.GothamBold
 sliderTitle.TextSize = 12
@@ -421,6 +391,19 @@ sliderValue.Font = Enum.Font.GothamBold
 sliderValue.TextSize = 12
 sliderValue.TextXAlignment = Enum.TextXAlignment.Right
 sliderValue.Parent = sliderFrame
+
+local autoPredictCheck = Instance.new("TextButton")
+autoPredictCheck.Name = "AutoPredictCheck"
+autoPredictCheck.Position = UDim2.new(1, -160, 0, 5)
+autoPredictCheck.Size = UDim2.fromOffset(91, 24)
+autoPredictCheck.BackgroundColor3 = Color3.fromRGB(51, 54, 66)
+autoPredictCheck.BorderSizePixel = 0
+autoPredictCheck.Text = "[ ] AUTO"
+autoPredictCheck.TextColor3 = Color3.fromRGB(232, 236, 248)
+autoPredictCheck.Font = Enum.Font.GothamBold
+autoPredictCheck.TextSize = 11
+autoPredictCheck.Parent = sliderFrame
+rounded(autoPredictCheck, 6)
 
 local sliderBar = Instance.new("Frame")
 sliderBar.Position = UDim2.fromOffset(12, 39)
@@ -448,15 +431,117 @@ sliderKnob.Active = true
 sliderKnob.Parent = sliderBar
 rounded(sliderKnob, 8)
 
-makeSectionLabel("SELECTION & SAFETY", 9)
-local teamsButton, teamsLabel = makeButton("Teams", "Shortcut: T · Ignores players on your team", 11)
+local sliderNote = Instance.new("TextLabel")
+sliderNote.Position = UDim2.fromOffset(12, 57)
+sliderNote.Size = UDim2.new(1, -24, 0, 19)
+sliderNote.BackgroundTransparency = 1
+sliderNote.Text = "P toggles Auto · moving target speed adjusts lead"
+sliderNote.TextColor3 = Color3.fromRGB(168, 178, 195)
+sliderNote.Font = Enum.Font.Gotham
+sliderNote.TextSize = 10
+sliderNote.TextXAlignment = Enum.TextXAlignment.Left
+sliderNote.Parent = sliderFrame
+
+local aimButton, aimLabel = makeButton("Aim Part", "Shortcut: H · Torso / Head", 9)
+
+makeSectionLabel("SELECTION & SAFETY", 10)
+local radiusFrame = Instance.new("Frame")
+radiusFrame.Name = "SelectionRadiusSlider"
+radiusFrame.LayoutOrder = 11
+radiusFrame.Size = UDim2.new(1, 0, 0, 88)
+radiusFrame.BackgroundColor3 = Color3.fromRGB(29, 31, 39)
+radiusFrame.BorderSizePixel = 0
+radiusFrame.Parent = content
+rounded(radiusFrame, 10)
+
+local radiusTitle = Instance.new("TextLabel")
+radiusTitle.Position = UDim2.fromOffset(12, 7)
+radiusTitle.Size = UDim2.new(1, -100, 0, 20)
+radiusTitle.BackgroundTransparency = 1
+radiusTitle.Text = "Selection Radius"
+radiusTitle.TextColor3 = Color3.fromRGB(239, 240, 246)
+radiusTitle.Font = Enum.Font.GothamBold
+radiusTitle.TextSize = 12
+radiusTitle.TextXAlignment = Enum.TextXAlignment.Left
+radiusTitle.Parent = radiusFrame
+
+local radiusValue = radiusTitle:Clone()
+radiusValue.Name = "Value"
+radiusValue.Position = UDim2.new(1, -88, 0, 7)
+radiusValue.Size = UDim2.fromOffset(76, 20)
+radiusValue.TextXAlignment = Enum.TextXAlignment.Right
+radiusValue.TextColor3 = Color3.fromRGB(127, 205, 255)
+radiusValue.Parent = radiusFrame
+
+local radiusNote = radiusTitle:Clone()
+radiusNote.Position = UDim2.fromOffset(12, 29)
+radiusNote.Size = UDim2.new(1, -24, 0, 18)
+radiusNote.Text = "Cursor area in screen pixels, not distance in studs"
+radiusNote.Font = Enum.Font.Gotham
+radiusNote.TextSize = 10
+radiusNote.Parent = radiusFrame
+
+local radiusTrack = Instance.new("TextButton")
+radiusTrack.Name = "Track"
+radiusTrack.Position = UDim2.fromOffset(12, 49)
+radiusTrack.Size = UDim2.new(1, -24, 0, 32)
+radiusTrack.BackgroundTransparency = 1
+radiusTrack.Text = ""
+radiusTrack.Parent = radiusFrame
+local radiusBar = Instance.new("Frame")
+radiusBar.Position = UDim2.new(0, 0, 0.5, -4)
+radiusBar.Size = UDim2.new(1, 0, 0, 8)
+radiusBar.BackgroundColor3 = Color3.fromRGB(64, 67, 79)
+radiusBar.BorderSizePixel = 0
+radiusBar.Parent = radiusTrack
+rounded(radiusBar, 4)
+local radiusFill = sliderFill:Clone()
+radiusFill.Parent = radiusBar
+local radiusKnob = sliderKnob:Clone()
+radiusKnob.Active = false
+radiusKnob.Parent = radiusBar
+
+local radiusPointer
+local function paintRadius()
+	local alpha = (selectionRadius - SELECTION_RADIUS_MIN) / (SELECTION_RADIUS_MAX - SELECTION_RADIUS_MIN)
+	radiusFill.Size = UDim2.fromScale(alpha, 1)
+	radiusKnob.Position = UDim2.fromScale(alpha, 0.5)
+	radiusValue.Text = tostring(selectionRadius) .. " px"
+end
+local function setRadius(screenX)
+	local alpha = math.clamp((screenX - radiusTrack.AbsolutePosition.X) / math.max(1, radiusTrack.AbsoluteSize.X), 0, 1)
+	selectionRadius = math.floor(SELECTION_RADIUS_MIN + alpha * (SELECTION_RADIUS_MAX - SELECTION_RADIUS_MIN) + 0.5)
+	lastHoverRefresh = 0
+	paintRadius()
+end
+connect(radiusTrack.InputBegan, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		radiusPointer = input
+		content.ScrollingEnabled = false
+		setRadius(input.Position.X)
+	end
+end)
+connect(UserInputService.InputChanged, function(input)
+	if radiusPointer and (input == radiusPointer or (radiusPointer.UserInputType == Enum.UserInputType.MouseButton1
+		and input.UserInputType == Enum.UserInputType.MouseMovement)) then
+		setRadius(input.Position.X)
+	end
+end)
+connect(UserInputService.InputEnded, function(input)
+	if input == radiusPointer or (radiusPointer and input.UserInputType == Enum.UserInputType.MouseButton1) then
+		radiusPointer = nil
+		content.ScrollingEnabled = true
+	end
+end)
+paintRadius()
+local teamsButton, teamsLabel = makeButton("Teams", "Shortcut: T · Ignores players on your team", 12)
 
 local help = Instance.new("TextLabel")
-help.LayoutOrder = 12
-help.Size = UDim2.new(1, 0, 0, 58)
+help.LayoutOrder = 13
+help.Size = UDim2.new(1, 0, 0, 76)
 help.BackgroundColor3 = Color3.fromRGB(25, 27, 34)
 help.BorderSizePixel = 0
-help.Text = "Q focuses the target box · F selects/unlocks near your cursor.\nTyped targets are used when no F-selected target is locked."
+help.Text = "Q focuses the target box · F selects/unlocks near your cursor.\nP toggles Auto Predict · H chooses Head/Torso.\nTyped targets work when no F-selected target is locked.\nSelection Radius uses screen pixels; players only."
 help.TextColor3 = Color3.fromRGB(161, 166, 183)
 help.Font = Enum.Font.Gotham
 help.TextSize = 10
@@ -501,6 +586,10 @@ local function updateUI()
 	setButtonVisual(predictButton, predictLabel, "Predict", state.mode == "Predict", Color3.fromRGB(38, 92, 126))
 	setButtonVisual(snapButton, snapLabel, "Snap", state.snap, Color3.fromRGB(96, 73, 34))
 	setButtonVisual(teamsButton, teamsLabel, "Teams", state.teams, Color3.fromRGB(34, 102, 76))
+	aimLabel.Text = "Aim Part: " .. string.upper(state.aimPart)
+	aimButton.BackgroundColor3 = state.aimPart == "Head" and Color3.fromRGB(38, 92, 126) or Color3.fromRGB(49, 55, 70)
+	autoPredictCheck.Text = state.autoPredict and "[✓] AUTO" or "[ ] AUTO"
+	autoPredictCheck.BackgroundColor3 = state.autoPredict and Color3.fromRGB(38, 92, 126) or Color3.fromRGB(51, 54, 66)
 end
 
 ----------------------------------------------------
@@ -552,12 +641,6 @@ local function rebuildManualCandidates()
 				end
 			end
 
-			for model in pairs(npcSet) do
-				if model.Parent and string.find(string.lower(model.Name), query, 1, true) and not seen[model] then
-					seen[model] = true
-					table.insert(manualCandidates, model)
-				end
-			end
 		end
 	end
 end
@@ -619,8 +702,7 @@ local function refreshHoveredTarget()
 	end
 	local inset = select(1, GuiService:GetGuiInset())
 	local mousePosition = UserInputService:GetMouseLocation() - inset
-	local radius = math.max(75, math.min(AUTO_SELECT_RADIUS, math.min(camera.ViewportSize.X, camera.ViewportSize.Y) * 0.22))
-	local closestDistance = radius
+	local closestDistance = selectionRadius
 
 	local function consider(target)
 		local part = targetPart(target)
@@ -641,13 +723,6 @@ local function refreshHoveredTarget()
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and not isTeammate(player) then
 			consider(player)
-		end
-	end
-	for model in pairs(npcSet) do
-		if model.Parent then
-			consider(model)
-		else
-			npcSet[model] = nil
 		end
 	end
 
@@ -739,30 +814,74 @@ connect(teamsButton.MouseButton1Click, function()
 	end
 	updateUI()
 end)
+local function toggleAimPart()
+	state.aimPart = state.aimPart == "Torso" and "Head" or "Torso"
+	state.currentPart = nil
+	lastTargetRefresh, lastHoverRefresh = 0, 0
+	updateUI()
+end
+connect(aimButton.MouseButton1Click, toggleAimPart)
 
 local sliderDragging = false
+local function paintPredictionStrength(value)
+	value = math.floor(math.clamp(value, PREDICTION_MIN, PREDICTION_MAX) * 100 + 0.5) / 100
+	if predictionStrength == value then return end
+	predictionStrength = value
+	local alpha = (value - PREDICTION_MIN) / (PREDICTION_MAX - PREDICTION_MIN)
+	sliderFill.Size = UDim2.fromScale(alpha, 1)
+	sliderKnob.Position = UDim2.fromScale(alpha, 0.5)
+	sliderValue.Text = string.format("%.2f", value)
+end
+local function updateAutoPrediction()
+	if not state.autoPredict or state.mode ~= "Predict" then return end
+	local target = state.currentTarget
+	local aimPart = target and targetPart(target)
+	local character = aimPart and targetCharacter(target)
+	local motionPart = character and (character:FindFirstChild("HumanoidRootPart") or aimPart)
+	if not motionPart or not motionPart:IsA("BasePart") then
+		if sliderNote.Text ~= "AUTO: waiting for a living target" then
+			sliderNote.Text = "AUTO: waiting for a living target"
+		end
+		return
+	end
+	local velocity = motionPart.AssemblyLinearVelocity
+	local horizontalSpeed = Vector2.new(velocity.X, velocity.Z).Magnitude
+	-- Slider represents seconds of lead. This is a bounded speed-based estimate.
+	-- A camera cannot know an actual projectile's travel time without its speed.
+	paintPredictionStrength(horizontalSpeed / 120)
+	local note = string.format("AUTO: %.0f studs/s · %.2f seconds lead", horizontalSpeed, predictionStrength)
+	if sliderNote.Text ~= note then sliderNote.Text = note end
+end
+local function toggleAutoPrediction()
+	state.autoPredict = not state.autoPredict
+	sliderDragging = false
+	content.ScrollingEnabled = true
+	sliderNote.Text = state.autoPredict and "AUTO: waiting for a living target" or "P toggles Auto · moving target speed adjusts lead"
+	updateUI()
+	updateAutoPrediction()
+end
+connect(autoPredictCheck.MouseButton1Click, toggleAutoPrediction)
 local function setPredictionFromScreenX(screenX)
+	if state.autoPredict then return end
 	local width = sliderBar.AbsoluteSize.X
 	if width <= 0 then
 		return
 	end
 	local alpha = math.clamp((screenX - sliderBar.AbsolutePosition.X) / width, 0, 1)
-	predictionStrength = PREDICTION_MIN + (PREDICTION_MAX - PREDICTION_MIN) * alpha
-	predictionStrength = math.floor(predictionStrength * 100 + 0.5) / 100
-	sliderFill.Size = UDim2.fromScale(alpha, 1)
-	sliderKnob.Position = UDim2.fromScale(alpha, 0.5)
-	sliderValue.Text = string.format("%.2f", predictionStrength)
+	paintPredictionStrength(PREDICTION_MIN + (PREDICTION_MAX - PREDICTION_MIN) * alpha)
 end
 
 connect(sliderBar.InputBegan, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+	if not state.autoPredict and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 		sliderDragging = true
+		content.ScrollingEnabled = false
 		setPredictionFromScreenX(input.Position.X)
 	end
 end)
 connect(sliderKnob.InputBegan, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+	if not state.autoPredict and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 		sliderDragging = true
+		content.ScrollingEnabled = false
 	end
 end)
 connect(UserInputService.InputChanged, function(input)
@@ -773,6 +892,7 @@ end)
 connect(UserInputService.InputEnded, function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		sliderDragging = false
+		content.ScrollingEnabled = true
 	end
 end)
 
@@ -787,7 +907,7 @@ connect(UserInputService.InputBegan, function(input, processed)
 	elseif input.KeyCode == Enum.KeyCode.Z then
 		state.snap = not state.snap
 		updateUI()
-	elseif input.KeyCode == Enum.KeyCode.F then
+	elseif input.KeyCode == Enum.KeyCode.E then
 		selectOrUnlockHovered()
 	elseif input.KeyCode == Enum.KeyCode.T then
 		state.teams = not state.teams
@@ -796,6 +916,10 @@ connect(UserInputService.InputBegan, function(input, processed)
 			resetTargeting("Teammate target removed")
 		end
 		updateUI()
+	elseif input.KeyCode == Enum.KeyCode.P then
+		toggleAutoPrediction()
+	elseif input.KeyCode == Enum.KeyCode.H then
+		toggleAimPart()
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		targetBox:CaptureFocus()
 	end
@@ -853,7 +977,6 @@ local function shutdown()
 		end)
 	end
 	table.clear(connections)
-	table.clear(npcSet)
 	table.clear(manualCandidates)
 	if screenGui.Parent then
 		screenGui:Destroy()
@@ -867,6 +990,8 @@ local function shutdown()
 	end)
 end
 connect(closeButton.MouseButton1Click, shutdown)
+connect(cleanupEvent.Event, shutdown)
+connect(screenGui.Destroying, shutdown)
 
 ----------------------------------------------------
 -- Camera loop
@@ -887,7 +1012,7 @@ connect(RunService.RenderStepped, function(deltaTime)
 		scale.Scale = math.clamp(fit, 0.68, 1)
 	end
 
-	-- Hard guarantee: no player/NPC resolution and no camera writes while aim is off.
+	-- No player resolution or camera writes while aim is off.
 	if state.mode == "Off" then
 		state.currentTarget = nil
 		state.currentPart = nil
@@ -902,6 +1027,7 @@ connect(RunService.RenderStepped, function(deltaTime)
 	if now - lastTargetRefresh >= TARGET_REFRESH_INTERVAL then
 		lastTargetRefresh = now
 		refreshCurrentTarget()
+		updateAutoPrediction()
 	end
 
 	local target = state.currentTarget
