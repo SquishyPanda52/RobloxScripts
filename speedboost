@@ -1,0 +1,345 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Configuration
+local DEFAULT_MULTIPLIER = 1.15 -- Original 15% speed boost
+local MIN_MULTIPLIER = 1
+local MAX_MULTIPLIER = 3
+local TOGGLE_KEY = Enum.KeyCode.RightControl
+local UPDATE_INTERVALz = 0.1 -- Lightweight check: 10 times per second
+local GUI_NAME = "VelocityToggleGui"
+
+local multiplier = DEFAULT_MULTIPLIER
+local enabled = false
+local disposed = false
+local connections = {}
+
+local character
+local humanoid
+local baseSpeed
+local lastWrittenSpeed
+local bindVersion = 0
+
+-- Replacing this version cleans up its previous connections and speed.
+local previousGui = playerGui:FindFirstChild(GUI_NAME)
+if previousGui then
+	previousGui:Destroy()
+end
+
+local function connect(signal, callback)
+	local connection = signal:Connect(callback)
+	table.insert(connections, connection)
+	return connection
+end
+
+local function restoreSpeed()
+	if humanoid and humanoid.Parent and baseSpeed ~= nil then
+		-- Do not overwrite a newer speed assigned by another script.
+		if lastWrittenSpeed ~= nil
+			and humanoid.WalkSpeed == lastWrittenSpeed then
+			humanoid.WalkSpeed = baseSpeed
+		end
+	end
+
+	lastWrittenSpeed = nil
+end
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = GUI_NAME
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(200, 100)
+frame.Position = UDim2.new(0.02, 0, 0.4, 0)
+frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 24)
+title.BackgroundTransparency = 1
+title.Text = "Speed Boost • drag here"
+title.TextColor3 = Color3.fromRGB(210, 210, 210)
+title.Font = Enum.Font.SourceSans
+title.TextSize = 14
+title.Active = true
+title.Parent = frame
+
+local toggle = Instance.new("TextButton")
+toggle.Size = UDim2.new(1, -16, 0, 32)
+toggle.Position = UDim2.fromOffset(8, 27)
+toggle.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+toggle.TextColor3 = Color3.new(1, 1, 1)
+toggle.Text = "Speed Boost: OFF"
+toggle.Font = Enum.Font.SourceSansBold
+toggle.TextSize = 16
+toggle.Parent = frame
+
+local label = Instance.new("TextLabel")
+label.Size = UDim2.fromOffset(112, 26)
+label.Position = UDim2.fromOffset(8, 66)
+label.BackgroundTransparency = 1
+label.Text = "Speed multiplier:"
+label.TextXAlignment = Enum.TextXAlignment.Left
+label.TextColor3 = Color3.fromRGB(230, 230, 230)
+label.Font = Enum.Font.SourceSans
+label.TextSize = 15
+label.Parent = frame
+
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.fromOffset(64, 26)
+speedBox.Position = UDim2.fromOffset(128, 66)
+speedBox.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+speedBox.BorderSizePixel = 0
+speedBox.TextColor3 = Color3.new(1, 1, 1)
+speedBox.Font = Enum.Font.SourceSansBold
+speedBox.TextSize = 16
+speedBox.ClearTextOnFocus = false
+speedBox.Text = tostring(DEFAULT_MULTIPLIER)
+speedBox.PlaceholderText = "1.15"
+speedBox.Parent = frame
+
+-- Only normal running/jumping states can receive the boost.
+local allowedStates = {
+	[Enum.HumanoidStateType.Running] = true,
+	[Enum.HumanoidStateType.RunningNoPhysics] = true,
+	[Enum.HumanoidStateType.Jumping] = true,
+	[Enum.HumanoidStateType.Freefall] = true,
+	[Enum.HumanoidStateType.Landed] = true,
+}
+
+-- Optional support for common custom ragdoll markers.
+-- Add your game's exact marker name here if necessary.
+local ragdollNames = {
+	"Ragdolled",
+	"IsRagdolled",
+	"Ragdoll",
+}
+
+local function hasRagdollFlag(instance)
+	for _, name in ipairs(ragdollNames) do
+		if instance:GetAttribute(name) == true then
+			return true
+		end
+
+		local flag = instance:FindFirstChild(name)
+		if flag and flag:IsA("BoolValue") and flag.Value then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function canBoost()
+	return enabled
+		and character ~= nil
+		and character.Parent ~= nil
+		and humanoid ~= nil
+		and humanoid.Parent ~= nil
+		and humanoid.Health > 0
+		and not humanoid.PlatformStand
+		and not humanoid.Sit
+		and humanoid.EvaluateStateMachine
+		and allowedStates[humanoid:GetState()] == true
+		and not hasRagdollFlag(character)
+		and not hasRagdollFlag(humanoid)
+end
+
+local function updateSpeed()
+	if disposed or not humanoid or not humanoid.Parent then
+		return
+	end
+
+	local currentSpeed = humanoid.WalkSpeed
+
+	-- Adopt speed changes made by the game, such as sprinting/slowing.
+	-- Never multiply our previously boosted value again.
+	if lastWrittenSpeed == nil or currentSpeed ~= lastWrittenSpeed then
+		baseSpeed = currentSpeed
+	end
+
+	local targetSpeed = baseSpeed
+	if canBoost() then
+		targetSpeed = baseSpeed * multiplier
+	end
+
+	-- Avoid redundant property writes.
+	if currentSpeed ~= targetSpeed then
+		humanoid.WalkSpeed = targetSpeed
+	end
+
+	lastWrittenSpeed = targetSpeed
+end
+
+local function bindCharacter(newCharacter)
+	bindVersion += 1
+	local thisVersion = bindVersion
+
+	restoreSpeed()
+	character = newCharacter
+	humanoid = nil
+	baseSpeed = nil
+
+	local newHumanoid = newCharacter:WaitForChild("Humanoid", 10)
+
+	-- Ignore delayed setup belonging to an old character.
+	if disposed
+		or thisVersion ~= bindVersion
+		or player.Character ~= newCharacter
+		or not newHumanoid
+		or not newHumanoid:IsA("Humanoid") then
+		return
+	end
+
+	humanoid = newHumanoid
+	baseSpeed = newHumanoid.WalkSpeed
+	updateSpeed()
+end
+
+local function setEnabled(value)
+	enabled = value
+	toggle.Text = enabled and "Speed Boost: ON" or "Speed Boost: OFF"
+	toggle.BackgroundColor3 = enabled
+		and Color3.fromRGB(50, 180, 50)
+		or Color3.fromRGB(180, 50, 50)
+
+	updateSpeed()
+end
+
+connect(toggle.Activated, function()
+	setEnabled(not enabled)
+end)
+
+connect(speedBox.FocusLost, function()
+	local value = tonumber(speedBox.Text)
+
+	-- Reject invalid numbers, NaN, and infinity.
+	if value and value == value and math.abs(value) < math.huge then
+		multiplier = math.clamp(value, MIN_MULTIPLIER, MAX_MULTIPLIER)
+	end
+
+	speedBox.Text = tostring(multiplier)
+	updateSpeed()
+end)
+
+connect(UserInputService.InputBegan, function(input, processed)
+	if processed or UserInputService:GetFocusedTextBox() then
+		return
+	end
+
+	if input.KeyCode == TOGGLE_KEY then
+		setEnabled(not enabled)
+	end
+end)
+
+-- Mouse/touch dragging through the title bar.
+local dragInput
+local dragStart
+local frameStart
+
+connect(title.InputBegan, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+		dragStart = input.Position
+		frameStart = frame.Position
+	end
+end)
+
+connect(UserInputService.InputChanged, function(input)
+	if not dragInput then
+		return
+	end
+
+	local isMouseMove =
+		dragInput.UserInputType == Enum.UserInputType.MouseButton1
+		and input.UserInputType == Enum.UserInputType.MouseMovement
+
+	if input == dragInput or isMouseMove then
+		local delta = input.Position - dragStart
+		frame.Position = UDim2.new(
+			frameStart.X.Scale,
+			frameStart.X.Offset + delta.X,
+			frameStart.Y.Scale,
+			frameStart.Y.Offset + delta.Y
+		)
+	end
+end)
+
+connect(UserInputService.InputEnded, function(input)
+	if input == dragInput then
+		dragInput = nil
+	end
+end)
+
+connect(UserInputService.WindowFocusReleased, function()
+	dragInput = nil
+end)
+
+connect(player.CharacterAdded, bindCharacter)
+
+connect(player.CharacterRemoving, function(oldCharacter)
+	if oldCharacter == character then
+		bindVersion += 1
+		restoreSpeed()
+		character = nil
+		humanoid = nil
+		baseSpeed = nil
+	end
+end)
+
+-- Performance: cached character references, throttled checks,
+-- no physics constraints, and no workspace-wide scanning.
+local elapsed = 0
+
+connect(RunService.Heartbeat, function(deltaTime)
+	if not enabled then
+		return
+	end
+
+	elapsed += deltaTime
+	if elapsed < UPDATE_INTERVAL then
+		return
+	end
+
+	elapsed = 0
+	updateSpeed()
+end)
+
+local function cleanup()
+	if disposed then
+		return
+	end
+
+	disposed = true
+	bindVersion += 1
+	restoreSpeed()
+
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+
+	table.clear(connections)
+end
+
+connect(gui.Destroying, cleanup)
+
+connect(script.Destroying, function()
+	cleanup()
+	gui:Destroy()
+end)
+
+if player.Character then
+	task.spawn(bindCharacter, player.Character)
+end
