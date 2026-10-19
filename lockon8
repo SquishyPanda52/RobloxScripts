@@ -920,7 +920,7 @@ connect(UserInputService.InputBegan, function(input, processed)
 		toggleAutoPrediction()
 	elseif input.KeyCode == Enum.KeyCode.H then
 		toggleAimPart()
-	elseif input.KeyCode == Enum.KeyCode.Q then
+	elseif input.KeyCode == Enum.KeyCode.T then
 		targetBox:CaptureFocus()
 	end
 end)
