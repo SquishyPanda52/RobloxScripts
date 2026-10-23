@@ -409,9 +409,95 @@ aimUI.teamAssistTextConstraint.MinTextSize = 8
 aimUI.teamAssistTextConstraint.MaxTextSize = 12
 aimUI.teamAssistTextConstraint.Parent = aimUI.teamAssistButton
 
+aimUI.helpButton = Instance.new("TextButton")
+aimUI.helpButton.Name = "PersistentHelpToggle"
+aimUI.helpButton.LayoutOrder = 3
+aimUI.helpButton.Size = UDim2.new(1, 0, 0, 44)
+aimUI.helpButton.AutoButtonColor = false
+aimUI.helpButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.helpButton.BorderSizePixel = 0
+aimUI.helpButton.Font = Enum.Font.GothamBold
+aimUI.helpButton.Text = "Help: OFF  •  Keep assisting near friendlies"
+aimUI.helpButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.helpButton.TextScaled = true
+aimUI.helpButton.Parent = scrollingFrame
+local helpCorner = Instance.new("UICorner")
+helpCorner.CornerRadius = UDim.new(0, 10)
+helpCorner.Parent = aimUI.helpButton
+aimUI.helpStroke = Instance.new("UIStroke")
+aimUI.helpStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.helpStroke.Transparency = 0.12
+aimUI.helpStroke.Parent = aimUI.helpButton
+local helpTextConstraint = Instance.new("UITextSizeConstraint")
+helpTextConstraint.MinTextSize = 10
+helpTextConstraint.MaxTextSize = 14
+helpTextConstraint.Parent = aimUI.helpButton
+
+aimUI.noSelfDefenseRow = Instance.new("Frame")
+aimUI.noSelfDefenseRow.Name = "NoSelfDefenseRow"
+aimUI.noSelfDefenseRow.LayoutOrder = 4
+aimUI.noSelfDefenseRow.Size = UDim2.new(1, 0, 0, 78)
+aimUI.noSelfDefenseRow.BackgroundTransparency = 1
+aimUI.noSelfDefenseRow.Parent = scrollingFrame
+aimUI.noSelfDefenseButton = Instance.new("TextButton")
+aimUI.noSelfDefenseButton.Name = "NoSelfDefenseToggle"
+aimUI.noSelfDefenseButton.Size = UDim2.new(0.52, -5, 0, 44)
+aimUI.noSelfDefenseButton.AutoButtonColor = false
+aimUI.noSelfDefenseButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
+aimUI.noSelfDefenseButton.BorderSizePixel = 0
+aimUI.noSelfDefenseButton.Font = Enum.Font.GothamBold
+aimUI.noSelfDefenseButton.Text = "No Self Defense: OFF"
+aimUI.noSelfDefenseButton.TextColor3 = Color3.fromRGB(255, 218, 221)
+aimUI.noSelfDefenseButton.TextScaled = true
+aimUI.noSelfDefenseButton.Parent = aimUI.noSelfDefenseRow
+local noSelfDefenseCorner = Instance.new("UICorner")
+noSelfDefenseCorner.CornerRadius = UDim.new(0, 10)
+noSelfDefenseCorner.Parent = aimUI.noSelfDefenseButton
+aimUI.noSelfDefenseStroke = Instance.new("UIStroke")
+aimUI.noSelfDefenseStroke.Color = Color3.fromRGB(170, 68, 82)
+aimUI.noSelfDefenseStroke.Transparency = 0.12
+aimUI.noSelfDefenseStroke.Parent = aimUI.noSelfDefenseButton
+local noSelfDefenseConstraint = Instance.new("UITextSizeConstraint")
+noSelfDefenseConstraint.MinTextSize = 8
+noSelfDefenseConstraint.MaxTextSize = 13
+noSelfDefenseConstraint.Parent = aimUI.noSelfDefenseButton
+
+aimUI.defendCommandersCheck = Instance.new("TextButton")
+aimUI.defendCommandersCheck.Name = "DefendCommandersCheck"
+aimUI.defendCommandersCheck.Position = UDim2.new(0.52, 5, 0, 0)
+aimUI.defendCommandersCheck.Size = UDim2.new(0.48, -5, 0, 44)
+aimUI.defendCommandersCheck.AutoButtonColor = false
+aimUI.defendCommandersCheck.BackgroundColor3 = Color3.fromRGB(43, 44, 50)
+aimUI.defendCommandersCheck.BorderSizePixel = 0
+aimUI.defendCommandersCheck.Font = Enum.Font.GothamBold
+aimUI.defendCommandersCheck.Text = "☐ Defend Commanders"
+aimUI.defendCommandersCheck.TextColor3 = Color3.fromRGB(218, 220, 229)
+aimUI.defendCommandersCheck.TextScaled = true
+aimUI.defendCommandersCheck.Parent = aimUI.noSelfDefenseRow
+local defendCommandersCorner = Instance.new("UICorner")
+defendCommandersCorner.CornerRadius = UDim.new(0, 10)
+defendCommandersCorner.Parent = aimUI.defendCommandersCheck
+local defendCommandersConstraint = Instance.new("UITextSizeConstraint")
+defendCommandersConstraint.MinTextSize = 8
+defendCommandersConstraint.MaxTextSize = 13
+defendCommandersConstraint.Parent = aimUI.defendCommandersCheck
+
+aimUI.noSelfDefenseNote = Instance.new("TextLabel")
+aimUI.noSelfDefenseNote.Name = "Note"
+aimUI.noSelfDefenseNote.Position = UDim2.fromOffset(2, 48)
+aimUI.noSelfDefenseNote.Size = UDim2.new(1, -4, 0, 28)
+aimUI.noSelfDefenseNote.BackgroundTransparency = 1
+aimUI.noSelfDefenseNote.Font = Enum.Font.Gotham
+aimUI.noSelfDefenseNote.Text = "Blocks self retaliation; check to keep commander defense."
+aimUI.noSelfDefenseNote.TextColor3 = Color3.fromRGB(166, 168, 178)
+aimUI.noSelfDefenseNote.TextSize = 10
+aimUI.noSelfDefenseNote.TextWrapped = true
+aimUI.noSelfDefenseNote.TextXAlignment = Enum.TextXAlignment.Left
+aimUI.noSelfDefenseNote.Parent = aimUI.noSelfDefenseRow
+
 local followBox = Instance.new("TextBox")
 followBox.Name = "FollowBox"
-followBox.LayoutOrder = 3
+followBox.LayoutOrder = 5
 followBox.Size = UDim2.new(1, 0, 0, 54)
 followBox.BackgroundColor3 = Color3.fromRGB(24, 25, 29)
 followBox.BackgroundTransparency = 0.06
@@ -444,7 +530,7 @@ followBoxPadding.Parent = followBox
 
 local toggleRow = Instance.new("Frame")
 toggleRow.Name = "FollowToggles"
-toggleRow.LayoutOrder = 4
+toggleRow.LayoutOrder = 6
 toggleRow.Size = UDim2.new(1, 0, 0, 48)
 toggleRow.BackgroundTransparency = 1
 toggleRow.BorderSizePixel = 0
@@ -515,7 +601,7 @@ deathFollowTextConstraint.Parent = deathFollowButton
 
 local attackBox = Instance.new("TextBox")
 attackBox.Name = "AttackBox"
-attackBox.LayoutOrder = 5
+attackBox.LayoutOrder = 7
 attackBox.Size = UDim2.new(1, 0, 0, 54)
 attackBox.BackgroundColor3 = Color3.fromRGB(24, 25, 29)
 attackBox.BackgroundTransparency = 0.06
@@ -548,7 +634,7 @@ attackBoxPadding.Parent = attackBox
 
 local attackToggleRow = Instance.new("Frame")
 attackToggleRow.Name = "AttackToggles"
-attackToggleRow.LayoutOrder = 6
+attackToggleRow.LayoutOrder = 8
 attackToggleRow.Size = UDim2.new(1, 0, 0, 48)
 attackToggleRow.BackgroundTransparency = 1
 attackToggleRow.BorderSizePixel = 0
@@ -619,7 +705,7 @@ deathAttackTextConstraint.Parent = deathAttackButton
 
 local toolPickerRow = Instance.new("Frame")
 toolPickerRow.Name = "ToolPickerRow"
-toolPickerRow.LayoutOrder = 7
+toolPickerRow.LayoutOrder = 9
 toolPickerRow.Size = UDim2.new(1, 0, 0, 44)
 toolPickerRow.BackgroundTransparency = 1
 toolPickerRow.BorderSizePixel = 0
@@ -694,7 +780,7 @@ toolPickerTextConstraint.Parent = toolPickerButton
 
 aimUI.masterButton = Instance.new("TextButton")
 aimUI.masterButton.Name = "AimMasterToggle"
-aimUI.masterButton.LayoutOrder = 8
+aimUI.masterButton.LayoutOrder = 10
 aimUI.masterButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.masterButton.AutoButtonColor = false
 aimUI.masterButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
@@ -722,7 +808,7 @@ aimUI.masterTextConstraint.Parent = aimUI.masterButton
 
 aimUI.toggleRow = Instance.new("Frame")
 aimUI.toggleRow.Name = "AimToggles"
-aimUI.toggleRow.LayoutOrder = 9
+aimUI.toggleRow.LayoutOrder = 11
 aimUI.toggleRow.Size = UDim2.new(1, 0, 0, 44)
 aimUI.toggleRow.BackgroundTransparency = 1
 aimUI.toggleRow.BorderSizePixel = 0
@@ -822,7 +908,7 @@ aimUI.snapTextConstraint.Parent = aimUI.snapButton
 
 aimUI.shiftlockButton = Instance.new("TextButton")
 aimUI.shiftlockButton.Name = "ShiftlockToggle"
-aimUI.shiftlockButton.LayoutOrder = 10
+aimUI.shiftlockButton.LayoutOrder = 12
 aimUI.shiftlockButton.Size = UDim2.new(1, 0, 0, 42)
 aimUI.shiftlockButton.AutoButtonColor = false
 aimUI.shiftlockButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
@@ -851,7 +937,7 @@ aimUI.shiftlockTextConstraint.Parent = aimUI.shiftlockButton
 
 aimUI.slider = Instance.new("Frame")
 aimUI.slider.Name = "PredictionSlider"
-aimUI.slider.LayoutOrder = 11
+aimUI.slider.LayoutOrder = 13
 aimUI.slider.Size = UDim2.new(1, 0, 0, 54)
 aimUI.slider.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
 aimUI.slider.BackgroundTransparency = 0.12
@@ -916,7 +1002,7 @@ aimUI.knobCorner.Parent = aimUI.knob
 
 aimUI.baddiesButton = Instance.new("TextButton")
 aimUI.baddiesButton.Name = "BaddiesToggle"
-aimUI.baddiesButton.LayoutOrder = 12
+aimUI.baddiesButton.LayoutOrder = 14
 aimUI.baddiesButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.baddiesButton.AutoButtonColor = false
 aimUI.baddiesButton.BackgroundColor3 = Color3.fromRGB(255, 190, 214)
@@ -944,7 +1030,7 @@ aimUI.baddiesTextConstraint.Parent = aimUI.baddiesButton
 
 aimUI.circleButton = Instance.new("TextButton")
 aimUI.circleButton.Name = "PvpCircleToggle"
-aimUI.circleButton.LayoutOrder = 13
+aimUI.circleButton.LayoutOrder = 15
 aimUI.circleButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.circleButton.AutoButtonColor = false
 aimUI.circleButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
@@ -972,7 +1058,7 @@ aimUI.circleButtonTextConstraint.Parent = aimUI.circleButton
 
 aimUI.debugButton = Instance.new("TextButton")
 aimUI.debugButton.Name = "DebugPrintsToggle"
-aimUI.debugButton.LayoutOrder = 14
+aimUI.debugButton.LayoutOrder = 16
 aimUI.debugButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.debugButton.AutoButtonColor = false
 aimUI.debugButton.BackgroundColor3 = Color3.fromRGB(29, 84, 54)
@@ -1000,7 +1086,7 @@ aimUI.debugTextConstraint.Parent = aimUI.debugButton
 
 aimUI.commandListButton = Instance.new("TextButton")
 aimUI.commandListButton.Name = "CommandListToggle"
-aimUI.commandListButton.LayoutOrder = 15
+aimUI.commandListButton.LayoutOrder = 17
 aimUI.commandListButton.Size = UDim2.new(1, 0, 0, 44)
 aimUI.commandListButton.AutoButtonColor = false
 aimUI.commandListButton.BackgroundColor3 = Color3.fromRGB(82, 33, 40)
@@ -1028,7 +1114,7 @@ aimUI.commandListTextConstraint.Parent = aimUI.commandListButton
 
 aimUI.commandListBody = Instance.new("TextLabel")
 aimUI.commandListBody.Name = "CommandList"
-aimUI.commandListBody.LayoutOrder = 16
+aimUI.commandListBody.LayoutOrder = 18
 aimUI.commandListBody.Size = UDim2.new(1, 0, 0, 410)
 aimUI.commandListBody.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
 aimUI.commandListBody.BackgroundTransparency = 0.12
@@ -1056,13 +1142,13 @@ aimUI.commandListBodyPadding.Parent = aimUI.commandListBody
 
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
-hint.LayoutOrder = 17
+hint.LayoutOrder = 19
 hint.Size = UDim2.new(1, 0, 0, 20)
 hint.AutomaticSize = Enum.AutomaticSize.Y
 hint.BackgroundTransparency = 1
 hint.TextWrapped = true
 hint.Font = Enum.Font.Gotham
-hint.Text = "Separate multiple players with commas"
+hint.Text = "Separate players with commas. Help ON ignores friendly attack safety continuously. No Self Defense blocks retaliation for you and commanders; check Defend Commanders to keep commander defense."
 hint.TextColor3 = Color3.fromRGB(160, 162, 172)
 hint.TextSize = 13
 hint.TextXAlignment = Enum.TextXAlignment.Left
@@ -1070,7 +1156,7 @@ hint.Parent = scrollingFrame
 
 local results = Instance.new("TextLabel")
 results.Name = "ResolvedPlayers"
-results.LayoutOrder = 18
+results.LayoutOrder = 20
 results.Size = UDim2.new(1, 0, 0, 42)
 results.AutomaticSize = Enum.AutomaticSize.Y
 results.BackgroundColor3 = Color3.fromRGB(19, 20, 23)
@@ -1132,6 +1218,9 @@ local suppressFollowBoxUpdate = false
 local suppressAttackBoxUpdate = false
 aimUI.noFriendlyFireEnabled = false
 aimUI.teamAssistEnabled = false
+aimUI.helpButtonEnabled = false
+aimUI.noSelfDefenseEnabled = false
+aimUI.defendCommandersWhileNoSelfDefense = false
 aimUI.teamPlayerIds = {}
 aimUI.commandListOpen = false
 aimUI.attackValidationShowingError = false
@@ -1142,6 +1231,7 @@ aimUI.attackFriendlyResumeCorridor = 5
 aimUI.attackCheckmateTargetDistance = 4.5
 aimUI.attackCheckmateFriendlyDistance = 6
 aimUI.attackRetreatDistance = 6
+aimUI.attackSafetyFollowDistance = 8 -- Stay with a moving friendly/target cluster without entering melee.
 aimUI.attackSafetyOverrideUntil = 0
 aimUI.baddiesEnabled = false
 aimUI.baddiesHelpOverride = false
@@ -1177,6 +1267,9 @@ screenGui:SetAttribute("AttackSafetyState", "Idle")
 screenGui:SetAttribute("AttackSafetyOverrideRemaining", 0)
 screenGui:SetAttribute("BaddiesEnabled", false)
 screenGui:SetAttribute("BaddiesHelpContinuous", false)
+screenGui:SetAttribute("HelpButtonEnabled", false)
+screenGui:SetAttribute("NoSelfDefenseEnabled", false)
+screenGui:SetAttribute("DefendCommandersWhileNoSelfDefense", false)
 screenGui:SetAttribute("BaddiesWeaponInRange", false)
 screenGui:SetAttribute("PvpCircleEnabled", false)
 screenGui:SetAttribute("BaddiesPvPStatus", "Disabled")
@@ -1197,6 +1290,15 @@ local function updateToggleVisual(button, buttonStroke, label, enabled)
 	button.BackgroundColor3 = if enabled then ON_BACKGROUND else OFF_BACKGROUND
 	button.TextColor3 = if enabled then ON_TEXT else OFF_TEXT
 	buttonStroke.Color = if enabled then ON_STROKE else OFF_STROKE
+end
+
+local function updateDefendCommandersCheck()
+	local checked = aimUI.defendCommandersWhileNoSelfDefense
+	aimUI.defendCommandersCheck.Text = if checked then "☑ Defend Commanders" else "☐ Defend Commanders"
+	aimUI.defendCommandersCheck.BackgroundColor3 = if checked
+		then Color3.fromRGB(29, 84, 54) else Color3.fromRGB(43, 44, 50)
+	aimUI.defendCommandersCheck.TextColor3 = if checked
+		then Color3.fromRGB(214, 255, 228) else Color3.fromRGB(218, 220, 229)
 end
 
 aimUI.updateBaddiesVisual = function()
@@ -1426,6 +1528,9 @@ updateToggleVisual(deathAttackButton, deathAttackStroke, "Death Attack", deathAt
 updateToggleVisual(toolPickerButton, toolPickerStroke, "Tool Picker", toolPickerEnabled)
 updateToggleVisual(aimUI.noFriendlyFireButton, aimUI.noFriendlyFireStroke, "No Friendly Fire", aimUI.noFriendlyFireEnabled)
 updateToggleVisual(aimUI.teamAssistButton, aimUI.teamAssistStroke, "Team Assist", aimUI.teamAssistEnabled)
+updateToggleVisual(aimUI.helpButton, aimUI.helpStroke, "Help", aimUI.helpButtonEnabled)
+updateToggleVisual(aimUI.noSelfDefenseButton, aimUI.noSelfDefenseStroke, "No Self Defense", aimUI.noSelfDefenseEnabled)
+updateDefendCommandersCheck()
 updateToggleVisual(aimUI.masterButton, aimUI.masterStroke, "Aim Section", aimSectionEnabled)
 updateToggleVisual(aimUI.lockonButton, aimUI.lockonStroke, "Lock On", lockonEnabled)
 updateToggleVisual(aimUI.predictionButton, aimUI.predictionStroke, "Prediction", predictionEnabled)
@@ -1683,11 +1788,12 @@ end
 
 aimUI.attackSafetyAction = function(targetPlayer, targetRoot, localRoot)
 	local continuousOverride = aimUI.baddiesEnabled and aimUI.baddiesHelpOverride
+	local persistentOverride = aimUI.helpButtonEnabled or continuousOverride
 	local overrideRemaining = if continuousOverride
 		then math.huge
 		else math.max(0, aimUI.attackSafetyOverrideUntil - os.clock())
-	screenGui:SetAttribute("AttackSafetyOverrideRemaining", if continuousOverride then -1 else overrideRemaining)
-	if continuousOverride or overrideRemaining > 0 then
+	screenGui:SetAttribute("AttackSafetyOverrideRemaining", if persistentOverride then -1 else overrideRemaining)
+	if persistentOverride or overrideRemaining > 0 then
 		aimUI.attackSafetyPaused = false
 		aimUI.attackSafetyTargetUserId = targetPlayer.UserId
 		aimUI.attackSafetyFriendlyUserId = nil
@@ -1796,6 +1902,20 @@ aimUI.attackSafetyAction = function(targetPlayer, targetRoot, localRoot)
 			screenGui:SetAttribute("AttackSafetyState", "Retreating")
 			return "Retreat", aimUI.attackRetreatPosition
 		end
+	end
+
+	-- The target and friendly may travel together. Follow their moving cluster
+	-- from the near side, but keep a standoff and do not use the attack tool.
+	local fromFriendly = localPosition - hazardRoot.Position
+	local flatFromFriendly = Vector3.new(fromFriendly.X, 0, fromFriendly.Z)
+	local distanceFromFriendly = flatFromFriendly.Magnitude
+	if distanceFromFriendly > aimUI.attackSafetyFollowDistance + 1.5
+		and localTargetDistance > aimUI.attackSafetyFollowDistance + 1.5 then
+		local approachDirection = flatFromFriendly.Unit
+		local approachPoint = hazardRoot.Position
+			+ approachDirection * aimUI.attackSafetyFollowDistance
+		screenGui:SetAttribute("AttackSafetyState", "FollowingSafely")
+		return "Approach", Vector3.new(approachPoint.X, localPosition.Y, approachPoint.Z)
 	end
 
 	screenGui:SetAttribute("AttackSafetyState", "Paused")
@@ -2157,6 +2277,7 @@ local function followPlanStep()
 		local safetyMode, safetyDestination =
 			aimUI.attackSafetyAction(closestPlayer, targetRoot, localRoot)
 		if safetyMode ~= "Chase" then
+			screenGui:SetAttribute("BaddiesWeaponInRange", false)
 			local equippedTool = localCharacter:FindFirstChildOfClass("Tool")
 			if equippedTool then
 				pcall(function()
@@ -2168,7 +2289,7 @@ local function followPlanStep()
 		if safetyMode == "Pause" then
 			stopActiveMovement()
 			return
-		elseif safetyMode == "Retreat" then
+		elseif safetyMode == "Retreat" or safetyMode == "Approach" then
 			destination = safetyDestination
 		else
 			destination = targetRoot.Position
@@ -3084,6 +3205,9 @@ local function watchLocalDamage(character)
 
 		screenGui:SetAttribute("LastDamageAmount", damageAmount)
 		screenGui:SetAttribute("HealthAfterDamage", newHealth)
+		if aimUI.noSelfDefenseEnabled then
+			return
+		end
 
 		local attacker, hadAttackerTag =
 			taggedAttacker(humanoid, character, localPlayer)
@@ -3113,7 +3237,8 @@ aimUI.shouldAssistVictim = function(player)
 		return false
 	end
 	if selectedCommanderIds[player.UserId] then
-		return true
+		return not aimUI.noSelfDefenseEnabled
+			or aimUI.defendCommandersWhileNoSelfDefense
 	end
 	return aimUI.teamAssistEnabled and aimUI.teamPlayerIds[player.UserId] == true
 end
@@ -3443,6 +3568,30 @@ connect(aimUI.teamAssistButton.Activated, function()
 		"Team Assist",
 		aimUI.teamAssistEnabled
 	)
+end)
+
+connect(aimUI.helpButton.Activated, function()
+	aimUI.helpButtonEnabled = not aimUI.helpButtonEnabled
+	screenGui:SetAttribute("HelpButtonEnabled", aimUI.helpButtonEnabled)
+	aimUI.resetAttackSafety()
+	updateToggleVisual(aimUI.helpButton, aimUI.helpStroke, "Help", aimUI.helpButtonEnabled)
+end)
+
+connect(aimUI.noSelfDefenseButton.Activated, function()
+	aimUI.noSelfDefenseEnabled = not aimUI.noSelfDefenseEnabled
+	screenGui:SetAttribute("NoSelfDefenseEnabled", aimUI.noSelfDefenseEnabled)
+	updateToggleVisual(
+		aimUI.noSelfDefenseButton,
+		aimUI.noSelfDefenseStroke,
+		"No Self Defense",
+		aimUI.noSelfDefenseEnabled
+	)
+end)
+
+connect(aimUI.defendCommandersCheck.Activated, function()
+	aimUI.defendCommandersWhileNoSelfDefense = not aimUI.defendCommandersWhileNoSelfDefense
+	screenGui:SetAttribute("DefendCommandersWhileNoSelfDefense", aimUI.defendCommandersWhileNoSelfDefense)
+	updateDefendCommandersCheck()
 end)
 
 connect(followBox.Focused, function()
@@ -3864,6 +4013,13 @@ local function applyResponsiveLayout()
 	aimUI.teamBox.TextSize = math.max(13, math.floor(15 * compactScale))
 	aimUI.teamBoxPadding.PaddingLeft = UDim.new(0, math.floor(16 * compactScale))
 	aimUI.teamBoxPadding.PaddingRight = UDim.new(0, math.floor(16 * compactScale))
+	local safetyButtonHeight = math.max(40, math.floor(44 * compactScale))
+	aimUI.helpButton.Size = UDim2.new(1, 0, 0, safetyButtonHeight)
+	aimUI.noSelfDefenseRow.Size = UDim2.new(1, 0, 0, safetyButtonHeight + 34)
+	aimUI.noSelfDefenseButton.Size = UDim2.new(0.52, -5, 0, safetyButtonHeight)
+	aimUI.defendCommandersCheck.Size = UDim2.new(0.48, -5, 0, safetyButtonHeight)
+	aimUI.noSelfDefenseNote.Position = UDim2.fromOffset(2, safetyButtonHeight + 4)
+	aimUI.noSelfDefenseNote.TextSize = math.max(9, math.floor(10 * compactScale))
 	followBox.Size = UDim2.new(1, 0, 0, inputHeight)
 	followBox.TextSize = math.max(13, math.floor(15 * compactScale))
 	followBoxPadding.PaddingLeft = UDim.new(0, math.floor(16 * compactScale))
