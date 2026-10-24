@@ -1122,6 +1122,10 @@ aimUI.commandListBody.BorderSizePixel = 0
 aimUI.commandListBody.Font = Enum.Font.Gotham
 aimUI.commandListBody.Text = "FOLLOW [player] — Follow a named player; with no player, follow the commander.\n\nC / F — Exact shortcuts that immediately follow the commander.\n\nCOME [player] — Same as Follow.\n\nGOTO [player] — Same as Follow.\n\nHOLD — Walk to the commander's current position and remain there.\n\nATTACK / ATK [players] — Attack comma-separated targets; with no target, use the saved Attack Textbox.\n\nHELP / H — Ignore attack safety for 30 seconds, or continuously while Baddies is ON.\n\nNO HELP — Disable the continuous Baddies help override.\n\nSTOP — Stop movement and attack, and disable all Follow, Attack, Death Follow, and Death Attack modes.\n\nCLEAR — Clear the saved Attack Textbox and stop its active attack.\n\nDEATH FOLLOW / NO DEATH FOLLOW — Enable or disable following again after a respawn.\n\nDEATH ATTACK / NO DEATH ATTACK — Enable or disable attacking again after a respawn.\n\nTEAM ASSIST / NO TEAM ASSIST — Enable or disable retaliation when a listed teammate is damaged.\n\nCommands are case-insensitive. Names support usernames, display names, partial names, and commas."
 aimUI.commandListBody.TextColor3 = Color3.fromRGB(205, 207, 216)
+aimUI.commandListBody.Text = aimUI.commandListBody.Text:gsub(
+	"HOLD — Walk to the commander's current position and remain there%.",
+	"HOLD — Walk once to the commander's position, then release movement control."
+)
 aimUI.commandListBody.TextSize = 12
 aimUI.commandListBody.TextWrapped = true
 aimUI.commandListBody.TextXAlignment = Enum.TextXAlignment.Left
@@ -2250,7 +2254,10 @@ local function followPlanStep()
 
 		local holdDistance = (localRoot.Position - holdPosition).Magnitude
 		if holdDistance <= HOLD_STOP_DISTANCE then
-			stopActiveMovement()
+			-- Hold is a one-time move. Once reached, release control so the
+			-- player can walk away without being pulled back to this position.
+			cancelActiveCommand(false)
+			setFollowEnabled(false)
 			return
 		end
 
